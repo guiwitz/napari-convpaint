@@ -83,3 +83,6 @@ venv/
 # written by setuptools_scm
 **/_version.py
 
+# additional
+/test_out*/
+
