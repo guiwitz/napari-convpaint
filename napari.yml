@@ -1,0 +1,10 @@
+name: napari-convpaint
+display_name: napari ConvPaint
+contributions:
+  commands: 
+    - id: napari-convpaint.make_qwidget
+      python_name: napari_convpaint.conv_paint:ConvPaintWidget
+      title: ConvPaint widget  
+  widgets:
+    - command: napari-convpaint.make_qwidget
+      display_name: ConvPaint
