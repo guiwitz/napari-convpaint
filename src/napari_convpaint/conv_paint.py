@@ -131,13 +131,23 @@ class ConvPaintWidget(QWidget):
         non_empty = np.unique(np.where(self.viewer.layers['annotations'].data > 0)[0])
         if len(non_empty) == 0:
             raise Exception('No annotations found')
+        elif non_empty.ndim == 1:
+            non_empty = [non_empty]
 
         all_values = []
         for ind, t in enumerate(non_empty):
-            image = self.viewer.layers[self.param.channel].data[t]
+
+            if self.viewer.layers[self.param.channel].data.ndim == 2:
+                image = self.viewer.layers[self.param.channel].data
+                annot = self.viewer.layers['annotations'].data
+            else:
+                image = self.viewer.layers[self.param.channel].data[t]
+                annot = self.viewer.layers['annotations'].data[t]
+
+            #image = self.viewer.layers[self.param.channel].data[t]
 
             full_annotation = np.ones((n_features, image.shape[0], image.shape[1]),dtype=np.bool8)
-            full_annotation = full_annotation * self.viewer.layers['annotations'].data[t,:,:]>0
+            full_annotation = full_annotation * annot>0
 
             all_scales = filter_image(image, self.model, self.param.scalings)
             all_values_scales=[]
@@ -171,11 +181,17 @@ class ConvPaintWidget(QWidget):
             self.update_model()
 
         self.check_prediction_layer_exists()
-        step = self.viewer.dims.current_step[0]
-
-        image = self.viewer.layers[self.param.channel].data[step]
-        predicted_image = predict_image(image, self.model, self.random_forest)
-        self.viewer.layers['prediction'].data[step] = predicted_image
+        
+        if self.viewer.dims.ndim > 2:
+            step = self.viewer.dims.current_step[0]
+            image = self.viewer.layers[self.param.channel].data[step]
+            predicted_image = predict_image(image, self.model, self.random_forest)
+            self.viewer.layers['prediction'].data[step] = predicted_image
+        else:
+            image = self.viewer.layers[self.param.channel].data
+            predicted_image = predict_image(image, self.model, self.random_forest)
+            self.viewer.layers['prediction'].data = predicted_image
+        
         self.viewer.layers['prediction'].refresh()
 
     def predict_all(self):
