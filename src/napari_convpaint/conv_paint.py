@@ -13,8 +13,9 @@ import yaml
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
+from napari_guitils.gui_structures import VHGroup
+
 from .conv_paint_utils import filter_image, predict_image, load_nn_model
-from .VHGroup import VHGroup
 from .conv_parameters import Param
 
 class ConvPaintWidget(QWidget):
@@ -90,7 +91,8 @@ class ConvPaintWidget(QWidget):
         self.load_annotations_btn.clicked.connect(self.load_annotations)
         self._layout.addWidget(self.load_annotations_btn)
 
-        self.viewer.events.layers_change.connect(self.update_layer_list)
+        self.viewer.layers.events.removed.connect(self.update_layer_list)
+        self.viewer.layers.events.inserted.connect(self.update_layer_list)
 
     def update_layer_list(self, event):
         
@@ -128,13 +130,15 @@ class ConvPaintWidget(QWidget):
        
         n_features = 64
 
+        # get indices of first dimension of non-empty annotations. Gives t/z indices
         non_empty = np.unique(np.where(self.viewer.layers['annotations'].data > 0)[0])
         if len(non_empty) == 0:
             raise Exception('No annotations found')
-        elif non_empty.ndim == 1:
-            non_empty = [non_empty]
+       # elif non_empty.ndim == 1:
+       #     non_empty = [non_empty]
 
         all_values = []
+        # iterating over non_empty iteraties of t/z for 3D data
         for ind, t in enumerate(non_empty):
 
             if self.viewer.layers[self.param.channel].data.ndim == 2:
@@ -146,7 +150,7 @@ class ConvPaintWidget(QWidget):
 
             #image = self.viewer.layers[self.param.channel].data[t]
 
-            full_annotation = np.ones((n_features, image.shape[0], image.shape[1]),dtype=np.bool8)
+            full_annotation = np.ones((n_features, image.shape[0], image.shape[1]),dtype=np.bool_)
             full_annotation = full_annotation * annot>0
 
             all_scales = filter_image(image, self.model, self.param.scalings)
@@ -198,6 +202,9 @@ class ConvPaintWidget(QWidget):
         """Predict the segmentation of all frames based 
         on a RF model trained with annotations"""
 
+        if self.random_forest is None:
+            raise Exception('No model found. Please train a model first.')
+        
         if self.model is None:
             self.model = load_nn_model()
 
