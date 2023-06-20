@@ -1,6 +1,6 @@
 from napari_plugin_engine import napari_hook_implementation
 from qtpy.QtWidgets import (QWidget, QPushButton,
-QVBoxLayout, QLabel, QComboBox,QFileDialog, QTabWidget)
+QVBoxLayout, QLabel, QComboBox,QFileDialog, QTabWidget, QCheckBox)
 
 from joblib import dump, load
 from pathlib import Path
@@ -15,7 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
 from napari_guitils.gui_structures import VHGroup, TabSet
-from napari_annotation_project.project_widget import ProjectWidget 
+#from napari_annotation_project.project_widget import ProjectWidget 
 from .conv_paint_utils import filter_image, predict_image, load_nn_model
 from .conv_parameters import Param
 
@@ -34,7 +34,7 @@ class ConvPaintWidget(QWidget):
         layer name to use for features extraction/classification
     """
     
-    def __init__(self, napari_viewer, channel=None, parent=None):
+    def __init__(self, napari_viewer, channel=None, parent=None, project=False):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         
@@ -45,12 +45,14 @@ class ConvPaintWidget(QWidget):
         #self.scalings = [1,2]
         self.model = None
         self.random_forest = None
+        self.project_widget = None
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
 
         self.tab_names = ['Annotation', 'Files']
         self.tabs = TabSet(self.tab_names)
+        self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
         self.main_layout.addWidget(self.tabs)
 
         #self._layout = QVBoxLayout()
@@ -77,6 +79,8 @@ class ConvPaintWidget(QWidget):
 
         self.update_model_on_project_btn = QPushButton('Train model on full project')
         self.tabs.add_named_tab('Annotation', self.update_model_on_project_btn)
+        if project is False:
+            self.update_model_on_project_btn.setEnabled(False)
 
         self.prediction_btn = QPushButton('Predict single frame')
         self.tabs.add_named_tab('Annotation', self.prediction_btn)
@@ -90,13 +94,32 @@ class ConvPaintWidget(QWidget):
         self.load_model_btn = QPushButton('Load trained model')
         self.tabs.add_named_tab('Annotation', self.load_model_btn)
 
+        self.check_use_project = QCheckBox('Use project')
+        self.check_use_project.setChecked(False)
+        self.tabs.add_named_tab('Annotation', self.check_use_project)
+
+
         #self.load_annotations_btn = QPushButton('Load annotations')
         #self.tabs.add_named_tab('Annotation', self.load_annotations_btn)
 
-        self.projet_widget = ProjectWidget(napari_viewer=napari_viewer)
-        self.tabs.add_named_tab('Files', self.projet_widget)
+        if project is True:
+            self._add_project()
 
         self.add_connections()
+
+    def _add_project(self, event=None):
+
+        if self.check_use_project.isChecked():
+            if self.project_widget is None:
+                from napari_annotation_project.project_widget import ProjectWidget
+                self.project_widget = ProjectWidget(napari_viewer=self.viewer)
+                self.tabs.add_named_tab('Files', self.project_widget)
+            
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), True)
+            self.update_model_on_project_btn.setEnabled(True)
+        else:
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
+            self.update_model_on_project_btn.setEnabled(False)
 
 
     def add_connections(self):
@@ -113,6 +136,7 @@ class ConvPaintWidget(QWidget):
         self.prediction_all_btn.clicked.connect(self.predict_all)
         self.save_model_btn.clicked.connect(self.save_model)
         self.load_model_btn.clicked.connect(self.load_model)
+        self.check_use_project.stateChanged.connect(self._add_project)
         #self.load_annotations_btn.clicked.connect(self.load_annotations)
 
     def update_layer_list(self, event):
@@ -183,12 +207,15 @@ class ConvPaintWidget(QWidget):
         files."""
 
         # get indices of first dimension of non-empty annotations. Gives t/z indices
-        non_empty = np.unique(np.where(self.viewer.layers['annotations'].data > 0)[0])
-        if len(non_empty) == 0:
-            warnings.warn('No annotations found')
-            return None, None
-       # elif non_empty.ndim == 1:
-       #     non_empty = [non_empty]
+        if self.viewer.layers['annotations'].data.ndim == 3:
+            non_empty = np.unique(np.where(self.viewer.layers['annotations'].data > 0)[0])
+            if len(non_empty) == 0:
+                warnings.warn('No annotations found')
+                return None, None
+        elif self.viewer.layers['annotations'].data.ndim == 2:
+            non_empty = [0]
+        else:
+            raise Exception('Annotations must be 2D or 3D')
 
         all_values = []
         # iterating over non_empty iteraties of t/z for 3D data
