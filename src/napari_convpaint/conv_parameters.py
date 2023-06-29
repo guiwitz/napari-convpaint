@@ -17,7 +17,7 @@ class Param:
     image_source: str = None
 
     def __post_init__(self):
-        self.scalings = [1,2]
+        self.scalings = [1]
 
     def save_parameters(self, save_path):
         """Save parameters as yml file.

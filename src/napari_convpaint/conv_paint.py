@@ -1,6 +1,6 @@
 from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
-                            QCheckBox, QAbstractItemView)
+                            QCheckBox, QAbstractItemView, QGridLayout)
 
 from joblib import dump, load
 from pathlib import Path
@@ -11,7 +11,7 @@ import yaml
 
 from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
-from .conv_paint_utils import predict_image, load_nn_model
+from .conv_paint_utils import predict_image
 from .conv_parameters import Param
 from .conv_paint_utils import (Hookmodel, get_features_current_layers, train_classifier)
 
@@ -48,7 +48,7 @@ class ConvPaintWidget(QWidget):
         self.setLayout(self.main_layout)
 
         self.tab_names = ['Annotation', 'Files', 'Model']
-        self.tabs = TabSet(self.tab_names)
+        self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
         self.main_layout.addWidget(self.tabs)
 
@@ -58,15 +58,6 @@ class ConvPaintWidget(QWidget):
         self.select_layer_widget = QComboBox()
         self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
         self.tabs.add_named_tab('Annotation', self.select_layer_widget)
-
-        self.settings_vgroup = VHGroup('Settings', orientation='G')
-        self.tabs.add_named_tab('Annotation', self.settings_vgroup.gbox)
-
-        self.num_scales_combo = QComboBox()
-        self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
-        self.num_scales_combo.setCurrentText('[1,2]')
-        self.settings_vgroup.glayout.addWidget(QLabel('Number of scales'), 0, 0)
-        self.settings_vgroup.glayout.addWidget(self.num_scales_combo, 0, 1)
 
         self.add_layers_btn = QPushButton('Add annotation/predict layers')
         self.tabs.add_named_tab('Annotation', self.add_layers_btn)
@@ -96,18 +87,24 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Annotation', self.check_use_project)
 
         self.qcombo_model_type = QComboBox()
-        self.qcombo_model_type.addItems(['vgg16', 'single_layer_vgg16'])
-        self.tabs.add_named_tab('Model', self.qcombo_model_type)
+        self.qcombo_model_type.addItems(['vgg16', 'efficient_netb0', 'single_layer_vgg16'])
+        self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
         self.load_nnmodel_btn = QPushButton('Load nn model')
-        self.tabs.add_named_tab('Model', self.load_nnmodel_btn)
+        self.tabs.add_named_tab('Model', self.load_nnmodel_btn, [1,0,1,2])
 
         self.set_nnmodel_outputs_btn = QPushButton('Set model outputs')
-        self.tabs.add_named_tab('Model', self.set_nnmodel_outputs_btn)
+        self.tabs.add_named_tab('Model', self.set_nnmodel_outputs_btn, [2,0,1,2])
 
         self.model_output_selection = QListWidget()
         self.model_output_selection.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.tabs.add_named_tab('Model', self.model_output_selection)
+        self.tabs.add_named_tab('Model', self.model_output_selection, [3,0,1,2])
+
+        self.num_scales_combo = QComboBox()
+        self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
+        self.num_scales_combo.setCurrentText('[1]')
+        self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
+        self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
 
         if project is True:
             self._add_project()
@@ -188,19 +185,9 @@ class ConvPaintWidget(QWidget):
         model_type = self.qcombo_model_type.currentText()
         self.model = Hookmodel(model_name=model_type)
 
-        selected_layer = []
-        layer_pos = []
-        selected_rows = self.model_output_selection.selectedIndexes()
-        selected_rows = [x.row() for x in selected_rows]
-        for row in selected_rows:
-            
-            curr_name = self.model.module_list[row][1]
-            curr_pos = self.model.module_list[row][2]
-
-            selected_layer.append(curr_name)
-            layer_pos.append(curr_pos)
-
-        self.model.register_hooks(selected_layer=selected_layer, selected_layer_pos=layer_pos)
+        selected_rows = self.model_output_selection.selectedItems()
+        selected_layers = [x.text() for x in selected_rows]
+        self.model.register_hooks(selected_layers=selected_layers)
                                   
 
     def _on_load_nnmodel(self, event=None):
@@ -209,7 +196,7 @@ class ConvPaintWidget(QWidget):
         self.model = Hookmodel(self.qcombo_model_type.currentText())
         self._create_output_selection()
         # if model has a single layer output, automatically initialize it
-        if len(self.model.module_list) == 1:
+        if len(self.model.named_modules) == 1:
             self.model_output_selection.setCurrentRow(0)
             self._on_click_define_model_outputs()
             self.set_nnmodel_outputs_btn.setEnabled(False)
@@ -237,8 +224,7 @@ class ConvPaintWidget(QWidget):
         """Train classifier on all annotations in project."""
 
         if self.model is None:
-            #self.model = load_nn_model()
-            raise Exception('No model loaded')
+            raise Exception('No feature generator model loaded')
 
         num_files = len(self.projet_widget.params.file_paths)
         if num_files == 0:
@@ -270,7 +256,6 @@ class ConvPaintWidget(QWidget):
         on a RF model trained with annotations"""
 
         if self.model is None:
-            #self.model = load_nn_model()
             raise Exception('No feature generator model loaded')
         
         if self.random_forest is None:
@@ -298,7 +283,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('No model found. Please train a model first.')
         
         if self.model is None:
-            self.model = load_nn_model()
+            raise Exception('No feature generator model loaded')
 
         self.check_prediction_layer_exists()
 

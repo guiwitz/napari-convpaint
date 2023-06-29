@@ -73,7 +73,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
         
     """
     
-    input_channels = hookmodel.get_module_by_index(0).in_channels
+    input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
     image = np.ones((input_channels, image.shape[0],image.shape[1]), dtype=np.float32) * image
     
@@ -271,6 +271,8 @@ class Hookmodel():
 
         if model_name == 'vgg16':
             self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+        elif model_name == 'efficient_netb0':
+            self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
         elif model_name == 'single_layer_vgg16':
             self.model = load_single_layer_vgg16()
         
@@ -294,58 +296,25 @@ class Hookmodel():
         self.outputs.append(output)
         assert False
 
-    def register_hooks(self, selected_layer, selected_layer_pos):
+    def register_hooks(self, selected_layers):#, selected_layer_pos):
 
         self.features_per_layer = []
-        for ind in range(len(selected_layer)):
+        for ind in range(len(selected_layers)):
+
+            self.features_per_layer.append(
+                self.module_dict[selected_layers[ind]].out_channels)
             
-            if selected_layer_pos[ind] is not None:
-                layer_pos = selected_layer_pos[ind]
-
-                self.features_per_layer.append(
-                    getattr(self.model, selected_layer[ind])[int(layer_pos)].out_channels)
-
-                if ind == len(selected_layer)-1:
-                    getattr(self.model, selected_layer[ind])[int(layer_pos)].register_forward_hook(self.hook_last)
-                else:
-                    getattr(self.model, selected_layer[ind])[int(layer_pos)].register_forward_hook(self.hook_normal)
-
+            if ind == len(selected_layers)-1:
+                self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_last)
             else:
-                self.features_per_layer.append(
-                    getattr(self.model, selected_layer[ind]).out_channels)
-                
-                if ind == len(selected_layer)-1:
-                    getattr(self.model, selected_layer[ind]).register_forward_hook(self.hook_last)
-                else:
-                    getattr(self.model, selected_layer[ind]).register_forward_hook(self.hook_normal)
+                self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
+
 
     def get_layer_dict(self):
-        """Return dictionary where key are names of layers composed of layer name 
-        as returned by named_modules() and layer type (e.g. Conv2D...), and values are layer names
-        returned by named_modules() only."""
-
-        named_modules = list(self.model.named_modules())
-        named_modules = [n for n in named_modules if 
-                         (not isinstance(n[1], nn.Sequential) and not isinstance(n[1], type(self.model)))]
+        """Create a flat list of all modules as well as a dictionary of modules with 
+        keys describing the layers."""
         
-        self.module_dict = OrderedDict()
-        for x in named_modules:
-            self.module_dict[x[0] + ' ' + x[1].__str__()] = x[0]
-
-        self.module_list = []
-        for x in named_modules:
-            if '.' in x[0]:
-                self.module_list.append(
-                [x[0] + ' ' + x[1].__str__(), x[0].split('.')[0], int(x[0].split('.')[1])])
-            else:
-                self.module_list.append([x[0] + ' ' + x[1].__str__(), x[0], None])
-
-    def get_module_by_index(self, ind):
-        """Return module name by index."""
-
-        selected_layer = self.module_list[ind][1]
-        selected_layer_pos = self.module_list[ind][2]
-        if selected_layer_pos is None:
-            return getattr(self.model, selected_layer)
-        else:
-            return getattr(self.model, selected_layer)[selected_layer_pos]
+        named_modules = list(self.model.named_modules())
+        self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
+        self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
+        self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
