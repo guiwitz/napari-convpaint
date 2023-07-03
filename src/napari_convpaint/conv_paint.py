@@ -87,7 +87,8 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Annotation', self.check_use_project)
 
         self.qcombo_model_type = QComboBox()
-        self.qcombo_model_type.addItems(['vgg16', 'efficient_netb0', 'single_layer_vgg16'])
+        self.qcombo_model_type.addItems([
+            'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'dino_vits16'])
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
         self.load_nnmodel_btn = QPushButton('Load nn model')
