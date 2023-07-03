@@ -11,6 +11,7 @@ import torchvision.models as models
 from torch import nn
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from torchvision import transforms
 
 def filter_image(image, model, scalings):
     """
@@ -81,6 +82,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
     for s in scalings:
         im_tot = image[:, ::s, ::s]
         im_torch = torch.from_numpy(im_tot[np.newaxis, ::])
+        #im_torch = hookmodel.transform(im_torch)
         hookmodel.outputs = []
         try:
             _ = hookmodel(im_torch)
@@ -225,7 +227,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1]):
 
     all_values = np.concatenate(all_values,axis=0)
     features = pd.DataFrame(all_values)
-    target_im = current_annot[annotations>0]
+    target_im = current_annot[current_annot>0]
     targets = pd.Series(target_im)
 
     return features, targets
@@ -267,14 +269,20 @@ class Hookmodel():
         List of hooked layers, their names, and their indices in the model (if applicable)
     """
     
-    def __init__(self, model_name='vgg16'):
+    def __init__(self, model_name='vgg16', model=None):
 
-        if model_name == 'vgg16':
-            self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-        elif model_name == 'efficient_netb0':
-            self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
-        elif model_name == 'single_layer_vgg16':
-            self.model = load_single_layer_vgg16()
+        if model is not None:
+            self.model = model
+        else:
+            if model_name == 'vgg16':
+                self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+                #self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
+            elif model_name == 'efficient_netb0':
+                self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+            elif model_name == 'single_layer_vgg16':
+                self.model = load_single_layer_vgg16()
+            elif model_name == 'dino_vits16':
+                self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
         
         self.outputs = []
         self.features_per_layer = []
@@ -282,8 +290,7 @@ class Hookmodel():
         self.get_layer_dict()
 
         if model_name == 'single_layer_vgg16':
-            self.register_hooks(
-                [x[1] for x in self.module_list], [x[2] for x in self.module_list])
+            self.register_hooks(list(self.module_dict.keys()))
 
     def __call__(self, tensor_image):
         
