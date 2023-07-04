@@ -36,13 +36,14 @@ class ConvPaintWidget(QWidget):
         
         #self.param = param
         #if self.param is None:
-        self.param = Param(channel=channel)
+        self.param = Param()
         
         #self.scalings = [1,2]
         self.model = None
         self.random_forest = None
         self.project_widget = None
         self.features_per_layer = None
+        self.selected_channel = None
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -149,7 +150,9 @@ class ConvPaintWidget(QWidget):
 
     def update_layer_list(self, event):
         
-        keep_channel = self.param.channel
+        keep_channel = None
+        if self.selected_channel is not None:
+            keep_channel = self.selected_channel
         self.select_layer_widget.clear()
         self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
         if keep_channel in [x.name for x in self.viewer.layers]:
@@ -157,16 +160,16 @@ class ConvPaintWidget(QWidget):
 
     def select_layer(self):
 
-        self.param.channel = self.select_layer_widget.currentText()
+        self.selected_channel = self.select_layer_widget.currentText()
 
     def add_annotation_layer(self):
 
         self.viewer.add_labels(
-            data=np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8),
+            data=np.zeros((self.viewer.layers[self.selected_channel].data.shape), dtype=np.uint8),
             name='annotations'
             )
         self.viewer.add_labels(
-            data=np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8),
+            data=np.zeros((self.viewer.layers[self.selected_channel].data.shape), dtype=np.uint8),
             name='prediction'
             )
 
@@ -186,9 +189,15 @@ class ConvPaintWidget(QWidget):
         model_type = self.qcombo_model_type.currentText()
         self.model = Hookmodel(model_name=model_type)
 
+        selected_layers = self.get_selected_layers_names()
+        self.model.register_hooks(selected_layers=selected_layers)
+
+    def get_selected_layers_names(self):
+        """Get names of selected layers."""
+
         selected_rows = self.model_output_selection.selectedItems()
         selected_layers = [x.text() for x in selected_rows]
-        self.model.register_hooks(selected_layers=selected_layers)
+        return selected_layers
                                   
 
     def _on_load_nnmodel(self, event=None):
@@ -215,7 +224,7 @@ class ConvPaintWidget(QWidget):
 
         features, targets = get_features_current_layers(
             model=self.model,
-            image=self.viewer.layers[self.param.channel].data,
+            image=self.viewer.layers[self.selected_channel].data,
             annotations=self.viewer.layers['annotations'].data,
             scalings=self.param.scalings,
         )
@@ -237,7 +246,7 @@ class ConvPaintWidget(QWidget):
 
             features, targets = get_features_current_layers(
                 model=self.model,
-                image=self.viewer.layers[self.param.channel].data,
+                image=self.viewer.layers[self.selected_channel].data,
                 annotations=self.viewer.layers['annotations'].data,
                 scalings=self.param.scalings,
             )
@@ -266,11 +275,11 @@ class ConvPaintWidget(QWidget):
         
         if self.viewer.dims.ndim > 2:
             step = self.viewer.dims.current_step[0]
-            image = self.viewer.layers[self.param.channel].data[step]
+            image = self.viewer.layers[self.selected_channel].data[step]
             predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
-            image = self.viewer.layers[self.param.channel].data
+            image = self.viewer.layers[self.selected_channel].data
             predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
             self.viewer.layers['prediction'].data = predicted_image
         
@@ -289,7 +298,7 @@ class ConvPaintWidget(QWidget):
         self.check_prediction_layer_exists()
 
         for step in range(self.viewer.dims.nsteps[0]):
-            image = self.viewer.layers[self.param.channel].data[step]
+            image = self.viewer.layers[self.selected_channel].data[step]
             predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
             self.viewer.layers['prediction'].data[step] = predicted_image
 
@@ -298,7 +307,7 @@ class ConvPaintWidget(QWidget):
         layer_names = [x.name for x in self.viewer.layers]
         if 'prediction' not in layer_names:
             self.viewer.add_labels(
-                data=np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8),
+                data=np.zeros((self.viewer.layers[self.selected_channel].data.shape), dtype=np.uint8),
                 name='prediction'
                 )
 
@@ -311,9 +320,16 @@ class ConvPaintWidget(QWidget):
         save_file = Path(save_file)
         dump(self.random_forest, save_file)
         self.param.random_forest = save_file#.as_posix()
-
+        self.update_params()
         self.param.save_parameters(save_file.parent.joinpath('convpaint_params.yml'))
 
+    def update_params(self):
+        """Update parameters from GUI."""
+
+        self.update_scalings()
+        self.param.model_name = self.qcombo_model_type.currentText()
+        self.param.model_layers = self.get_selected_layers_names() 
+    
     def load_classifier(self):
         """Select classifier model file to load."""
 
@@ -322,10 +338,21 @@ class ConvPaintWidget(QWidget):
         save_file = Path(save_file)
         self.random_forest = load(save_file)
         
-        #self.param.random_forest = save_file
-
         self.param = Param()
         with open(save_file.parent.joinpath('convpaint_params.yml')) as file:
             documents = yaml.full_load(file)
         for k in documents.keys():
             setattr(self.param, k, documents[k])
+
+        self.update_gui_from_params()
+
+    def update_gui_from_params(self):
+        """Update GUI from parameters."""
+
+        self.qcombo_model_type.setCurrentText(self.param.model_name)
+        self._on_load_nnmodel()
+        self.update_scalings()
+        self.num_scales_combo.setCurrentText(str(self.param.scalings))
+        for sel in self.param.model_layers:
+            self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
+        self._on_click_define_model_outputs()

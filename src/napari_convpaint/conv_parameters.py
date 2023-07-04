@@ -13,8 +13,8 @@ class Param:
 
     random_forest: str = None
     scalings: list[int] = None
-    channel: str = None
-    image_source: str = None
+    model_name: str = None
+    model_layers: list[str] = None
 
     def __post_init__(self):
         self.scalings = [1]
@@ -33,7 +33,6 @@ class Param:
         with open(save_path, "w") as file:
             dict_to_save = dataclasses.asdict(self)
             dict_to_save = self.convert_path(dict_to_save, 'random_forest')
-            dict_to_save = self.convert_path(dict_to_save, 'image_source')
             
             yaml.dump(dict_to_save, file)
 
