@@ -1,23 +1,19 @@
-from napari_plugin_engine import napari_hook_implementation
-from qtpy.QtWidgets import (QWidget, QPushButton,
-QVBoxLayout, QLabel, QComboBox,QFileDialog, QTabWidget, QCheckBox)
+from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
+                            QLabel, QComboBox,QFileDialog, QListWidget,
+                            QCheckBox, QAbstractItemView, QGridLayout)
 
 from joblib import dump, load
 from pathlib import Path
 import warnings
 import numpy as np
 import pandas as pd
-import torchvision.models as models
-from torch import nn
 import yaml
-
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
 
 from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
-from .conv_paint_utils import filter_image, predict_image, load_nn_model
+from .conv_paint_utils import predict_image
 from .conv_parameters import Param
+from .conv_paint_utils import (Hookmodel, get_features_current_layers, train_classifier)
 
 class ConvPaintWidget(QWidget):
     """
@@ -40,18 +36,20 @@ class ConvPaintWidget(QWidget):
         
         #self.param = param
         #if self.param is None:
-        self.param = Param(channel=channel)
+        self.param = Param()
         
         #self.scalings = [1,2]
         self.model = None
         self.random_forest = None
         self.project_widget = None
+        self.features_per_layer = None
+        self.selected_channel = None
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
 
-        self.tab_names = ['Annotation', 'Files']
-        self.tabs = TabSet(self.tab_names)
+        self.tab_names = ['Annotation', 'Files', 'Model']
+        self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
         self.main_layout.addWidget(self.tabs)
 
@@ -61,15 +59,6 @@ class ConvPaintWidget(QWidget):
         self.select_layer_widget = QComboBox()
         self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
         self.tabs.add_named_tab('Annotation', self.select_layer_widget)
-
-        self.settings_vgroup = VHGroup('Settings', orientation='G')
-        self.tabs.add_named_tab('Annotation', self.settings_vgroup.gbox)
-
-        self.num_scales_combo = QComboBox()
-        self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
-        self.num_scales_combo.setCurrentText('[1,2]')
-        self.settings_vgroup.glayout.addWidget(QLabel('Number of scales'), 0, 0)
-        self.settings_vgroup.glayout.addWidget(self.num_scales_combo, 0, 1)
 
         self.add_layers_btn = QPushButton('Add annotation/predict layers')
         self.tabs.add_named_tab('Annotation', self.add_layers_btn)
@@ -98,9 +87,26 @@ class ConvPaintWidget(QWidget):
         self.check_use_project.setChecked(False)
         self.tabs.add_named_tab('Annotation', self.check_use_project)
 
+        self.qcombo_model_type = QComboBox()
+        self.qcombo_model_type.addItems([
+            'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'dino_vits16'])
+        self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
-        #self.load_annotations_btn = QPushButton('Load annotations')
-        #self.tabs.add_named_tab('Annotation', self.load_annotations_btn)
+        self.load_nnmodel_btn = QPushButton('Load nn model')
+        self.tabs.add_named_tab('Model', self.load_nnmodel_btn, [1,0,1,2])
+
+        self.set_nnmodel_outputs_btn = QPushButton('Set model outputs')
+        self.tabs.add_named_tab('Model', self.set_nnmodel_outputs_btn, [2,0,1,2])
+
+        self.model_output_selection = QListWidget()
+        self.model_output_selection.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tabs.add_named_tab('Model', self.model_output_selection, [3,0,1,2])
+
+        self.num_scales_combo = QComboBox()
+        self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
+        self.num_scales_combo.setCurrentText('[1]')
+        self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
+        self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
 
         if project is True:
             self._add_project()
@@ -108,6 +114,7 @@ class ConvPaintWidget(QWidget):
         self.add_connections()
 
     def _add_project(self, event=None):
+        """Add widget for multi-image project management"""
 
         if self.check_use_project.isChecked():
             if self.project_widget is None:
@@ -130,19 +137,22 @@ class ConvPaintWidget(QWidget):
         self.viewer.layers.events.inserted.connect(self.update_layer_list)
 
         self.add_layers_btn.clicked.connect(self.add_annotation_layer)
-        self.update_model_btn.clicked.connect(self.update_model)
-        self.update_model_on_project_btn.clicked.connect(self.update_model_on_project)
+        self.update_model_btn.clicked.connect(self.update_classifier)
+        self.update_model_on_project_btn.clicked.connect(self.update_classifier_on_project)
         self.prediction_btn.clicked.connect(self.predict)
         self.prediction_all_btn.clicked.connect(self.predict_all)
         self.save_model_btn.clicked.connect(self.save_model)
-        self.load_model_btn.clicked.connect(self.load_model)
+        self.load_model_btn.clicked.connect(self.load_classifier)
         self.check_use_project.stateChanged.connect(self._add_project)
-        #self.load_annotations_btn.clicked.connect(self.load_annotations)
+
+        self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
+        self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
     def update_layer_list(self, event):
         
-        print('update_layer_list')
-        keep_channel = self.param.channel
+        keep_channel = None
+        if self.selected_channel is not None:
+            keep_channel = self.selected_channel
         self.select_layer_widget.clear()
         self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
         if keep_channel in [x.name for x in self.viewer.layers]:
@@ -150,38 +160,81 @@ class ConvPaintWidget(QWidget):
 
     def select_layer(self):
 
-        self.param.channel = self.select_layer_widget.currentText()
+        self.selected_channel = self.select_layer_widget.currentText()
 
     def add_annotation_layer(self):
 
         self.viewer.add_labels(
-            data=np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8),
+            data=np.zeros((self.viewer.layers[self.selected_channel].data.shape), dtype=np.uint8),
             name='annotations'
             )
         self.viewer.add_labels(
-            data=np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8),
+            data=np.zeros((self.viewer.layers[self.selected_channel].data.shape), dtype=np.uint8),
             name='prediction'
             )
 
     def update_scalings(self):
 
         self.param.scalings = eval(self.num_scales_combo.currentText())
-        #self.param.scalings = self.scalings
+
+    def _create_output_selection(self):
+        """Update list of selectable layers"""
+
+        self.model_output_selection.clear()
+        self.model_output_selection.addItems(self.model.module_dict.keys())
+
+    def _on_click_define_model_outputs(self, event=None):
+        """Using hooks setup model to give outputs at selected layers."""
         
-    def update_model(self):
+        model_type = self.qcombo_model_type.currentText()
+        self.model = Hookmodel(model_name=model_type)
+
+        selected_layers = self.get_selected_layers_names()
+        self.model.register_hooks(selected_layers=selected_layers)
+
+    def get_selected_layers_names(self):
+        """Get names of selected layers."""
+
+        selected_rows = self.model_output_selection.selectedItems()
+        selected_layers = [x.text() for x in selected_rows]
+        return selected_layers
+                                  
+
+    def _on_load_nnmodel(self, event=None):
+        """Load a neural network model. Create list of selectable layers."""
+            
+        self.model = Hookmodel(self.qcombo_model_type.currentText())
+        self._create_output_selection()
+        # if model has a single layer output, automatically initialize it
+        if len(self.model.named_modules) == 1:
+            self.model_output_selection.setCurrentRow(0)
+            self._on_click_define_model_outputs()
+            self.set_nnmodel_outputs_btn.setEnabled(False)
+            self.model_output_selection.setEnabled(False)
+        else:
+            self.set_nnmodel_outputs_btn.setEnabled(True)
+            self.model_output_selection.setEnabled(True)
+
+
+    def update_classifier(self):
         """Given a set of new annotations, update the random forest model."""
 
         if self.model is None:
-            self.model = load_nn_model()
+            raise Exception('No feature generator model loaded')
 
-        features, targets = self.get_features_current_layers()
+        features, targets = get_features_current_layers(
+            model=self.model,
+            image=self.viewer.layers[self.selected_channel].data,
+            annotations=self.viewer.layers['annotations'].data,
+            scalings=self.param.scalings,
+        )
+        self.random_forest = train_classifier(features, targets)
 
-        self.train_classifier(features, targets)
-
-    def update_model_on_project(self):
+    def update_classifier_on_project(self):
+        """Train classifier on all annotations in project."""
 
         if self.model is None:
-            self.model = load_nn_model()
+            raise Exception('No feature generator model loaded')
 
         num_files = len(self.projet_widget.params.file_paths)
         if num_files == 0:
@@ -191,7 +244,12 @@ class ConvPaintWidget(QWidget):
         for ind in range(num_files):
             self.projet_widget.file_list.setCurrentRow(ind)
 
-            features, targets = self.get_features_current_layers()
+            features, targets = get_features_current_layers(
+                model=self.model,
+                image=self.viewer.layers[self.selected_channel].data,
+                annotations=self.viewer.layers['annotations'].data,
+                scalings=self.param.scalings,
+            )
             if features is None:
                 continue
             all_features.append(features)
@@ -200,89 +258,7 @@ class ConvPaintWidget(QWidget):
         all_features = np.concatenate(all_features, axis=0)
         all_targets = np.concatenate(all_targets, axis=0)
 
-        self.train_classifier(all_features, all_targets)
-
-    def get_features_current_layers(self):
-        """Get a current set of features, targets from the currently selected
-        files."""
-
-        # get indices of first dimension of non-empty annotations. Gives t/z indices
-        if self.viewer.layers['annotations'].data.ndim == 3:
-            non_empty = np.unique(np.where(self.viewer.layers['annotations'].data > 0)[0])
-            if len(non_empty) == 0:
-                warnings.warn('No annotations found')
-                return None, None
-        elif self.viewer.layers['annotations'].data.ndim == 2:
-            non_empty = [0]
-        else:
-            raise Exception('Annotations must be 2D or 3D')
-
-        all_values = []
-        # iterating over non_empty iteraties of t/z for 3D data
-        for ind, t in enumerate(non_empty):
-
-            if self.viewer.layers[self.param.channel].data.ndim == 2:
-                image = self.viewer.layers[self.param.channel].data
-                annot = self.viewer.layers['annotations'].data
-            else:
-                image = self.viewer.layers[self.param.channel].data[t]
-                annot = self.viewer.layers['annotations'].data[t]
-
-            #image = self.viewer.layers[self.param.channel].data[t]
-
-            extracted_features = self.get_multiscale_features(image, annot)
-            all_values.append(extracted_features)
-
-        all_values = np.concatenate(all_values,axis=0)
-        features = pd.DataFrame(all_values)
-        target_im = self.viewer.layers['annotations'].data[self.viewer.layers['annotations'].data>0]
-        targets = pd.Series(target_im)
-
-        return features, targets
-
-
-    def train_classifier(self, features, targets):
-        """Train a random forest classifier given a set of features and targets."""
-
-        # train model
-        #split train/test
-        X, X_test, y, y_test = train_test_split(features, targets, 
-                                            test_size = 0.2, 
-                                            random_state = 42)
-
-        #train a random forest classififer
-        self.random_forest = RandomForestClassifier(n_estimators=100)
-        self.random_forest.fit(X, y)
-
-
-    def get_multiscale_features(self, image, annot):
-        """Given an image and a set of annotations, extract multiscale features
-        
-        Parameters
-        ----------
-        image : np.ndarray
-            Image to extract features from (currently 2D only)
-        annot : np.ndarray
-            Annotations (1,2) to extract features from (currently 2D only)
-
-        Returns
-        -------
-        extracted_features : np.ndarray
-            Extracted features. Dimensions npixels x nfeatures * nbscales
-        """
-
-        n_features = 64
-        full_annotation = np.ones((n_features, image.shape[0], image.shape[1]),dtype=np.bool_)
-        full_annotation = full_annotation * annot > 0
-
-        all_scales = filter_image(image, self.model, self.param.scalings)
-        all_values_scales=[]
-        for a in all_scales:
-            extract = a[0, full_annotation]
-            all_values_scales.append(np.reshape(extract, (n_features, int(extract.shape[0]/n_features))).T)
-        extracted_features = np.concatenate(all_values_scales, axis=1)
-        
-        return extracted_features
+        self.random_forest = train_classifier(all_features, all_targets)
         
 
     def predict(self):
@@ -290,20 +266,21 @@ class ConvPaintWidget(QWidget):
         on a RF model trained with annotations"""
 
         if self.model is None:
-            self.model = load_nn_model()
+            raise Exception('No feature generator model loaded')
+        
         if self.random_forest is None:
-            self.update_model()
+            self.update_classifier()
 
         self.check_prediction_layer_exists()
         
         if self.viewer.dims.ndim > 2:
             step = self.viewer.dims.current_step[0]
-            image = self.viewer.layers[self.param.channel].data[step]
-            predicted_image = predict_image(image, self.model, self.random_forest)
+            image = self.viewer.layers[self.selected_channel].data[step]
+            predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
-            image = self.viewer.layers[self.param.channel].data
-            predicted_image = predict_image(image, self.model, self.random_forest)
+            image = self.viewer.layers[self.selected_channel].data
+            predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
             self.viewer.layers['prediction'].data = predicted_image
         
         self.viewer.layers['prediction'].refresh()
@@ -316,13 +293,13 @@ class ConvPaintWidget(QWidget):
             raise Exception('No model found. Please train a model first.')
         
         if self.model is None:
-            self.model = load_nn_model()
+            raise Exception('No feature generator model loaded')
 
         self.check_prediction_layer_exists()
 
         for step in range(self.viewer.dims.nsteps[0]):
-            image = self.viewer.layers[self.param.channel].data[step]
-            predicted_image = predict_image(image, self.model, self.random_forest)
+            image = self.viewer.layers[self.selected_channel].data[step]
+            predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
             self.viewer.layers['prediction'].data[step] = predicted_image
 
     def check_prediction_layer_exists(self):
@@ -330,7 +307,7 @@ class ConvPaintWidget(QWidget):
         layer_names = [x.name for x in self.viewer.layers]
         if 'prediction' not in layer_names:
             self.viewer.add_labels(
-                data=np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8),
+                data=np.zeros((self.viewer.layers[self.selected_channel].data.shape), dtype=np.uint8),
                 name='prediction'
                 )
 
@@ -343,25 +320,17 @@ class ConvPaintWidget(QWidget):
         save_file = Path(save_file)
         dump(self.random_forest, save_file)
         self.param.random_forest = save_file#.as_posix()
-
-        '''# save annotations
-        dfs = []
-        ar = self.viewer.layers['annotations'].data
-        for i in range(1, 1+int(ar.max())):
-            coords = np.where(ar==i)
-            coords_dict = {f'd{j}':coords[j] for j in range(len(coords))}
-            df = pd.DataFrame(coords_dict)
-            df['val'] = i
-            dfs.append(df)
-        df = pd.concat(dfs)
-        df.to_csv(save_file.parent.joinpath('annotations.csv'), index=False)
-
-        # save parameters
-        self.param.image_source = self.viewer.layers[self.param.channel].source.path
-        '''
+        self.update_params()
         self.param.save_parameters(save_file.parent.joinpath('convpaint_params.yml'))
 
-    def load_model(self):
+    def update_params(self):
+        """Update parameters from GUI."""
+
+        self.update_scalings()
+        self.param.model_name = self.qcombo_model_type.currentText()
+        self.param.model_layers = self.get_selected_layers_names() 
+    
+    def load_classifier(self):
         """Select classifier model file to load."""
 
         dialog = QFileDialog()
@@ -369,43 +338,21 @@ class ConvPaintWidget(QWidget):
         save_file = Path(save_file)
         self.random_forest = load(save_file)
         
-        #self.param.random_forest = save_file
-
         self.param = Param()
         with open(save_file.parent.joinpath('convpaint_params.yml')) as file:
             documents = yaml.full_load(file)
         for k in documents.keys():
             setattr(self.param, k, documents[k])
 
-    def load_annotations(self):
-        """Select file with annotations to load."""
+        self.update_gui_from_params()
 
-        project_path = Path(str(QFileDialog.getExistingDirectory(self, "Select a project folder to load",options=QFileDialog.DontUseNativeDialog)))
-        if not project_path.joinpath('convpaint_params.yml').exists():
-            raise FileNotFoundError(f"Project {project_path} does not exist")
+    def update_gui_from_params(self):
+        """Update GUI from parameters."""
 
-        self.param = Param()
-        with open(project_path.joinpath('convpaint_params.yml')) as file:
-            documents = yaml.full_load(file)
-        for k in documents.keys():
-            setattr(self.param, k, documents[k])
-
-        if self.param.image_source is None:
-            if len(self.viewer.layers) == 0:
-                raise Exception("No image is loaded and it seems the convpaint\
-                    training has been done on a larger project. Load the project first.")
-        else:
-            image_file = Path(self.param.image_source)
-            self.viewer.open(image_file)
-        self.add_annotation_layer()
-
-        annotation_file = Path(project_path.joinpath('annotations.csv'))
-        df = pd.read_csv(annotation_file)
-        ar = np.zeros((self.viewer.layers[self.param.channel].data.shape), dtype=np.uint8)
-        for i in range(1, 1+int(df.val.max())):
-            row_cols = df[df.val==i].drop('val', axis=1).values
-            index_list = [row_cols[:,x] for x in range(row_cols.shape[1])]
-            ar[tuple(index_list)]=i
-
-        self.viewer.layers['annotations'].data = ar
-        self.viewer.layers['annotations'].refresh()
+        self.qcombo_model_type.setCurrentText(self.param.model_name)
+        self._on_load_nnmodel()
+        self.update_scalings()
+        self.num_scales_combo.setCurrentText(str(self.param.scalings))
+        for sel in self.param.model_layers:
+            self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
+        self._on_click_define_model_outputs()
