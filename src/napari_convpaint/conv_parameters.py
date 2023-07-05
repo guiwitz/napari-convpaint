@@ -12,9 +12,13 @@ class Param:
     """
 
     random_forest: str = None
-    scalings: list[int] = None
     model_name: str = None
     model_layers: list[str] = None
+    scalings: list[int] = None
+    order: int = None
+    use_min_features: bool = None
+
+
 
     def __post_init__(self):
         self.scalings = [1]

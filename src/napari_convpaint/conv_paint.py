@@ -1,6 +1,6 @@
 from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
-                            QCheckBox, QAbstractItemView, QGridLayout)
+                            QCheckBox, QAbstractItemView, QGridLayout, QSpinBox)
 
 from joblib import dump, load
 from pathlib import Path
@@ -114,7 +114,15 @@ class ConvPaintWidget(QWidget):
 
         self.check_use_min_features = QCheckBox('Use min features')
         self.check_use_min_features.setChecked(False)
-        self.tabs.add_named_tab('Model', self.check_use_min_features, [5,0,1,1])
+        self.tabs.add_named_tab('Model', self.check_use_min_features, [5,0,1,2])
+
+        self.spin_interpolation_order = QSpinBox()
+        self.spin_interpolation_order.setMinimum(0)
+        self.spin_interpolation_order.setMaximum(5)
+        self.spin_interpolation_order.setValue(1)
+        self.tabs.add_named_tab('Model', QLabel('Interpolation order'), [6,0,1,1])
+        self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
+
 
         if project is True:
             self._add_project()
@@ -239,6 +247,7 @@ class ConvPaintWidget(QWidget):
             image=self.viewer.layers[self.selected_channel].data,
             annotations=self.viewer.layers['annotations'].data,
             scalings=self.param.scalings,
+            order=self.spin_interpolation_order.value(),
             use_min_features=self.check_use_min_features.isChecked(),
             device=device
         )
@@ -264,6 +273,7 @@ class ConvPaintWidget(QWidget):
                 image=self.viewer.layers[self.selected_channel].data,
                 annotations=self.viewer.layers['annotations'].data,
                 scalings=self.param.scalings,
+                order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device
             )
@@ -296,12 +306,14 @@ class ConvPaintWidget(QWidget):
             image = self.viewer.layers[self.selected_channel].data[step]
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
+                order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(), device=device)
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
             image = self.viewer.layers[self.selected_channel].data
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
+                order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(), device=device)
             self.viewer.layers['prediction'].data = predicted_image
         
@@ -324,6 +336,7 @@ class ConvPaintWidget(QWidget):
             image = self.viewer.layers[self.selected_channel].data[step]
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
+                order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(), device=device)
             self.viewer.layers['prediction'].data[step] = predicted_image
 
@@ -353,7 +366,9 @@ class ConvPaintWidget(QWidget):
 
         self.update_scalings()
         self.param.model_name = self.qcombo_model_type.currentText()
-        self.param.model_layers = self.get_selected_layers_names() 
+        self.param.model_layers = self.get_selected_layers_names()
+        self.param.order = self.spin_interpolation_order.value()
+        self.param.use_min_features = self.check_use_min_features.isChecked()
     
     def load_classifier(self):
         """Select classifier model file to load."""
@@ -381,3 +396,5 @@ class ConvPaintWidget(QWidget):
         for sel in self.param.model_layers:
             self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
         self._on_click_define_model_outputs()
+        self.spin_interpolation_order.setValue(self.param.order)
+        self.check_use_min_features.setChecked(self.param.use_min_features)
