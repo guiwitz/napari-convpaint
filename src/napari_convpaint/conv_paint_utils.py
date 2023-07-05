@@ -52,7 +52,7 @@ def filter_image(image, model, scalings):
         all_scales.append(out_np)
     return all_scales
 
-def filter_image_multioutputs(image, hookmodel, scalings=[1]):
+def filter_image_multioutputs(image, hookmodel, scalings=[1], device='cpu'):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object.
     
@@ -64,6 +64,8 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
         Model to extract features from
     scalings : list of ints, optional
         Downsampling factors, by default None
+    device : str, optional
+        Device to use for computation, by default 'cpu'
 
     Returns
     -------
@@ -74,6 +76,8 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
         
     """
     
+    is_model_cuda = device == 'cuda'
+
     input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
     image = np.ones((input_channels, image.shape[0],image.shape[1]), dtype=np.float32) * image
@@ -85,11 +89,16 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
         #im_torch = hookmodel.transform(im_torch)
         hookmodel.outputs = []
         try:
+            if is_model_cuda:
+                im_torch = im_torch.cuda()
+
             _ = hookmodel(im_torch)
         except:
             pass
         
         for im in hookmodel.outputs:
+            if is_model_cuda:
+                im = im.to('cpu')
             out_np = im.detach().numpy()
             if image.shape[1:3] != out_np.shape[2:4]:
                 out_np = skimage.transform.resize(
@@ -100,7 +109,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
 
 
 
-def predict_image(image, model, classifier, scalings=[1], use_min_features=True):
+def predict_image(image, model, classifier, scalings=[1], use_min_features=True, device='cpu'):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -115,6 +124,11 @@ def predict_image(image, model, classifier, scalings=[1], use_min_features=True)
         classifier to use for prediction
     scalings: list of ints
         downsampling factors
+    use_min_features: bool
+        if True, use the minimum number of features per layer
+    device: str, optional
+        device to use for computation, by default 'cpu'
+
 
     Returns
     -------
@@ -125,13 +139,13 @@ def predict_image(image, model, classifier, scalings=[1], use_min_features=True)
 
     if use_min_features:
         max_features = np.min(model.features_per_layer)
-        all_scales = filter_image_multioutputs(image, model, scalings=scalings)
+        all_scales = filter_image_multioutputs(image, model, scalings=scalings, device=device)
         all_scales = [a[:,0:max_features,:,:] for a in all_scales]
         tot_filters = max_features * len(all_scales)
 
     else:
         max_features = np.max(model.features_per_layer)
-        all_scales = filter_image_multioutputs(image, model, scalings=scalings)
+        all_scales = filter_image_multioutputs(image, model, scalings=scalings, device=device)
         tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
     
     tot_filters = int(tot_filters)
@@ -169,7 +183,7 @@ def load_single_layer_vgg16():
     
     return model
 
-def get_multiscale_features(model, image, annot, scalings, use_min_features=True):
+def get_multiscale_features(model, image, annot, scalings, use_min_features=True, device='cpu'):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -184,6 +198,8 @@ def get_multiscale_features(model, image, annot, scalings, use_min_features=True
         Downsampling factors
     use_min_features : bool, optional
         Use minimal number of features, by default True
+    device : str, optional
+        Device to use for computation, by default 'cpu'
 
     Returns
     -------
@@ -200,7 +216,7 @@ def get_multiscale_features(model, image, annot, scalings, use_min_features=True
     full_annotation = np.ones((max_features, image.shape[0], image.shape[1]),dtype=np.bool_)
     full_annotation = full_annotation * annot > 0
 
-    all_scales = filter_image_multioutputs(image, model, scalings)
+    all_scales = filter_image_multioutputs(image, model, scalings, device=device)
     if use_min_features:
         all_scales = [a[:,0:max_features,:,:] for a in all_scales]
     all_values_scales=[]
@@ -214,7 +230,7 @@ def get_multiscale_features(model, image, annot, scalings, use_min_features=True
     
     return extracted_features
     
-def get_features_current_layers(model, image, annotations, scalings=[1], use_min_features=True):
+def get_features_current_layers(model, image, annotations, scalings=[1], use_min_features=True, device='cpu'):
     """Get a current set of features, targets from the currently selected
     files."""
 
@@ -241,7 +257,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1], use_min
             current_annot = annotations[t]
             
         extracted_features = get_multiscale_features(
-            model, current_image, current_annot, scalings, use_min_features)
+            model, current_image, current_annot, scalings, use_min_features, device=device)
         all_values.append(extracted_features)
 
     all_values = np.concatenate(all_values,axis=0)
@@ -275,7 +291,11 @@ class Hookmodel():
     ----------
     model_name : str
         Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16' are supported.
-
+    model : torch model, optional
+        Model to extract features from, by default None
+    use_cuda : bool, optional
+        Use cuda, by default False
+        
     Attributes
     ----------
     model : torch model
@@ -288,7 +308,7 @@ class Hookmodel():
         List of hooked layers, their names, and their indices in the model (if applicable)
     """
     
-    def __init__(self, model_name='vgg16', model=None):
+    def __init__(self, model_name='vgg16', model=None, use_cuda=False):
 
         if model is not None:
             self.model = model
@@ -303,6 +323,9 @@ class Hookmodel():
             elif model_name == 'dino_vits16':
                 self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
         
+        if use_cuda:
+            self.model = self.model.cuda()
+
         self.outputs = []
         self.features_per_layer = []
 

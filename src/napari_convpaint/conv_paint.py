@@ -87,6 +87,10 @@ class ConvPaintWidget(QWidget):
         self.check_use_project.setChecked(False)
         self.tabs.add_named_tab('Annotation', self.check_use_project)
 
+        self.check_use_cuda = QCheckBox('Use cuda')
+        self.check_use_cuda.setChecked(False)
+        self.tabs.add_named_tab('Annotation', self.check_use_cuda)
+
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
             'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'dino_vits16'])
@@ -205,7 +209,7 @@ class ConvPaintWidget(QWidget):
     def _on_load_nnmodel(self, event=None):
         """Load a neural network model. Create list of selectable layers."""
             
-        self.model = Hookmodel(self.qcombo_model_type.currentText())
+        self.model = Hookmodel(self.qcombo_model_type.currentText(), use_cuda=self.check_use_cuda.isChecked())
         self._create_output_selection()
         # if model has a single layer output, automatically initialize it
         if len(self.model.named_modules) == 1:
@@ -223,13 +227,16 @@ class ConvPaintWidget(QWidget):
 
         if self.model is None:
             raise Exception('No feature generator model loaded')
+        
+        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
         features, targets = get_features_current_layers(
             model=self.model,
             image=self.viewer.layers[self.selected_channel].data,
             annotations=self.viewer.layers['annotations'].data,
             scalings=self.param.scalings,
-            use_min_features=False
+            use_min_features=False,
+            device=device
         )
         self.random_forest = train_classifier(features, targets)
 
@@ -238,6 +245,7 @@ class ConvPaintWidget(QWidget):
 
         if self.model is None:
             raise Exception('No feature generator model loaded')
+        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
         num_files = len(self.projet_widget.params.file_paths)
         if num_files == 0:
@@ -252,7 +260,8 @@ class ConvPaintWidget(QWidget):
                 image=self.viewer.layers[self.selected_channel].data,
                 annotations=self.viewer.layers['annotations'].data,
                 scalings=self.param.scalings,
-                use_min_features=False
+                use_min_features=False,
+                device=device
             )
             if features is None:
                 continue
@@ -271,6 +280,7 @@ class ConvPaintWidget(QWidget):
 
         if self.model is None:
             raise Exception('No feature generator model loaded')
+        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
         
         if self.random_forest is None:
             self.update_classifier()
@@ -280,11 +290,13 @@ class ConvPaintWidget(QWidget):
         if self.viewer.dims.ndim > 2:
             step = self.viewer.dims.current_step[0]
             image = self.viewer.layers[self.selected_channel].data[step]
-            predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
+            predicted_image = predict_image(
+                image, self.model, self.random_forest, self.param.scalings, device=device)
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
             image = self.viewer.layers[self.selected_channel].data
-            predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
+            predicted_image = predict_image(
+                image, self.model, self.random_forest, self.param.scalings, device=device)
             self.viewer.layers['prediction'].data = predicted_image
         
         self.viewer.layers['prediction'].refresh()
@@ -298,12 +310,14 @@ class ConvPaintWidget(QWidget):
         
         if self.model is None:
             raise Exception('No feature generator model loaded')
+        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
         self.check_prediction_layer_exists()
 
         for step in range(self.viewer.dims.nsteps[0]):
             image = self.viewer.layers[self.selected_channel].data[step]
-            predicted_image = predict_image(image, self.model, self.random_forest, self.param.scalings)
+            predicted_image = predict_image(
+                image, self.model, self.random_forest, self.param.scalings, device=device)
             self.viewer.layers['prediction'].data[step] = predicted_image
 
     def check_prediction_layer_exists(self):
