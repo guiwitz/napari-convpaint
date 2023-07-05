@@ -91,6 +91,10 @@ class ConvPaintWidget(QWidget):
         self.check_use_cuda.setChecked(False)
         self.tabs.add_named_tab('Annotation', self.check_use_cuda)
 
+        self.check_use_default_model = QCheckBox('Use default model')
+        self.check_use_default_model.setChecked(True)
+        self.tabs.add_named_tab('Annotation', self.check_use_default_model)
+
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
             'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'dino_vits16'])
@@ -108,7 +112,7 @@ class ConvPaintWidget(QWidget):
 
         self.num_scales_combo = QComboBox()
         self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
-        self.num_scales_combo.setCurrentText('[1]')
+        self.num_scales_combo.setCurrentText('[1, 2]')
         self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
         self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
 
@@ -122,6 +126,7 @@ class ConvPaintWidget(QWidget):
         self.spin_interpolation_order.setValue(1)
         self.tabs.add_named_tab('Model', QLabel('Interpolation order'), [6,0,1,1])
         self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
+        self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
 
 
         if project is True:
@@ -144,6 +149,15 @@ class ConvPaintWidget(QWidget):
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
             self.update_model_on_project_btn.setEnabled(False)
 
+    def _set_custom_model(self, event=None):
+        """Add widget for custom model management"""
+
+        if self.check_use_default_model.isChecked():
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
+            self.set_default_model()
+        else:
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
+
 
     def add_connections(self):
 
@@ -160,6 +174,7 @@ class ConvPaintWidget(QWidget):
         self.save_model_btn.clicked.connect(self.save_model)
         self.load_model_btn.clicked.connect(self.load_classifier)
         self.check_use_project.stateChanged.connect(self._add_project)
+        self.check_use_default_model.stateChanged.connect(self._set_custom_model)
 
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
@@ -233,12 +248,23 @@ class ConvPaintWidget(QWidget):
             self.set_nnmodel_outputs_btn.setEnabled(True)
             self.model_output_selection.setEnabled(True)
 
+    def set_default_model(self):
+        """Set default model."""
+
+        self.qcombo_model_type.setCurrentText('single_layer_vgg16')
+        self.num_scales_combo.setCurrentText('[1,2]')
+        self.spin_interpolation_order.setValue(1)
+        self.check_use_min_features.setChecked(True)
+        self._on_load_nnmodel()
 
     def update_classifier(self):
         """Given a set of new annotations, update the random forest model."""
 
         if self.model is None:
-            raise Exception('No feature generator model loaded')
+            if self.check_use_default_model.isChecked():
+                self.set_default_model()
+            else:
+                raise Exception('You have to define and load a model first')
         
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
@@ -257,7 +283,10 @@ class ConvPaintWidget(QWidget):
         """Train classifier on all annotations in project."""
 
         if self.model is None:
-            raise Exception('No feature generator model loaded')
+            if self.check_use_default_model.isChecked():
+                self.set_default_model()
+            else:
+                raise Exception('You have to define and load a model first')
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
         num_files = len(self.projet_widget.params.file_paths)
@@ -293,7 +322,10 @@ class ConvPaintWidget(QWidget):
         on a RF model trained with annotations"""
 
         if self.model is None:
-            raise Exception('No feature generator model loaded')
+            if self.check_use_default_model.isChecked():
+                self.set_default_model()
+            else:
+                raise Exception('You have to define and load a model first')
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
         
         if self.random_forest is None:
@@ -327,7 +359,11 @@ class ConvPaintWidget(QWidget):
             raise Exception('No model found. Please train a model first.')
         
         if self.model is None:
-            raise Exception('No feature generator model loaded')
+            if self.check_use_default_model.isChecked():
+                self.set_default_model()
+            else:
+                raise Exception('You have to define and load a model first')
+            
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
         self.check_prediction_layer_exists()
