@@ -112,6 +112,10 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
         self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
 
+        self.check_use_min_features = QCheckBox('Use min features')
+        self.check_use_min_features.setChecked(False)
+        self.tabs.add_named_tab('Model', self.check_use_min_features, [5,0,1,1])
+
         if project is True:
             self._add_project()
 
@@ -235,7 +239,7 @@ class ConvPaintWidget(QWidget):
             image=self.viewer.layers[self.selected_channel].data,
             annotations=self.viewer.layers['annotations'].data,
             scalings=self.param.scalings,
-            use_min_features=False,
+            use_min_features=self.check_use_min_features.isChecked(),
             device=device
         )
         self.random_forest = train_classifier(features, targets)
@@ -260,7 +264,7 @@ class ConvPaintWidget(QWidget):
                 image=self.viewer.layers[self.selected_channel].data,
                 annotations=self.viewer.layers['annotations'].data,
                 scalings=self.param.scalings,
-                use_min_features=False,
+                use_min_features=self.check_use_min_features.isChecked(),
                 device=device
             )
             if features is None:
@@ -291,12 +295,14 @@ class ConvPaintWidget(QWidget):
             step = self.viewer.dims.current_step[0]
             image = self.viewer.layers[self.selected_channel].data[step]
             predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings, device=device)
+                image, self.model, self.random_forest, self.param.scalings,
+                use_min_features=self.check_use_min_features.isChecked(), device=device)
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
             image = self.viewer.layers[self.selected_channel].data
             predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings, device=device)
+                image, self.model, self.random_forest, self.param.scalings,
+                use_min_features=self.check_use_min_features.isChecked(), device=device)
             self.viewer.layers['prediction'].data = predicted_image
         
         self.viewer.layers['prediction'].refresh()
@@ -317,7 +323,8 @@ class ConvPaintWidget(QWidget):
         for step in range(self.viewer.dims.nsteps[0]):
             image = self.viewer.layers[self.selected_channel].data[step]
             predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings, device=device)
+                image, self.model, self.random_forest, self.param.scalings,
+                use_min_features=self.check_use_min_features.isChecked(), device=device)
             self.viewer.layers['prediction'].data[step] = predicted_image
 
     def check_prediction_layer_exists(self):
