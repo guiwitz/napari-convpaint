@@ -100,7 +100,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1]):
 
 
 
-def predict_image(image, model, classifier, scalings=[1]):
+def predict_image(image, model, classifier, scalings=[1], use_min_features=True):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -123,14 +123,24 @@ def predict_image(image, model, classifier, scalings=[1]):
 
     """
 
-    all_scales = filter_image_multioutputs(image, model, scalings=scalings)
-    tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
+    if use_min_features:
+        max_features = np.min(model.features_per_layer)
+        all_scales = filter_image_multioutputs(image, model, scalings=scalings)
+        all_scales = [a[:,0:max_features,:,:] for a in all_scales]
+        tot_filters = max_features * len(all_scales)
+
+    else:
+        max_features = np.max(model.features_per_layer)
+        all_scales = filter_image_multioutputs(image, model, scalings=scalings)
+        tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
+    
     tot_filters = int(tot_filters)
     all_pixels = pd.DataFrame(np.reshape(np.concatenate(all_scales, axis=1), (tot_filters, image.shape[0]*image.shape[1])).T)
         
     predictions = classifier.predict(all_pixels)
 
     predicted_image = np.reshape(predictions, image.shape)
+    
     return predicted_image
 
 def load_single_layer_vgg16():
@@ -159,7 +169,7 @@ def load_single_layer_vgg16():
     
     return model
 
-def get_multiscale_features(model, image, annot, scalings):
+def get_multiscale_features(model, image, annot, scalings, use_min_features=True):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -170,6 +180,10 @@ def get_multiscale_features(model, image, annot, scalings):
         Image to extract features from (currently 2D only)
     annot : np.ndarray
         Annotations (1,2) to extract features from (currently 2D only)
+    scalings : list of ints
+        Downsampling factors
+    use_min_features : bool, optional
+        Use minimal number of features, by default True
 
     Returns
     -------
@@ -177,14 +191,18 @@ def get_multiscale_features(model, image, annot, scalings):
         Extracted features. Dimensions npixels x nfeatures * nbscales
     """
 
-    # get number of features
+    if use_min_features:
+        max_features = np.min(model.features_per_layer)
+    else:
+        max_features = np.max(model.features_per_layer)
+    # test with minimal number of features i.e. taking only n first features
     
-    max_features = np.max(model.features_per_layer)
     full_annotation = np.ones((max_features, image.shape[0], image.shape[1]),dtype=np.bool_)
-
     full_annotation = full_annotation * annot > 0
 
     all_scales = filter_image_multioutputs(image, model, scalings)
+    if use_min_features:
+        all_scales = [a[:,0:max_features,:,:] for a in all_scales]
     all_values_scales=[]
     for ind, a in enumerate(all_scales):
         
@@ -196,7 +214,7 @@ def get_multiscale_features(model, image, annot, scalings):
     
     return extracted_features
     
-def get_features_current_layers(model, image, annotations, scalings=[1]):
+def get_features_current_layers(model, image, annotations, scalings=[1], use_min_features=True):
     """Get a current set of features, targets from the currently selected
     files."""
 
@@ -222,7 +240,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1]):
             current_image = image[t]
             current_annot = annotations[t]
             
-        extracted_features = get_multiscale_features(model, current_image, current_annot, scalings)
+        extracted_features = get_multiscale_features(
+            model, current_image, current_annot, scalings, use_min_features)
         all_values.append(extracted_features)
 
     all_values = np.concatenate(all_values,axis=0)

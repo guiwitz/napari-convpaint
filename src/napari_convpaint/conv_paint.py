@@ -157,6 +157,8 @@ class ConvPaintWidget(QWidget):
         self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
         if keep_channel in [x.name for x in self.viewer.layers]:
             self.select_layer_widget.setCurrentText(keep_channel)
+        else:
+            self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)
 
     def select_layer(self):
 
@@ -227,6 +229,7 @@ class ConvPaintWidget(QWidget):
             image=self.viewer.layers[self.selected_channel].data,
             annotations=self.viewer.layers['annotations'].data,
             scalings=self.param.scalings,
+            use_min_features=False
         )
         self.random_forest = train_classifier(features, targets)
 
@@ -249,6 +252,7 @@ class ConvPaintWidget(QWidget):
                 image=self.viewer.layers[self.selected_channel].data,
                 annotations=self.viewer.layers['annotations'].data,
                 scalings=self.param.scalings,
+                use_min_features=False
             )
             if features is None:
                 continue
