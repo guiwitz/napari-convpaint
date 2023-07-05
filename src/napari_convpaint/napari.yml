@@ -4,7 +4,14 @@ contributions:
   commands: 
     - id: napari-convpaint.make_qwidget
       python_name: napari_convpaint.conv_paint:ConvPaintWidget
-      title: ConvPaint widget  
+      title: ConvPaint widget
+    - id: napari-convpaint.labelcell3d
+      title: Label cell 3D
+      python_name: napari_convpaint.convpaint_sample:create_annotation_cell3d
   widgets:
     - command: napari-convpaint.make_qwidget
       display_name: ConvPaint
+  sample_data:
+    - key: labelcell3d
+      display_name: Label cell 3D
+      command: napari-convpaint.labelcell3d
