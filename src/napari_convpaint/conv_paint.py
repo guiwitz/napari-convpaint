@@ -13,7 +13,8 @@ from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
 from .conv_paint_utils import predict_image
 from .conv_parameters import Param
-from .conv_paint_utils import (Hookmodel, get_features_current_layers, train_classifier)
+from .conv_paint_utils import (Hookmodel, get_features_current_layers,
+                               train_classifier, load_trained_classifier)
 
 class ConvPaintWidget(QWidget):
     """
@@ -412,13 +413,7 @@ class ConvPaintWidget(QWidget):
         dialog = QFileDialog()
         save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
-        self.random_forest = load(save_file)
-        
-        self.param = Param()
-        with open(save_file.parent.joinpath('convpaint_params.yml')) as file:
-            documents = yaml.full_load(file)
-        for k in documents.keys():
-            setattr(self.param, k, documents[k])
+        self.random_forest, self.param = load_trained_classifier(save_file)
 
         self.update_gui_from_params()
 
