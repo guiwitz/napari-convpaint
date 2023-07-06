@@ -1,17 +1,24 @@
 from collections import OrderedDict
 from typing import Any
 import warnings
+from pathlib import Path
 
 import torch
 import numpy as np
 import skimage.transform
 import pandas as pd
+from joblib import dump, load
+import yaml
+import zarr
 
 import torchvision.models as models
 from torch import nn
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from torchvision import transforms
+
+from .conv_parameters import Param
+
 
 def filter_image(image, model, scalings):
     """
@@ -320,6 +327,68 @@ def train_classifier(features, targets):
 
     return random_forest
 
+def load_trained_classifier(model_path):
+
+    model_path = Path(model_path)
+    random_forest = load(model_path)
+        
+    param = Param()
+    with open(model_path.parent.joinpath('convpaint_params.yml')) as file:
+        documents = yaml.full_load(file)
+    for k in documents.keys():
+        setattr(param, k, documents[k])
+
+    return random_forest, param
+
+def segment_image_stack(image, model_path, save_path=None):
+    """Segment an image stack using a pretrained model. If save_path is not
+    None, save the zarr file to this path. Otherwise, return numpy array
+    
+    Parameters
+    ----------
+    image : np.ndarray
+        2D or 3D image stack to segment
+    model_path : str
+        Path to pretrained model
+    save_path : str
+        Path to save zarr file to
+
+    Returns
+    -------
+    np.ndarray
+        Segmented image stack
+    """
+
+    random_forest, param = load_trained_classifier(model_path)
+
+    model = Hookmodel(param=param)
+
+    if not ((image.ndim == 2) | (image.ndim == 3)):
+        raise Exception(f'Image must be 2D or 3D, not {image.ndim}')
+    if image.ndim == 2:
+        image = np.expand_dims(image, axis=0)
+    chunks = (1, image.shape[1], image.shape[2])        
+
+    if save_path is not None:
+        im_out = zarr.open(save_path, mode='w', shape=image.shape,
+                chunks=chunks, dtype=np.uint8)
+    else:
+        im_out = np.zeros(image.shape, dtype=np.uint8)
+    
+    for i in range(image.shape[0]):
+        im_out[i] = predict_image(
+            image=image[i],
+            model=model,
+            classifier=random_forest,
+            scalings=param.scalings,
+            order=param.order,
+            use_min_features=param.use_min_features,
+            device='cpu')
+    
+    if save_path is None:
+        return im_out
+
+
 
 # subclass of pytorch model that includes hooks and outputs for certain layers
 class Hookmodel():
@@ -333,6 +402,8 @@ class Hookmodel():
         Model to extract features from, by default None
     use_cuda : bool, optional
         Use cuda, by default False
+    param : Param, optional
+        Parameters for model, by default None
         
     Attributes
     ----------
@@ -346,11 +417,14 @@ class Hookmodel():
         List of hooked layers, their names, and their indices in the model (if applicable)
     """
     
-    def __init__(self, model_name='vgg16', model=None, use_cuda=False):
+    def __init__(self, model_name='vgg16', model=None, use_cuda=False, param=None):
 
         if model is not None:
             self.model = model
         else:
+            if param is not None:
+                model_name = param.model_name
+            
             if model_name == 'vgg16':
                 self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
                 #self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
@@ -371,6 +445,9 @@ class Hookmodel():
 
         if model_name == 'single_layer_vgg16':
             self.register_hooks(list(self.module_dict.keys()))
+
+        if param is not None:
+            self.register_hooks(param.model_layers)
 
     def __call__(self, tensor_image):
         
