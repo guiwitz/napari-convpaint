@@ -340,55 +340,6 @@ def load_trained_classifier(model_path):
 
     return random_forest, param
 
-def segment_image_stack(image, model_path, save_path=None):
-    """Segment an image stack using a pretrained model. If save_path is not
-    None, save the zarr file to this path. Otherwise, return numpy array
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        2D or 3D image stack to segment
-    model_path : str
-        Path to pretrained model
-    save_path : str
-        Path to save zarr file to
-
-    Returns
-    -------
-    np.ndarray
-        Segmented image stack
-    """
-
-    random_forest, param = load_trained_classifier(model_path)
-
-    model = Hookmodel(param=param)
-
-    if not ((image.ndim == 2) | (image.ndim == 3)):
-        raise Exception(f'Image must be 2D or 3D, not {image.ndim}')
-    if image.ndim == 2:
-        image = np.expand_dims(image, axis=0)
-    chunks = (1, image.shape[1], image.shape[2])        
-
-    if save_path is not None:
-        im_out = zarr.open(save_path, mode='w', shape=image.shape,
-                chunks=chunks, dtype=np.uint8)
-    else:
-        im_out = np.zeros(image.shape, dtype=np.uint8)
-    
-    for i in range(image.shape[0]):
-        im_out[i] = predict_image(
-            image=image[i],
-            model=model,
-            classifier=random_forest,
-            scalings=param.scalings,
-            order=param.order,
-            use_min_features=param.use_min_features,
-            device='cpu')
-    
-    if save_path is None:
-        return im_out
-
-
 
 # subclass of pytorch model that includes hooks and outputs for certain layers
 class Hookmodel():
@@ -482,3 +433,54 @@ class Hookmodel():
         self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
         self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
         self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
+
+class Classifier():
+    def __init__(self, model_path):
+
+        self.random_forest, self.param = load_trained_classifier(model_path)
+        self.model = Hookmodel(param=self.param)
+
+    def segment_image_stack(self, image, save_path=None, single_image=False):
+        """Segment an image stack using a pretrained model. If save_path is not
+        None, save the zarr file to this path. Otherwise, return numpy array
+        
+        Parameters
+        ----------
+        image : np.ndarray
+            2D or 3D image stack to segment
+        save_path : str
+            Path to save zarr file to
+
+        Returns
+        -------
+        np.ndarray
+            Segmented image stack
+        """
+
+        if not ((image.ndim == 2) | (image.ndim == 3)):
+            raise Exception(f'Image must be 2D or 3D, not {image.ndim}')
+        if image.ndim == 2:
+            image = np.expand_dims(image, axis=0)
+        chunks = (1, image.shape[1], image.shape[2])        
+
+        if save_path is not None:
+            im_out = zarr.open(save_path, mode='w', shape=image.shape,
+                    chunks=chunks, dtype=np.uint8)
+        else:
+            im_out = np.zeros(image.shape, dtype=np.uint8)
+        
+        for i in range(image.shape[0]):
+            im_out[i] = predict_image(
+                image=image[i],
+                model=self.model,
+                classifier=self.random_forest,
+                scalings=self.param.scalings,
+                order=self.param.order,
+                use_min_features=self.param.use_min_features,
+                device='cpu')
+        
+        if save_path is None:
+            if single_image:
+                return im_out[0]
+            else:
+                return im_out
