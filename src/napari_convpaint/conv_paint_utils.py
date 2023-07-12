@@ -107,14 +107,18 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
             pass
         
         for im in hookmodel.outputs:
-            if is_model_cuda:
-                im = im.to('cpu')
-            out_np = im.detach().numpy()
-            if image.shape[1:3] != out_np.shape[2:4]:
-                out_np = skimage.transform.resize(
+            if image.shape[1:3] != im.shape[2:4]:
+                from torch.nn.functional import interpolate
+                im = interpolate(im, size=image.shape[1:3], mode='bilinear', align_corners=False)
+                '''out_np = skimage.transform.resize(
                     image=out_np,
                     output_shape=(1, out_np.shape[1], image.shape[1],image.shape[2]),
-                    preserve_range=True, order=order)
+                    preserve_range=True, order=order)'''
+            
+            if is_model_cuda:
+                im = im.to('cpu')
+
+            out_np = im.detach().numpy()
             all_scales.append(out_np)
     
     return all_scales
