@@ -1,4 +1,4 @@
-from napari_convpaint import ConvPaintWidget
+from napari_convpaint.conv_paint import ConvPaintWidget
 import numpy as np
 
 # make_napari_viewer is a pytest fixture that returns a napari viewer object
