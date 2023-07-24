@@ -407,11 +407,12 @@ class ConvPaintWidget(QWidget):
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
     
-    def load_classifier(self):
+    def load_classifier(self, event=None, save_file=None):
         """Select classifier model file to load."""
 
-        dialog = QFileDialog()
-        save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
+        if save_file is None:
+            dialog = QFileDialog()
+            save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
         self.random_forest, self.param = load_trained_classifier(save_file)
 
