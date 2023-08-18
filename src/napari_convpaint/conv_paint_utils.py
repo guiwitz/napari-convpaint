@@ -439,10 +439,48 @@ class Hookmodel():
         self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
 
 class Classifier():
-    def __init__(self, model_path):
+    def __init__(self, model_path=None):
 
+        self.random_forest = None
+        self.param = None
+        self.model = None
+
+        if model_path is not None:
+            self.load_model(model_path)
+
+        else:
+            self.default_model()
+
+    def load_model(self, model_path):
+        
         self.random_forest, self.param = load_trained_classifier(model_path)
         self.model = Hookmodel(param=self.param)
+
+    def default_model(self):
+            
+        self.model = Hookmodel(model_name='single_layer_vgg16')
+        self.random_forest = None
+        self.param = Param(
+            model_name='single_layer_vgg16',
+            model_layers=list(self.model.module_dict.keys()),
+            scalings=[1,2],
+            order=1,
+            use_min_features=False,
+        )
+
+    def save_classifier(self, save_path):
+        """Save the classifier to a joblib file and the parameters to a yaml file.
+        
+        Parameters
+        ----------
+        save_path : str
+            Path to save files to
+        """
+
+        dump(self.random_forest, save_path)
+        self.param.random_forest = save_path
+        self.param.save_parameters(Path(save_path).parent.joinpath('convpaint_params.yml'))
+
 
     def segment_image_stack(self, image, save_path=None, single_image=False):
         """Segment an image stack using a pretrained model. If save_path is not
