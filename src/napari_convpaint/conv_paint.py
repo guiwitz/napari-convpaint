@@ -64,7 +64,7 @@ class ConvPaintWidget(QWidget):
         self.add_layers_btn = QPushButton('Add annotation/predict layers')
         self.tabs.add_named_tab('Annotation', self.add_layers_btn)
 
-        self.update_model_btn = QPushButton('Train model on singe image')
+        self.update_model_btn = QPushButton('Train model on single image')
         self.tabs.add_named_tab('Annotation', self.update_model_btn)
 
         self.update_model_on_project_btn = QPushButton('Train model on full project')
