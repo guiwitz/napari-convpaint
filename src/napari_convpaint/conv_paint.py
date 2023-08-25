@@ -423,13 +423,16 @@ class ConvPaintWidget(QWidget):
         self.random_forest, self.param = load_trained_classifier(save_file)
 
         self.update_gui_from_params()
+        self.model = Hookmodel(param=self.param)
+
 
     def update_gui_from_params(self):
-        """Update GUI from parameters."""
+        """Update GUI from parameters and then update NN model with that info."""
 
         self.qcombo_model_type.setCurrentText(self.param.model_name)
+        # load model to get layer list
         self._on_load_nnmodel()
-        self.update_scalings()
+        #self.update_scalings()
         self.num_scales_combo.setCurrentText(str(self.param.scalings))
         for sel in self.param.model_layers:
             self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
