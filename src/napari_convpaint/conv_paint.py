@@ -113,7 +113,7 @@ class ConvPaintWidget(QWidget):
 
         self.num_scales_combo = QComboBox()
         self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
-        self.num_scales_combo.setCurrentText('[1, 2]')
+        self.num_scales_combo.setCurrentText('[1,2]')
         self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
         self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
 
@@ -142,7 +142,13 @@ class ConvPaintWidget(QWidget):
             if self.project_widget is None:
                 from napari_annotation_project.project_widget import ProjectWidget
                 self.project_widget = ProjectWidget(napari_viewer=self.viewer)
-                self.tabs.add_named_tab('Files', self.project_widget)
+
+                #self.tabs.add_named_tab('Files', self.project_widget)
+                self.tabs.add_named_tab('Files', self.project_widget.file_list)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_remove_file)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_add_file)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_save_annotation)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_load_project)
             
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), True)
             self.update_model_on_project_btn.setEnabled(True)
@@ -290,13 +296,13 @@ class ConvPaintWidget(QWidget):
                 raise Exception('You have to define and load a model first')
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
-        num_files = len(self.projet_widget.params.file_paths)
+        num_files = len(self.project_widget.params.file_paths)
         if num_files == 0:
             raise Exception('No files found')
         
         all_features, all_targets = [], []
         for ind in range(num_files):
-            self.projet_widget.file_list.setCurrentRow(ind)
+            self.project_widget.file_list.setCurrentRow(ind)
 
             features, targets = get_features_current_layers(
                 model=self.model,
