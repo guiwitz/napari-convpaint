@@ -5,4 +5,4 @@ except ImportError:
     __version__ = "unknown"
 
 
-from .conv_paint import ConvPaintWidget
+#from .conv_paint import ConvPaintWidget

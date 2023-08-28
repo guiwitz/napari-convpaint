@@ -64,7 +64,7 @@ class ConvPaintWidget(QWidget):
         self.add_layers_btn = QPushButton('Add annotation/predict layers')
         self.tabs.add_named_tab('Annotation', self.add_layers_btn)
 
-        self.update_model_btn = QPushButton('Train model on singe image')
+        self.update_model_btn = QPushButton('Train model on single image')
         self.tabs.add_named_tab('Annotation', self.update_model_btn)
 
         self.update_model_on_project_btn = QPushButton('Train model on full project')
@@ -113,7 +113,7 @@ class ConvPaintWidget(QWidget):
 
         self.num_scales_combo = QComboBox()
         self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
-        self.num_scales_combo.setCurrentText('[1, 2]')
+        self.num_scales_combo.setCurrentText('[1,2]')
         self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
         self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
 
@@ -142,7 +142,13 @@ class ConvPaintWidget(QWidget):
             if self.project_widget is None:
                 from napari_annotation_project.project_widget import ProjectWidget
                 self.project_widget = ProjectWidget(napari_viewer=self.viewer)
-                self.tabs.add_named_tab('Files', self.project_widget)
+
+                #self.tabs.add_named_tab('Files', self.project_widget)
+                self.tabs.add_named_tab('Files', self.project_widget.file_list)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_remove_file)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_add_file)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_save_annotation)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_load_project)
             
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), True)
             self.update_model_on_project_btn.setEnabled(True)
@@ -290,13 +296,13 @@ class ConvPaintWidget(QWidget):
                 raise Exception('You have to define and load a model first')
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
-        num_files = len(self.projet_widget.params.file_paths)
+        num_files = len(self.project_widget.params.file_paths)
         if num_files == 0:
             raise Exception('No files found')
         
         all_features, all_targets = [], []
         for ind in range(num_files):
-            self.projet_widget.file_list.setCurrentRow(ind)
+            self.project_widget.file_list.setCurrentRow(ind)
 
             features, targets = get_features_current_layers(
                 model=self.model,
@@ -407,22 +413,26 @@ class ConvPaintWidget(QWidget):
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
     
-    def load_classifier(self):
+    def load_classifier(self, event=None, save_file=None):
         """Select classifier model file to load."""
 
-        dialog = QFileDialog()
-        save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
+        if save_file is None:
+            dialog = QFileDialog()
+            save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
         self.random_forest, self.param = load_trained_classifier(save_file)
 
         self.update_gui_from_params()
+        self.model = Hookmodel(param=self.param)
+
 
     def update_gui_from_params(self):
-        """Update GUI from parameters."""
+        """Update GUI from parameters and then update NN model with that info."""
 
         self.qcombo_model_type.setCurrentText(self.param.model_name)
+        # load model to get layer list
         self._on_load_nnmodel()
-        self.update_scalings()
+        #self.update_scalings()
         self.num_scales_combo.setCurrentText(str(self.param.scalings))
         for sel in self.param.model_layers:
             self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)

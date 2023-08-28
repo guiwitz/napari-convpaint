@@ -132,7 +132,8 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
     return all_scales
 
 
-def predict_image(image, model, classifier, scalings=[1], order=0, use_min_features=True, device='cpu'):
+def predict_image(image, model, classifier, scalings=[1], order=0,
+                  use_min_features=True, device='cpu'):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -212,8 +213,8 @@ def load_single_layer_vgg16():
 
     return model
 
-
-def get_multiscale_features(model, image, annot, scalings, order=0, use_min_features=True, device='cpu'):
+def get_multiscale_features(model, image, annotations, scalings, order=0,
+                            use_min_features=True, device='cpu'):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -222,7 +223,7 @@ def get_multiscale_features(model, image, annot, scalings, order=0, use_min_feat
         Model to extract features from
     image : np.ndarray
         Image to extract features from (currently 2D only)
-    annot : np.ndarray
+    annotations : np.ndarray
         Annotations (1,2) to extract features from (currently 2D only)
     scalings : list of ints
         Downsampling factors
@@ -246,7 +247,7 @@ def get_multiscale_features(model, image, annot, scalings, order=0, use_min_feat
     # test with minimal number of features i.e. taking only n first features
 
     full_annotation = np.ones((max_features, image.shape[0], image.shape[1]), dtype=np.bool_)
-    full_annotation = full_annotation * annot > 0
+    full_annotation = full_annotation * annotations > 0
 
     all_scales = filter_image_multioutputs(
         image, model, scalings, order=order, device=device)
@@ -264,7 +265,8 @@ def get_multiscale_features(model, image, annot, scalings, order=0, use_min_feat
     return extracted_features
 
 
-def get_features_current_layers(model, image, annotations, scalings=[1], order=0, use_min_features=True, device='cpu'):
+def get_features_current_layers(model, image, annotations, scalings=[1],
+                                order=0, use_min_features=True, device='cpu'):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -274,7 +276,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1], order=0
         Model to extract features from
     image : np.ndarray
         2D or 3D Image to extract features from
-    annot : np.ndarray
+    annotations : np.ndarray
         2D, 3D Annotations (1,2) to extract features from
     scalings : list of ints
         Downsampling factors
@@ -925,31 +927,97 @@ class Hookmodel():
 
 
 class Classifier():
-    def __init__(self, model_path):
+    """"
+    Class to segment images. Contains both the NN model needed to extract features
+    and the classifier to predict the class of each pixel. By default loads the
+    single_layer_vgg16 model and the classifier is None.
+     
+    Parameters
+    ----------
+    model_path : str, optional
+        Path to RF model saved as joblib. Expects a parameters file in the same
+        location
+    
+    Attributes
+    ----------
+    random_forest : sklearn RF classifier
+        Classifier to predict the class of each pixel
+    param : Param
+        Parameters for model
+    model : Hookmodel
+        Model to extract features from the image
 
+    """
+
+    def __init__(self, model_path=None):
+
+        self.random_forest = None
+        self.param = None
+        self.model = None
+
+        if model_path is not None:
+            self.load_model(model_path)
+
+        else:
+            self.default_model()
+
+    def load_model(self, model_path):
+        """Load a pretrained model by loading the joblib model
+        and recreating the NN from the param file."""
+        
         self.random_forest, self.param = load_trained_classifier(model_path)
         self.model = Hookmodel(param=self.param)
 
-    def segment_image_stack(self, image, save_path=None, single_image=False):
+    def default_model(self):
+        """Set default model to single_layer_vgg16."""
+            
+        self.model = Hookmodel(model_name='single_layer_vgg16')
+        self.random_forest = None
+        self.param = Param(
+            model_name='single_layer_vgg16',
+            model_layers=list(self.model.module_dict.keys()),
+            scalings=[1,2],
+            order=1,
+            use_min_features=False,
+        )
+
+    def save_classifier(self, save_path):
+        """Save the classifier to a joblib file and the parameters to a yaml file.
+        
+        Parameters
+        ----------
+        save_path : str
+            Path to save files to
+        """
+
+        dump(self.random_forest, save_path)
+        self.param.random_forest = save_path
+        self.param.save_parameters(Path(save_path).parent.joinpath('convpaint_params.yml'))
+
+
+    def segment_image_stack(self, image, save_path=None):
         """Segment an image stack using a pretrained model. If save_path is not
         None, save the zarr file to this path. Otherwise, return numpy array
         
         Parameters
         ----------
         image : np.ndarray
-            2D or 3D image stack to segment
+            2D or 3D image stack to segment, with dimensions n,y,x or y,x
         save_path : str
             Path to save zarr file to
 
         Returns
         -------
         np.ndarray
-            Segmented image stack
+            Segmented image stack. Either 2D (single image) or 3D with n,y,x
+            where n is the number of images in the stack.
         """
 
         if not ((image.ndim == 2) | (image.ndim == 3)):
             raise Exception(f'Image must be 2D or 3D, not {image.ndim}')
+        single_image=False
         if image.ndim == 2:
+            single_image = True
             image = np.expand_dims(image, axis=0)
         chunks = (1, image.shape[1], image.shape[2])
 
