@@ -174,11 +174,12 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         # max_features = np.max(model.features_per_layer)
         all_scales = filter_image_multioutputs(
             image, model, scalings=scalings, order=order, device=device)
+        # MV:  why this?         (64, 256, 512)                2            / 3
         tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
 
     tot_filters = int(tot_filters)
     all_pixels = pd.DataFrame(
-        np.reshape(np.concatenate(all_scales, axis=1), (tot_filters, image.shape[0] * image.shape[1])).T)
+        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, image.shape[0] * image.shape[1])).T)
 
     predictions = classifier.predict(all_pixels)
 
