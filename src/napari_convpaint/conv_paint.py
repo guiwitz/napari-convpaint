@@ -1,7 +1,7 @@
 from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox)
-
+from qtpy.QtCore import Qt
 from joblib import dump, load
 from pathlib import Path
 import warnings
@@ -50,6 +50,7 @@ class ConvPaintWidget(QWidget):
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
         self.main_layout.addWidget(self.tabs)
 
+        self.tabs.widget(0).layout().setAlignment(Qt.AlignTop)
         self.select_layer_widget = QComboBox()
         self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
         self.tabs.add_named_tab('Annotation', self.select_layer_widget, grid_pos=[0,0,1,2])
