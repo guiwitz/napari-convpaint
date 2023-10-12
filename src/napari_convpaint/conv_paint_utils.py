@@ -65,7 +65,7 @@ def filter_image(image, model, scalings):
     return all_scales
 
 
-def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='cpu'):
+def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='cpu', normalize=False):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object.
     
@@ -82,6 +82,8 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
         by default 0
     device : str, optional
         Device to use for computation, by default 'cpu'
+    normalize : bool, optional
+        If True, normalize each channel with its mean and std, by default False
 
     Returns
     -------
@@ -96,7 +98,17 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
 
     input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
-    image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
+
+    if image.ndim == 2:
+        image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
+    elif image.ndim == 3:
+        if image.shape[0] != input_channels:
+            warnings.warn(f'Image has {image.shape[0]} channels, model expects {input_channels}. Using mean projection.')
+            image = np.mean(image, axis=0)
+            image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
+
+    if normalize:
+        image = (image - image.mean(axis=(1, 2), keepdims=True)) / image.std(axis=(1, 2), keepdims=True)
 
     int_mode = 'bilinear' if order > 0 else 'nearest'
     align_corners = False if order > 0 else None
@@ -179,16 +191,16 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
 
     tot_filters = int(tot_filters)
     all_pixels = pd.DataFrame(
-        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, image.shape[0] * image.shape[1])).T)
+        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, image.shape[-2] * image.shape[-1])).T)
 
     predictions = classifier.predict(all_pixels)
 
-    predicted_image = np.reshape(predictions, image.shape)
+    predicted_image = np.reshape(predictions, image.shape[-2::])
 
     return predicted_image
 
 
-def load_single_layer_vgg16():
+def load_single_layer_vgg16(keep_rgb=False):
     """Load VGG16 model from torchvision, keep first layer only
     
     Parameters
@@ -198,17 +210,27 @@ def load_single_layer_vgg16():
     -------
     model: torch model
         model for pixel feature extraction
+    keep_rgb: bool
+        if True, keep model with three input channels, otherwise convert to single channel
     
     """
 
     vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-    model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(1, 64, 3, 1, 1))]))
-
     pretrained_dict = vgg16.state_dict()
+    
+    if keep_rgb:
+        model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(3, 64, 3, 1, 1))]))
+    else:
+        model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(1, 64, 3, 1, 1))]))
+
     reduced_dict = model.state_dict()
 
-    reduced_dict['conv1.weight'][:, 0, :, :] = pretrained_dict['features.0.weight'][:, :, :, :].sum(axis=1)
-    reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
+    if keep_rgb:
+        reduced_dict['conv1.weight'] = pretrained_dict['features.0.weight']
+        reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
+    else:
+        reduced_dict['conv1.weight'][:, 0, :, :] = pretrained_dict['features.0.weight'][:, :, :, :].sum(axis=1)
+        reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
 
     model.load_state_dict(reduced_dict)
 
@@ -223,7 +245,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
     model : Hookmodel
         Model to extract features from
     image : np.ndarray
-        Image to extract features from (currently 2D only)
+        Image to extract features from (currently 2D only or 2D multichannel (C,H,W))
     annotations : np.ndarray
         Annotations (1,2) to extract features from (currently 2D only)
     scalings : list of ints
@@ -247,7 +269,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         max_features = np.max(model.features_per_layer)
     # test with minimal number of features i.e. taking only n first features
 
-    full_annotation = np.ones((max_features, image.shape[0], image.shape[1]), dtype=np.bool_)
+    full_annotation = np.ones((max_features, image.shape[-2], image.shape[-1]), dtype=np.bool_)
     full_annotation = full_annotation * annotations > 0
 
     all_scales = filter_image_multioutputs(
@@ -276,7 +298,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
     model : Hookmodel
         Model to extract features from
     image : np.ndarray
-        2D or 3D Image to extract features from
+        2D or 3D Image to extract features from. If 3D but annotations are 2D,
+        image is treated as multichannel and not image series
     annotations : np.ndarray
         2D, 3D Annotations (1,2) to extract features from
     scalings : list of ints
@@ -311,7 +334,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
     # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
 
-        if image.ndim == 2:
+        if annotations.ndim == 2:
             current_image = image
             current_annot = annotations
         else:
@@ -838,7 +861,8 @@ class Hookmodel():
     Parameters
     ----------
     model_name : str
-        Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16' are supported.
+        Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16',
+         'single_layer_vgg16_rgb' are supported.
     model : torch model, optional
         Model to extract features from, by default None
     use_cuda : bool, optional
@@ -873,7 +897,9 @@ class Hookmodel():
             elif model_name == 'efficient_netb0':
                 self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
             elif model_name == 'single_layer_vgg16':
-                self.model = load_single_layer_vgg16()
+                self.model = load_single_layer_vgg16(keep_rgb=False)
+            elif model_name == 'single_layer_vgg16_rgb':
+                self.model = load_single_layer_vgg16(keep_rgb=True)
             elif model_name == 'dino_vits16':
                 self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
 
