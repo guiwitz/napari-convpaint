@@ -17,6 +17,7 @@ class Param:
     scalings: list[int] = None
     order: int = None
     use_min_features: bool = None
+    image_downsample: int = None
 
 
 

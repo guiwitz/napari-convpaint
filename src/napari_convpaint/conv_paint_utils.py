@@ -65,7 +65,8 @@ def filter_image(image, model, scalings):
     return all_scales
 
 
-def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='cpu', normalize=False):
+def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='cpu',
+                              normalize=False, image_downsample=1):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object.
     
@@ -84,6 +85,8 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
         Device to use for computation, by default 'cpu'
     normalize : bool, optional
         If True, normalize each channel with its mean and std, by default False
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
@@ -100,8 +103,10 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
     image = np.asarray(image, dtype=np.float32)
 
     if image.ndim == 2:
+        image = image[::image_downsample, ::image_downsample]
         image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
     elif image.ndim == 3:
+        image = image[:, ::image_downsample, ::image_downsample]
         if image.shape[0] != input_channels:
             warnings.warn(f'Image has {image.shape[0]} channels, model expects {input_channels}. Using mean projection.')
             image = np.mean(image, axis=0)
@@ -145,7 +150,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
 
 
 def predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True, device='cpu'):
+                  use_min_features=True, device='cpu', image_downsample=1):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -166,6 +171,8 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         if True, use the minimum number of features per layer
     device: str, optional
         device to use for computation, by default 'cpu'
+    image_downsample: int, optional
+        downsample image by this factor before extracting features, by default 1
 
 
     Returns
@@ -178,24 +185,33 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
     if use_min_features:
         max_features = np.min(model.features_per_layer)
         all_scales = filter_image_multioutputs(
-            image, model, scalings=scalings, order=order, device=device)
+            image, model, scalings=scalings, order=order,
+            device=device, image_downsample=image_downsample)
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         tot_filters = max_features * len(all_scales)
 
     else:
         # max_features = np.max(model.features_per_layer)
         all_scales = filter_image_multioutputs(
-            image, model, scalings=scalings, order=order, device=device)
+            image, model, scalings=scalings, order=order,
+            device=device, image_downsample=image_downsample)
         # MV:  why this?         (64, 256, 512)                2            / 3
         tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
 
     tot_filters = int(tot_filters)
+    rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
+    cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
     all_pixels = pd.DataFrame(
-        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, image.shape[-2] * image.shape[-1])).T)
+        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, rows * cols)).T)
 
     predictions = classifier.predict(all_pixels)
 
-    predicted_image = np.reshape(predictions, image.shape[-2::])
+    predicted_image = np.reshape(predictions, [rows, cols])
+    if image_downsample > 1:
+        predicted_image = skimage.transform.resize(
+            image=predicted_image,
+            output_shape=(image.shape[-2], image.shape[-1]),
+            preserve_range=True, order=1).astype(np.uint8)
 
     return predicted_image
 
@@ -237,7 +253,7 @@ def load_single_layer_vgg16(keep_rgb=False):
     return model
 
 def get_multiscale_features(model, image, annotations, scalings, order=0,
-                            use_min_features=True, device='cpu'):
+                            use_min_features=True, device='cpu', image_downsample=1):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -256,6 +272,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         Use minimal number of features, by default True
     device : str, optional
         Device to use for computation, by default 'cpu'
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
@@ -268,12 +286,14 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
     else:
         max_features = np.max(model.features_per_layer)
     # test with minimal number of features i.e. taking only n first features
-
-    full_annotation = np.ones((max_features, image.shape[-2], image.shape[-1]), dtype=np.bool_)
-    full_annotation = full_annotation * annotations > 0
+    rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
+    cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
+    full_annotation = np.ones((max_features, rows, cols), dtype=np.bool_)
+    full_annotation = full_annotation * annotations[::image_downsample, ::image_downsample] > 0
 
     all_scales = filter_image_multioutputs(
-        image, model, scalings, order=order, device=device)
+        image, model, scalings, order=order, device=device,
+        normalize=False, image_downsample=image_downsample)
     if use_min_features:
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
     all_values_scales = []
@@ -289,7 +309,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
 
 def get_features_current_layers(model, image, annotations, scalings=[1],
-                                order=0, use_min_features=True, device='cpu'):
+                                order=0, use_min_features=True, device='cpu', image_downsample=1):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -310,6 +330,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         Use minimal number of features, by default True
     device : str, optional
         Device to use for computation, by default 'cpu'
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
@@ -331,6 +353,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         raise Exception('Annotations must be 2D or 3D')
 
     all_values = []
+    all_targets = []
     # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
 
@@ -343,13 +366,17 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
 
         extracted_features = get_multiscale_features(
             model, current_image, current_annot, scalings,
-            order=order, use_min_features=use_min_features, device=device)
+            order=order, use_min_features=use_min_features,
+            device=device, image_downsample=image_downsample)
         all_values.append(extracted_features)
+        
+        all_targets.append(current_annot[::image_downsample, ::image_downsample]
+                           [current_annot[::image_downsample, ::image_downsample] > 0])
+        
 
     all_values = np.concatenate(all_values, axis=0)
     features = pd.DataFrame(all_values)
-    target_im = current_annot[current_annot > 0]
-    targets = pd.Series(target_im)
+    targets = pd.Series(np.concatenate(all_targets, axis=0))
 
     return features, targets
 

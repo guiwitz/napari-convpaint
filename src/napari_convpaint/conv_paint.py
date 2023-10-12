@@ -90,10 +90,17 @@ class ConvPaintWidget(QWidget):
         self.check_use_default_model.setChecked(True)
         self.tabs.add_named_tab('Annotation', self.check_use_default_model, grid_pos=[6,0,1,1])
 
-        self.check_dims_is_channels = QCheckBox('Ignore dimensions')
+        self.check_dims_is_channels = QCheckBox('Multichannel image')
         self.check_dims_is_channels.setChecked(False)
         self.check_dims_is_channels.setToolTip('If checked, the additional dimensions is not treated as time-lapse but as channels.')
         self.tabs.add_named_tab('Annotation', self.check_dims_is_channels, grid_pos=[6,1,1,1])
+
+        self.spin_downsample = QSpinBox()
+        self.spin_downsample.setMinimum(1)
+        self.spin_downsample.setMaximum(10)
+        self.spin_downsample.setValue(1)
+        self.tabs.add_named_tab('Annotation', QLabel('Downsample'), grid_pos=[7,0,1,1])
+        self.tabs.add_named_tab('Annotation', self.spin_downsample, grid_pos=[7,1,1,1])
 
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
@@ -293,7 +300,8 @@ class ConvPaintWidget(QWidget):
             scalings=self.param.scalings,
             order=self.spin_interpolation_order.value(),
             use_min_features=self.check_use_min_features.isChecked(),
-            device=device
+            device=device,
+            image_downsample=self.spin_downsample.value()
         )
         self.random_forest = train_classifier(features, targets)
 
@@ -322,7 +330,8 @@ class ConvPaintWidget(QWidget):
                 scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device
+                device=device,
+                image_downsample=self.spin_downsample.value()
             )
             if features is None:
                 continue
@@ -357,14 +366,18 @@ class ConvPaintWidget(QWidget):
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(), device=device)
+                use_min_features=self.check_use_min_features.isChecked(),
+                device=device, image_downsample=self.spin_downsample.value()
+            )
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
             image = self.viewer.layers[self.selected_channel].data
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(), device=device)
+                use_min_features=self.check_use_min_features.isChecked(),
+                device=device, image_downsample=self.spin_downsample.value()
+            )
             self.viewer.layers['prediction'].data = predicted_image
         
         self.viewer.layers['prediction'].refresh()
@@ -391,7 +404,8 @@ class ConvPaintWidget(QWidget):
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(), device=device)
+                use_min_features=self.check_use_min_features.isChecked(),
+                device=device, image_downsample=self.spin_downsample.value())
             self.viewer.layers['prediction'].data[step] = predicted_image
 
     def check_prediction_layer_exists(self):
@@ -429,6 +443,7 @@ class ConvPaintWidget(QWidget):
         self.param.model_layers = self.get_selected_layers_names()
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
+        self.param.image_downsample = self.spin_downsample.value()
     
     def load_classifier(self, event=None, save_file=None):
         """Select classifier model file to load."""
@@ -456,3 +471,4 @@ class ConvPaintWidget(QWidget):
         self._on_click_define_model_outputs()
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
+        self.spin_downsample.setValue(self.param.image_downsample)
