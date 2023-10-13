@@ -7,9 +7,9 @@
 [![codecov](https://codecov.io/gh/guiwitz/napari-convpaint/branch/main/graph/badge.svg)](https://codecov.io/gh/guiwitz/napari-convpaint)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-convpaint)](https://napari-hub.org/plugins/napari-convpaint)
 
-This napari plugin can be used the segment images into multiple classes based on a pixel classifier trained with sparse manual annotations. The features used for classification are extracted using the filters from the first layer of a VGG16 Neural Network trained on natural images. To include features at multiple scales, the image as well as multiple downscaled versions of it are used to generate features (for example using the raw image as well as one downscaled 2x, one obtains 2*64=128 features per pixel). The features are then classified using scikit-learn's Random Forest classifier. The trained classifier is saved and can be reused either directly in the plugin on other images or in a separate pipeline.
+This napari plugin can be used to segment images into multiple classes based on a pixel classifier trained with sparse manual annotations. The features used for classification are extracted using the filters from the first layer of a VGG16 Neural Network trained on natural images. To include features at multiple scales, the image as well as multiple downscaled versions of it are used to generate features (for example using the raw image as well as one downscaled 2x, one obtains 2*64=128 features per pixel). The features are then classified using scikit-learn's Random Forest classifier. The trained classifier is saved and can be reused either directly in the plugin on other images or in a separate pipeline.
 
-**The idea behind the plugin comes directly from the work of Lucien Hinderling (University of Bern) and can be found here: https://github.com/hinderling/napari_pixel_classifier).**
+**The idea behind the plugin comes directly from the work of Lucien Hinderling (University of Bern) and can be found here: https://github.com/hinderling/napari_pixel_classifier.**
 
 ## Installation
 
