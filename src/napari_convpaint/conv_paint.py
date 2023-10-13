@@ -206,7 +206,8 @@ class ConvPaintWidget(QWidget):
         if keep_channel in [x.name for x in self.viewer.layers]:
             self.select_layer_widget.setCurrentText(keep_channel)
         else:
-            self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)
+            if self.viewer.layers:
+                self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)
 
     def select_layer(self):
 
