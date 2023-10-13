@@ -1,0 +1,47 @@
+name: deploy-book
+
+# Only run this when the main branch changes
+on:
+  push:
+    branches:
+    - main
+    
+# Sets permissions of the GITHUB_TOKEN to allow deployment to Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# This job installs dependencies, build the book, and pushes it to Pages
+jobs:
+  deploy-book:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url}}
+    runs-on: ubuntu-latest
+    steps:
+      
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install jupyter-book
+
+      - name: Build the book
+        run: |
+          jupyter-book build .
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: '_build/html'
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1
