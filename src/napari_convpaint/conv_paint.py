@@ -135,6 +135,10 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
 
+        self.check_normalize = QCheckBox('Normalize')
+        self.check_normalize.setChecked(True)
+        self.tabs.add_named_tab('Model', self.check_normalize, [7,0,1,2])
+
 
         if project is True:
             self._add_project()
@@ -209,8 +213,11 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = self.select_layer_widget.currentText()
 
     def add_annotation_layer(self):
+        """Add annotation and prediction layers to viewer."""
 
-        if self.check_dims_is_channels.isChecked():
+        if self.viewer.layers[self.selected_channel].rgb:
+            layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
+        elif self.check_dims_is_channels.isChecked():
             layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
         else:
             layer_shape = self.viewer.layers[self.selected_channel].data.shape
@@ -282,25 +289,39 @@ class ConvPaintWidget(QWidget):
 
         if self.model is None:
             if self.check_use_default_model.isChecked():
-                if self.viewer.layers[self.selected_channel].data.ndim == 2:
-                    self.set_default_model()
+                
+                # use 2d input for 2d images or if 3d input does not represent channels
+                # use 3d input for rgb or if 3d input is channels and has dims 3
+                if self.viewer.layers[self.selected_channel].ndim == 2:
+                    if self.viewer.layers[self.selected_channel].rgb:
+                        self.set_default_model(keep_rgb=True)
+                    else:
+                        self.set_default_model()
+                
                 else:
-                    if self.viewer.layers[self.selected_channel].data.shape[0] != 3:
-                        raise Exception(f'your input has dimensions {self.viewer.layers[self.selected_channel].data.shape}, but the default model only works with 3 channel images')
-                    self.set_default_model(keep_rgb=True)
+                    if self.check_dims_is_channels.isChecked():
+                        if self.viewer.layers[self.selected_channel].data.shape[0] != 3:
+                            raise Exception(f'your input has dimensions {self.viewer.layers[self.selected_channel].data.shape}, but the default model only works with 3 channel images')
+                        self.set_default_model(keep_rgb=True)
+                    else:
+                        self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
         
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
+        data_to_pass = self.viewer.layers[self.selected_channel].data
+        if self.viewer.layers[self.selected_channel].rgb:
+            data_to_pass = np.moveaxis(data_to_pass, 2, 0)
         features, targets = get_features_current_layers(
             model=self.model,
-            image=self.viewer.layers[self.selected_channel].data,
+            image=data_to_pass,
             annotations=self.viewer.layers['annotations'].data,
             scalings=self.param.scalings,
             order=self.spin_interpolation_order.value(),
             use_min_features=self.check_use_min_features.isChecked(),
             device=device,
+            normalize=self.check_normalize.isChecked(),
             image_downsample=self.spin_downsample.value()
         )
         self.random_forest = train_classifier(features, targets)
@@ -323,14 +344,19 @@ class ConvPaintWidget(QWidget):
         for ind in range(num_files):
             self.project_widget.file_list.setCurrentRow(ind)
 
+            data_to_pass = self.viewer.layers[self.selected_channel].data
+            if self.viewer.layers[self.selected_channel].rgb:
+                data_to_pass = np.moveaxis(data_to_pass, 2, 0)
+
             features, targets = get_features_current_layers(
                 model=self.model,
-                image=self.viewer.layers[self.selected_channel].data,
+                image=data_to_pass,
                 annotations=self.viewer.layers['annotations'].data,
                 scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device,
+                normalize=self.check_normalize.isChecked(),
                 image_downsample=self.spin_downsample.value()
             )
             if features is None:
@@ -367,16 +393,21 @@ class ConvPaintWidget(QWidget):
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device, image_downsample=self.spin_downsample.value()
+                device=device, normalize=self.check_normalize.isChecked(),
+                image_downsample=self.spin_downsample.value()
             )
             self.viewer.layers['prediction'].data[step] = predicted_image
         else:
-            image = self.viewer.layers[self.selected_channel].data
+
+            data_to_pass = self.viewer.layers[self.selected_channel].data
+            if self.viewer.layers[self.selected_channel].rgb:
+                data_to_pass = np.moveaxis(data_to_pass, 2, 0)
             predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings,
+                data_to_pass, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device, image_downsample=self.spin_downsample.value()
+                device=device, normalize=self.check_normalize.isChecked(),
+                image_downsample=self.spin_downsample.value()
             )
             self.viewer.layers['prediction'].data = predicted_image
         
@@ -405,7 +436,8 @@ class ConvPaintWidget(QWidget):
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device, image_downsample=self.spin_downsample.value())
+                device=device, normalize=self.check_normalize.isChecked(),
+                image_downsample=self.spin_downsample.value())
             self.viewer.layers['prediction'].data[step] = predicted_image
 
     def check_prediction_layer_exists(self):
@@ -413,7 +445,9 @@ class ConvPaintWidget(QWidget):
         layer_names = [x.name for x in self.viewer.layers]
         if 'prediction' not in layer_names:
 
-            if self.check_dims_is_channels.isChecked():
+            if self.viewer.layers[self.selected_channel].rgb:
+                layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
+            elif self.check_dims_is_channels.isChecked():
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
             else:
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape

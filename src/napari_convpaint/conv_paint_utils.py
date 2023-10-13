@@ -150,7 +150,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
 
 
 def predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True, device='cpu', image_downsample=1):
+                  use_min_features=True, device='cpu', normalize=False, image_downsample=1):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -171,6 +171,8 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         if True, use the minimum number of features per layer
     device: str, optional
         device to use for computation, by default 'cpu'
+    normalize: bool, optional
+        if True, normalize each channel with its mean and std, by default False
     image_downsample: int, optional
         downsample image by this factor before extracting features, by default 1
 
@@ -186,7 +188,7 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         max_features = np.min(model.features_per_layer)
         all_scales = filter_image_multioutputs(
             image, model, scalings=scalings, order=order,
-            device=device, image_downsample=image_downsample)
+            device=device, normalize=normalize, image_downsample=image_downsample)
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         tot_filters = max_features * len(all_scales)
 
@@ -194,7 +196,7 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         # max_features = np.max(model.features_per_layer)
         all_scales = filter_image_multioutputs(
             image, model, scalings=scalings, order=order,
-            device=device, image_downsample=image_downsample)
+            device=device, normalize=normalize, image_downsample=image_downsample)
         # MV:  why this?         (64, 256, 512)                2            / 3
         tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
 
@@ -253,7 +255,8 @@ def load_single_layer_vgg16(keep_rgb=False):
     return model
 
 def get_multiscale_features(model, image, annotations, scalings, order=0,
-                            use_min_features=True, device='cpu', image_downsample=1):
+                            use_min_features=True, device='cpu',
+                            normalize=False, image_downsample=1):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -272,6 +275,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         Use minimal number of features, by default True
     device : str, optional
         Device to use for computation, by default 'cpu'
+    normalize : bool, optional
+        If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -293,7 +298,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
     all_scales = filter_image_multioutputs(
         image, model, scalings, order=order, device=device,
-        normalize=False, image_downsample=image_downsample)
+        normalize=normalize, image_downsample=image_downsample)
     if use_min_features:
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
     all_values_scales = []
@@ -309,7 +314,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
 
 def get_features_current_layers(model, image, annotations, scalings=[1],
-                                order=0, use_min_features=True, device='cpu', image_downsample=1):
+                                order=0, use_min_features=True, device='cpu',
+                                normalize=False, image_downsample=1):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -330,6 +336,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         Use minimal number of features, by default True
     device : str, optional
         Device to use for computation, by default 'cpu'
+    normalize : bool, optional
+        If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -367,7 +375,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         extracted_features = get_multiscale_features(
             model, current_image, current_annot, scalings,
             order=order, use_min_features=use_min_features,
-            device=device, image_downsample=image_downsample)
+            device=device, normalize=normalize, image_downsample=image_downsample)
         all_values.append(extracted_features)
         
         all_targets.append(current_annot[::image_downsample, ::image_downsample]
@@ -1089,7 +1097,9 @@ class Classifier():
                 scalings=self.param.scalings,
                 order=self.param.order,
                 use_min_features=self.param.use_min_features,
-                device='cpu')
+                device='cpu',
+                normalize=False,
+                image_downsample=1)
 
         if save_path is None:
             if single_image:
