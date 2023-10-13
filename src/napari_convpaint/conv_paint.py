@@ -479,6 +479,7 @@ class ConvPaintWidget(QWidget):
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.image_downsample = self.spin_downsample.value()
+        self.param.normalize = self.check_normalize.isChecked()
     
     def load_classifier(self, event=None, save_file=None):
         """Select classifier model file to load."""
@@ -507,3 +508,4 @@ class ConvPaintWidget(QWidget):
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
+        self.check_normalize.setChecked(self.param.normalize)
