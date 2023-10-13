@@ -1098,8 +1098,8 @@ class Classifier():
                 order=self.param.order,
                 use_min_features=self.param.use_min_features,
                 device='cpu',
-                normalize=False,
-                image_downsample=1)
+                normalize=self.param.normalize,
+                image_downsample=self.param.image_downsample)
 
         if save_path is None:
             if single_image:
