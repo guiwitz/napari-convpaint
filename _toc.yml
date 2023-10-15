@@ -1,7 +1,5 @@
 format: jb-book
-root: README
-chapters:
-  - file: book/Landing
+root: book/Landing
 
 parts:
   - caption: Getting started
