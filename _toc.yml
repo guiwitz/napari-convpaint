@@ -1,4 +1,15 @@
 format: jb-book
 root: README
 chapters:
-  - file: book/Description
+  - file: book/Landing
+
+parts:
+  - caption: Getting started
+    chapters:
+    - file: book/Installation
+  - caption: Examples
+    chapters:
+    - file: book/Timelapse
+  - caption: In-depth exlanations
+    chapters:
+    - file: book/Description
