@@ -144,6 +144,7 @@ class ConvPaintWidget(QWidget):
             self._add_project()
 
         self.add_connections()
+        self.select_layer()
 
     def _add_project(self, event=None):
         """Add widget for multi-image project management"""
@@ -288,6 +289,10 @@ class ConvPaintWidget(QWidget):
     def update_classifier(self):
         """Given a set of new annotations, update the random forest model."""
 
+        unique_labels = np.unique(self.viewer.layers['annotations'].data)
+        if (not 1 in unique_labels) | (not 2 in unique_labels):
+            raise Exception('You need annoations for foreground and background')
+        
         if self.model is None:
             if self.check_use_default_model.isChecked():
                 
