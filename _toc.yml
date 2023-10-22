@@ -8,6 +8,8 @@ parts:
   - caption: Examples
     chapters:
     - file: book/Timelapse
-  - caption: In-depth exlanations
+    - file: book/RGB
+    - file: book/Workflow
+  - caption: In-depth explanations
     chapters:
     - file: book/Description
