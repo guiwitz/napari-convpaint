@@ -10,6 +10,7 @@ parts:
     - file: book/Timelapse
     - file: book/RGB
     - file: book/Workflow
+    - file: book/Multifiles
   - caption: In-depth explanations
     chapters:
     - file: book/Description
