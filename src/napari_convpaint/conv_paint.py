@@ -233,6 +233,7 @@ class ConvPaintWidget(QWidget):
             data=np.zeros((layer_shape), dtype=np.uint8),
             name='prediction'
             )
+        self.viewer.layers.selection.active = self.viewer.layers['annotations']
 
     def update_scalings(self):
 
