@@ -465,12 +465,13 @@ class ConvPaintWidget(QWidget):
                 name='prediction'
             )
 
-    def save_model(self):
+    def save_model(self, event=None, save_file=None):
         """Select file where to save the classifier model."""
 
         # save sklearn model
-        dialog = QFileDialog()
-        save_file, _ = dialog.getSaveFileName(self, "Save model", None, "JOBLIB (*.joblib)")
+        if save_file is None:
+            dialog = QFileDialog()
+            save_file, _ = dialog.getSaveFileName(self, "Save model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
         dump(self.random_forest, save_file)
         self.param.random_forest = save_file#.as_posix()
