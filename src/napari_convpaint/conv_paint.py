@@ -27,11 +27,11 @@ class ConvPaintWidget(QWidget):
     ----------
     napari_viewer: napari.Viewer
         main napari viwer
-    channel: str
-        layer name to use for features extraction/classification
+    project: bool
+        use project widget for multi-image project management
     """
     
-    def __init__(self, napari_viewer, channel=None, parent=None, project=False):
+    def __init__(self, napari_viewer, parent=None, project=False):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         
@@ -78,13 +78,9 @@ class ConvPaintWidget(QWidget):
         self.load_model_btn = QPushButton('Load trained model')
         self.tabs.add_named_tab('Annotation', self.load_model_btn, grid_pos=[4,1,1,1])
 
-        self.check_use_project = QCheckBox('Use project')
+        self.check_use_project = QCheckBox('Use multiple files')
         self.check_use_project.setChecked(False)
         self.tabs.add_named_tab('Annotation', self.check_use_project, grid_pos=[5,0,1,1])
-
-        self.check_use_cuda = QCheckBox('Use cuda')
-        self.check_use_cuda.setChecked(False)
-        self.tabs.add_named_tab('Annotation', self.check_use_cuda, grid_pos=[5,1,1,1])
 
         self.check_use_default_model = QCheckBox('Use default model')
         self.check_use_default_model.setChecked(True)
@@ -93,18 +89,19 @@ class ConvPaintWidget(QWidget):
         self.check_dims_is_channels = QCheckBox('Multichannel image')
         self.check_dims_is_channels.setChecked(False)
         self.check_dims_is_channels.setToolTip('If checked, the additional dimensions is not treated as time-lapse but as channels.')
-        self.tabs.add_named_tab('Annotation', self.check_dims_is_channels, grid_pos=[6,1,1,1])
+        self.tabs.add_named_tab('Annotation', self.check_dims_is_channels, grid_pos=[7,0,1,1])
 
         self.spin_downsample = QSpinBox()
         self.spin_downsample.setMinimum(1)
         self.spin_downsample.setMaximum(10)
         self.spin_downsample.setValue(1)
-        self.tabs.add_named_tab('Annotation', QLabel('Downsample'), grid_pos=[7,0,1,1])
-        self.tabs.add_named_tab('Annotation', self.spin_downsample, grid_pos=[7,1,1,1])
+        self.spin_downsample.setToolTip('Reduce image size for faster computing.')
+        self.tabs.add_named_tab('Annotation', QLabel('Downsample'), grid_pos=[8,0,1,1])
+        self.tabs.add_named_tab('Annotation', self.spin_downsample, grid_pos=[8,1,1,1])
 
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
-            'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'single_layer_vgg16_rgb', 'dino_vits16'])
+            'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'single_layer_vgg16_rgb'])
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
         self.load_nnmodel_btn = QPushButton('Load nn model')
@@ -137,7 +134,11 @@ class ConvPaintWidget(QWidget):
 
         self.check_normalize = QCheckBox('Normalize')
         self.check_normalize.setChecked(True)
-        self.tabs.add_named_tab('Model', self.check_normalize, [7,0,1,2])
+        self.tabs.add_named_tab('Model', self.check_normalize, [7,0,1,1])
+
+        self.check_use_cuda = QCheckBox('Use cuda')
+        self.check_use_cuda.setChecked(False)
+        self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,1,1,1])
 
 
         if project is True:
