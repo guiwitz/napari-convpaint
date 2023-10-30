@@ -2,6 +2,8 @@ from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox)
 from qtpy.QtCore import Qt
+from magicgui.widgets import create_widget
+import napari
 from joblib import dump, load
 from pathlib import Path
 import warnings
@@ -51,9 +53,13 @@ class ConvPaintWidget(QWidget):
         self.main_layout.addWidget(self.tabs)
 
         self.tabs.widget(0).layout().setAlignment(Qt.AlignTop)
-        self.select_layer_widget = QComboBox()
-        self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
-        self.tabs.add_named_tab('Annotation', self.select_layer_widget, grid_pos=[0,0,1,2])
+        self.select_layer_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
+        self.select_layer_widget.reset_choices()
+        self.viewer.layers.events.inserted.connect(self.select_layer_widget.reset_choices)
+        self.viewer.layers.events.removed.connect(self.select_layer_widget.reset_choices)
+        #self.select_layer_widget = QComboBox()
+        #self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
+        self.tabs.add_named_tab('Annotation', self.select_layer_widget.native, grid_pos=[0,0,1,2])
 
         self.add_layers_btn = QPushButton('Add annotation/predict layers')
         self.tabs.add_named_tab('Annotation', self.add_layers_btn, grid_pos=[1,0,1,2])
@@ -179,11 +185,10 @@ class ConvPaintWidget(QWidget):
 
 
     def add_connections(self):
-
-        self.select_layer_widget.currentIndexChanged.connect(self.select_layer)
+        
+        self.select_layer_widget.changed.connect(self.select_layer)
+        self.viewer.layers.events.removed.connect(self.reset_model)
         self.num_scales_combo.currentIndexChanged.connect(self.update_scalings)
-        self.viewer.layers.events.removed.connect(self.update_layer_list)
-        self.viewer.layers.events.inserted.connect(self.update_layer_list)
 
         self.add_layers_btn.clicked.connect(self.add_annotation_layer)
         self.update_model_btn.clicked.connect(self.update_classifier)
@@ -198,7 +203,7 @@ class ConvPaintWidget(QWidget):
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
-    def update_layer_list(self, event):
+    '''def update_layer_list(self, event):
         
         keep_channel = None
         if self.selected_channel is not None:
@@ -209,11 +214,16 @@ class ConvPaintWidget(QWidget):
             self.select_layer_widget.setCurrentText(keep_channel)
         else:
             if self.viewer.layers:
-                self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)
+                self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)'''
 
-    def select_layer(self):
+    def select_layer(self, newtext=None):
+        
+        self.selected_channel = self.select_layer_widget.native.currentText()        
 
-        self.selected_channel = self.select_layer_widget.currentText()
+    def reset_model(self, event=None):
+
+        if len(self.viewer.layers) == 0:
+            self.model = None
 
     def add_annotation_layer(self):
         """Add annotation and prediction layers to viewer."""
