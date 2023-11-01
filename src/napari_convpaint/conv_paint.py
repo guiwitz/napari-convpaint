@@ -478,6 +478,8 @@ class ConvPaintWidget(QWidget):
     def save_model(self, event=None, save_file=None):
         """Select file where to save the classifier model."""
 
+        if self.random_forest is None:
+            raise Exception('No model found. Please train a model first.')
         # save sklearn model
         if save_file is None:
             dialog = QFileDialog()
