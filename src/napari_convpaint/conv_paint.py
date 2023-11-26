@@ -384,6 +384,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('No files found')
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
+        self.viewer.layers.events.removed.disconnect(self.reset_model)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             all_features, all_targets = [], []
@@ -415,6 +416,7 @@ class ConvPaintWidget(QWidget):
 
             self.random_forest = train_classifier(all_features, all_targets)
         self.viewer.window._status_bar._toggle_activity_dock(False)
+        self.viewer.layers.events.removed.connect(self.reset_model)
         
 
     def predict(self):
