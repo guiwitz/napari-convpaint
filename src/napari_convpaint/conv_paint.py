@@ -154,6 +154,9 @@ class ConvPaintWidget(QWidget):
         self.add_connections()
         self.select_layer()
 
+        self.viewer.bind_key('a', self.hide_annotation)
+        self.viewer.bind_key('r', self.hide_prediction)
+
     def _add_project(self, event=None):
         """Add widget for multi-image project management"""
 
@@ -216,6 +219,22 @@ class ConvPaintWidget(QWidget):
         else:
             if self.viewer.layers:
                 self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)'''
+
+    def hide_annotation(self, event=None):
+        """Hide annotation layer."""
+
+        if self.viewer.layers['annotations'].visible == False:
+            self.viewer.layers['annotations'].visible = True
+        else:
+            self.viewer.layers['annotations'].visible = False
+
+    def hide_prediction(self, event=None):
+        """Hide prediction layer."""
+
+        if self.viewer.layers['prediction'].visible == False:
+            self.viewer.layers['prediction'].visible = True
+        else:
+            self.viewer.layers['prediction'].visible = False
 
     def select_layer(self, newtext=None):
         
