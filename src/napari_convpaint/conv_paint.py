@@ -49,62 +49,80 @@ class ConvPaintWidget(QWidget):
         self.setLayout(self.main_layout)
 
         self.tab_names = ['Annotation', 'Files', 'Model']
-        self.tabs = TabSet(self.tab_names, tab_layouts=[QGridLayout(), None, QGridLayout()])
+        self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
         self.main_layout.addWidget(self.tabs)
 
         self.tabs.widget(0).layout().setAlignment(Qt.AlignTop)
+
+        self.layer_selection_group = VHGroup('Layer selection', orientation='G')
+        self.train_group = VHGroup('Train', orientation='G')
+        self.predict_group = VHGroup('Predict', orientation='G')
+        self.load_save_group = VHGroup('Load/Save', orientation='G')
+        self.options_group = VHGroup('Options', orientation='G')
+        self.tabs.add_named_tab('Annotation', self.layer_selection_group.gbox)
+        self.tabs.add_named_tab('Annotation', self.train_group.gbox)
+        self.tabs.add_named_tab('Annotation', self.predict_group.gbox)
+        self.tabs.add_named_tab('Annotation', self.load_save_group.gbox)
+        self.tabs.add_named_tab('Annotation', self.options_group.gbox)
+
+        # data layer
         self.select_layer_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
         self.select_layer_widget.reset_choices()
         self.viewer.layers.events.inserted.connect(self.select_layer_widget.reset_choices)
         self.viewer.layers.events.removed.connect(self.select_layer_widget.reset_choices)
-        #self.select_layer_widget = QComboBox()
-        #self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
-        self.tabs.add_named_tab('Annotation', self.select_layer_widget.native, grid_pos=[0,0,1,2])
+        # annotation layer
+        self.select_annotation_layer_widget = create_widget(annotation=napari.layers.Labels, label='Pick annotation')
+        self.select_annotation_layer_widget.reset_choices()
+        self.viewer.layers.events.inserted.connect(self.select_annotation_layer_widget.reset_choices)
+        self.viewer.layers.events.removed.connect(self.select_annotation_layer_widget.reset_choices)
+
+        self.layer_selection_group.glayout.addWidget(QLabel('Layer to segment'), 0,0,1,1)
+        self.layer_selection_group.glayout.addWidget(self.select_layer_widget.native, 0,1,1,1)
+        self.layer_selection_group.glayout.addWidget(QLabel('Layer for annotation'), 1,0,1,1)
+        self.layer_selection_group.glayout.addWidget(self.select_annotation_layer_widget.native, 1,1,1,1)
 
         self.add_layers_btn = QPushButton('Add annotation/predict layers')
-        self.tabs.add_named_tab('Annotation', self.add_layers_btn, grid_pos=[1,0,1,2])
+        self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
 
-        self.update_model_btn = QPushButton('Train model on single image')
-        self.tabs.add_named_tab('Annotation', self.update_model_btn, grid_pos=[2,0,1,1])
+        self.update_model_btn = QPushButton('Train')
+        self.train_group.glayout.addWidget(self.update_model_btn, 0,0,1,1)
+        self.check_use_project = QCheckBox('Use multiple files')
+        self.check_use_project.setChecked(False)
+        self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
 
-        self.update_model_on_project_btn = QPushButton('Train model on full project')
-        self.tabs.add_named_tab('Annotation', self.update_model_on_project_btn, grid_pos=[2,1,1,1])
+        self.update_model_on_project_btn = QPushButton('Train on multi-image')
+        self.train_group.glayout.addWidget(self.update_model_on_project_btn, 1,1,1,1)
         if project is False:
             self.update_model_on_project_btn.setEnabled(False)
 
         self.prediction_btn = QPushButton('Predict single frame')
-        self.tabs.add_named_tab('Annotation', self.prediction_btn, grid_pos=[3,0,1,1])
-
+        self.predict_group.glayout.addWidget(self.prediction_btn, 0,0,1,1)
         self.prediction_all_btn = QPushButton('Predict all frames')
-        self.tabs.add_named_tab('Annotation', self.prediction_all_btn, grid_pos=[3,1,1,1])
+        self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
 
         self.save_model_btn = QPushButton('Save trained model')
-        self.tabs.add_named_tab('Annotation', self.save_model_btn, grid_pos=[4,0,1,1])
+        self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
 
         self.load_model_btn = QPushButton('Load trained model')
-        self.tabs.add_named_tab('Annotation', self.load_model_btn, grid_pos=[4,1,1,1])
+        self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
-        self.check_use_project = QCheckBox('Use multiple files')
-        self.check_use_project.setChecked(False)
-        self.tabs.add_named_tab('Annotation', self.check_use_project, grid_pos=[5,0,1,1])
-
-        self.check_use_default_model = QCheckBox('Use default model')
-        self.check_use_default_model.setChecked(True)
-        self.tabs.add_named_tab('Annotation', self.check_use_default_model, grid_pos=[6,0,1,1])
+        self.check_custom_model = QCheckBox('Use custom model')
+        self.check_custom_model.setChecked(False)
+        self.options_group.glayout.addWidget(self.check_custom_model, 0,0,1,1)
 
         self.check_dims_is_channels = QCheckBox('Multichannel image')
         self.check_dims_is_channels.setChecked(False)
         self.check_dims_is_channels.setToolTip('If checked, the additional dimensions is not treated as time-lapse but as channels.')
-        self.tabs.add_named_tab('Annotation', self.check_dims_is_channels, grid_pos=[7,0,1,1])
+        self.options_group.glayout.addWidget(self.check_dims_is_channels, 0,1,1,1)
 
         self.spin_downsample = QSpinBox()
         self.spin_downsample.setMinimum(1)
         self.spin_downsample.setMaximum(10)
         self.spin_downsample.setValue(1)
         self.spin_downsample.setToolTip('Reduce image size for faster computing.')
-        self.tabs.add_named_tab('Annotation', QLabel('Downsample'), grid_pos=[8,0,1,1])
-        self.tabs.add_named_tab('Annotation', self.spin_downsample, grid_pos=[8,1,1,1])
+        self.options_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
+        self.options_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
 
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
@@ -178,7 +196,7 @@ class ConvPaintWidget(QWidget):
     def _set_custom_model(self, event=None):
         """Add widget for custom model management"""
 
-        if self.check_use_default_model.isChecked():
+        if not self.check_custom_model.isChecked():
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
             self.set_default_model()
         else:
@@ -199,7 +217,7 @@ class ConvPaintWidget(QWidget):
         self.save_model_btn.clicked.connect(self.save_model)
         self.load_model_btn.clicked.connect(self.load_classifier)
         self.check_use_project.stateChanged.connect(self._add_project)
-        self.check_use_default_model.stateChanged.connect(self._set_custom_model)
+        self.check_custom_model.stateChanged.connect(self._set_custom_model)
 
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
@@ -302,12 +320,12 @@ class ConvPaintWidget(QWidget):
     def update_classifier(self):
         """Given a set of new annotations, update the random forest model."""
 
-        unique_labels = np.unique(self.viewer.layers['annotations'].data)
+        unique_labels = np.unique(self.select_annotation_layer_widget.value.data)
         if (not 1 in unique_labels) | (not 2 in unique_labels):
             raise Exception('You need annoations for foreground and background')
         
         if self.model is None:
-            if self.check_use_default_model.isChecked():
+            if not self.check_custom_model.isChecked():
                 
                 # use 2d input for 2d images or if 3d input does not represent channels
                 # use 3d input for rgb or if 3d input is channels and has dims 3
@@ -339,7 +357,7 @@ class ConvPaintWidget(QWidget):
             features, targets = get_features_current_layers(
                 model=self.model,
                 image=data_to_pass,
-                annotations=self.viewer.layers['annotations'].data,
+                annotations=self.select_annotation_layer_widget.value.data,
                 scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
@@ -354,7 +372,7 @@ class ConvPaintWidget(QWidget):
         """Train classifier on all annotations in project."""
 
         if self.model is None:
-            if self.check_use_default_model.isChecked():
+            if not self.check_custom_model.isChecked():
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
@@ -378,7 +396,7 @@ class ConvPaintWidget(QWidget):
                 features, targets = get_features_current_layers(
                     model=self.model,
                     image=data_to_pass,
-                    annotations=self.viewer.layers['annotations'].data,
+                    annotations=self.select_annotation_layer_widget.value.data,
                     scalings=self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
@@ -403,7 +421,7 @@ class ConvPaintWidget(QWidget):
         on a RF model trained with annotations"""
 
         if self.model is None:
-            if self.check_use_default_model.isChecked():
+            if not self.check_custom_model.isChecked():
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
@@ -453,7 +471,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('No model found. Please train a model first.')
         
         if self.model is None:
-            if self.check_use_default_model.isChecked():
+            if not self.check_custom_model.isChecked():
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
