@@ -107,9 +107,9 @@ class ConvPaintWidget(QWidget):
         self.load_model_btn = QPushButton('Load trained model')
         self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
-        self.check_custom_model = QCheckBox('Use custom model')
-        self.check_custom_model.setChecked(False)
-        self.options_group.glayout.addWidget(self.check_custom_model, 0,0,1,1)
+        self.check_use_custom_model = QCheckBox('Use custom model')
+        self.check_use_custom_model.setChecked(False)
+        self.options_group.glayout.addWidget(self.check_use_custom_model, 0,0,1,1)
 
         self.check_dims_is_channels = QCheckBox('Multichannel image')
         self.check_dims_is_channels.setChecked(False)
@@ -196,7 +196,7 @@ class ConvPaintWidget(QWidget):
     def _set_custom_model(self, event=None):
         """Add widget for custom model management"""
 
-        if not self.check_custom_model.isChecked():
+        if not self.check_use_custom_model.isChecked():
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
             self.set_default_model()
         else:
@@ -217,7 +217,7 @@ class ConvPaintWidget(QWidget):
         self.save_model_btn.clicked.connect(self.save_model)
         self.load_model_btn.clicked.connect(self.load_classifier)
         self.check_use_project.stateChanged.connect(self._add_project)
-        self.check_custom_model.stateChanged.connect(self._set_custom_model)
+        self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
 
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
@@ -325,7 +325,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('You need annoations for foreground and background')
         
         if self.model is None:
-            if not self.check_custom_model.isChecked():
+            if not self.check_use_custom_model.isChecked():
                 
                 # use 2d input for 2d images or if 3d input does not represent channels
                 # use 3d input for rgb or if 3d input is channels and has dims 3
@@ -372,7 +372,7 @@ class ConvPaintWidget(QWidget):
         """Train classifier on all annotations in project."""
 
         if self.model is None:
-            if not self.check_custom_model.isChecked():
+            if not self.check_use_custom_model.isChecked():
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
@@ -421,7 +421,7 @@ class ConvPaintWidget(QWidget):
         on a RF model trained with annotations"""
 
         if self.model is None:
-            if not self.check_custom_model.isChecked():
+            if not self.check_use_custom_model.isChecked():
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
@@ -471,7 +471,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('No model found. Please train a model first.')
         
         if self.model is None:
-            if not self.check_custom_model.isChecked():
+            if not self.check_use_custom_model.isChecked():
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
