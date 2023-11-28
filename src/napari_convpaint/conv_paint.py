@@ -96,9 +96,9 @@ class ConvPaintWidget(QWidget):
         if project is False:
             self.update_model_on_project_btn.setEnabled(False)
 
-        self.prediction_btn = QPushButton('Predict single frame')
+        self.prediction_btn = QPushButton('Predict single slice')
         self.predict_group.glayout.addWidget(self.prediction_btn, 0,0,1,1)
-        self.prediction_all_btn = QPushButton('Predict all frames')
+        self.prediction_all_btn = QPushButton('Predict all slice')
         self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
 
         self.save_model_btn = QPushButton('Save trained model')
