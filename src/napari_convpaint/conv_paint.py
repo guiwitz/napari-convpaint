@@ -126,6 +126,10 @@ class ConvPaintWidget(QWidget):
         self.load_model_btn = QPushButton('Load trained model')
         self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
+        self.load_save_group.glayout.addWidget(QLabel('Current model:'), 1,0,1,1)
+        self.current_model_path = QLabel('None')
+        self.load_save_group.glayout.addWidget(self.current_model_path, 1,1,1,1)
+
         self.check_use_custom_model = QCheckBox('Use custom model')
         self.check_use_custom_model.setChecked(False)
         self.options_group.glayout.addWidget(self.check_use_custom_model, 0,0,1,1)
@@ -281,6 +285,7 @@ class ConvPaintWidget(QWidget):
         self.radio_multi_channel.setEnabled(True)
         self.radio_rgb.setEnabled(True)
         self.radio_single_channel.setChecked(True)
+        self.current_model_path.setText('None')
 
     def add_annotation_layer(self):
         """Add annotation and prediction layers to viewer."""
@@ -394,6 +399,7 @@ class ConvPaintWidget(QWidget):
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
+            self.current_model_path.setText('In training')
             pbr.set_description(f"Training")
             features, targets = get_features_current_layers(
                 model=self.model,
@@ -410,6 +416,7 @@ class ConvPaintWidget(QWidget):
             self.prediction_btn.setEnabled(True)
             self.prediction_all_btn.setEnabled(True)
             self.save_model_btn.setEnabled(True)
+            self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def update_classifier_on_project(self):
@@ -429,6 +436,7 @@ class ConvPaintWidget(QWidget):
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
+            self.current_model_path.setText('In training')
             all_features, all_targets = [], []
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
@@ -460,6 +468,7 @@ class ConvPaintWidget(QWidget):
             self.prediction_btn.setEnabled(True)
             self.prediction_all_btn.setEnabled(True)
             self.save_model_btn.setEnabled(True)
+            self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
         
 
@@ -570,6 +579,7 @@ class ConvPaintWidget(QWidget):
         self.param.random_forest = save_file#.as_posix()
         self.update_params()
         self.param.save_parameters(save_file.parent.joinpath('convpaint_params.yml'))
+        self.current_model_path.setText(save_file.name)
 
     def update_params(self):
         """Update parameters from GUI."""
@@ -592,6 +602,7 @@ class ConvPaintWidget(QWidget):
         self.random_forest, self.param = load_trained_classifier(save_file)
         self.prediction_btn.setEnabled(True)
         self.prediction_all_btn.setEnabled(True)
+        self.current_model_path.setText(save_file.name)
 
         self.update_gui_from_params()
         self.model = Hookmodel(param=self.param)
