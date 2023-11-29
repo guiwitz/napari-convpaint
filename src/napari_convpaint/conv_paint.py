@@ -63,9 +63,9 @@ class ConvPaintWidget(QWidget):
         self.load_save_group = VHGroup('Load/Save', orientation='G')
         self.options_group = VHGroup('Options', orientation='G')
         self.tabs.add_named_tab('Annotation', self.layer_selection_group.gbox)
-        self.tabs.add_named_tab('Annotation', self.data_dims_group.gbox)
         self.tabs.add_named_tab('Annotation', self.train_group.gbox)
         self.tabs.add_named_tab('Annotation', self.predict_group.gbox)
+        self.tabs.add_named_tab('Annotation', self.data_dims_group.gbox)
         self.tabs.add_named_tab('Annotation', self.load_save_group.gbox)
         self.tabs.add_named_tab('Annotation', self.options_group.gbox)
 
