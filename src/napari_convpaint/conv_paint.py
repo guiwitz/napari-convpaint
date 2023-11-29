@@ -224,7 +224,7 @@ class ConvPaintWidget(QWidget):
     def add_connections(self):
         
         self.select_layer_widget.changed.connect(self.select_layer)
-        self.viewer.layers.events.removed.connect(self.reset_model)
+        #self.viewer.layers.events.removed.connect(self.reset_model)
         self.num_scales_combo.currentIndexChanged.connect(self.update_scalings)
 
         self.add_layers_btn.clicked.connect(self.add_annotation_layer)
