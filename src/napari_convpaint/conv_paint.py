@@ -1,6 +1,7 @@
 from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
-                            QCheckBox, QAbstractItemView, QGridLayout, QSpinBox)
+                            QCheckBox, QAbstractItemView, QGridLayout, QSpinBox, QButtonGroup,
+                            QRadioButton)
 from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
@@ -56,11 +57,13 @@ class ConvPaintWidget(QWidget):
         self.tabs.widget(0).layout().setAlignment(Qt.AlignTop)
 
         self.layer_selection_group = VHGroup('Layer selection', orientation='G')
+        self.data_dims_group = VHGroup('Data dimensions', orientation='G')
         self.train_group = VHGroup('Train', orientation='G')
-        self.predict_group = VHGroup('Predict', orientation='G')
+        self.predict_group = VHGroup('Segment', orientation='G')
         self.load_save_group = VHGroup('Load/Save', orientation='G')
         self.options_group = VHGroup('Options', orientation='G')
         self.tabs.add_named_tab('Annotation', self.layer_selection_group.gbox)
+        self.tabs.add_named_tab('Annotation', self.data_dims_group.gbox)
         self.tabs.add_named_tab('Annotation', self.train_group.gbox)
         self.tabs.add_named_tab('Annotation', self.predict_group.gbox)
         self.tabs.add_named_tab('Annotation', self.load_save_group.gbox)
@@ -82,9 +85,21 @@ class ConvPaintWidget(QWidget):
         self.layer_selection_group.glayout.addWidget(QLabel('Layer for annotation'), 1,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.select_annotation_layer_widget.native, 1,1,1,1)
 
-        self.add_layers_btn = QPushButton('Add annotation/predict layers')
+        self.add_layers_btn = QPushButton('Add annotations/segmentation layers')
         self.add_layers_btn.setEnabled(False)
         self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
+
+        self.button_group_channels = QButtonGroup()
+        self.radio_single_channel = QRadioButton('Single channel image/stack')
+        self.radio_multi_channel = QRadioButton('Multichannel image')
+        self.radio_rgb = QRadioButton('RGB image')
+        self.radio_single_channel.setChecked(True)
+        self.button_group_channels.addButton(self.radio_single_channel, id=1)
+        self.button_group_channels.addButton(self.radio_multi_channel, id=2)
+        self.button_group_channels.addButton(self.radio_rgb, id=3)
+        self.data_dims_group.glayout.addWidget(self.radio_single_channel, 0,0,1,1)
+        self.data_dims_group.glayout.addWidget(self.radio_multi_channel, 1,0,1,1)
+        self.data_dims_group.glayout.addWidget(self.radio_rgb, 2,0,1,1)
 
         self.update_model_btn = QPushButton('Train')
         self.train_group.glayout.addWidget(self.update_model_btn, 0,0,1,1)
@@ -92,15 +107,15 @@ class ConvPaintWidget(QWidget):
         self.check_use_project.setChecked(False)
         self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
 
-        self.update_model_on_project_btn = QPushButton('Train on multi-image')
+        self.update_model_on_project_btn = QPushButton('Train on multiple images')
         self.train_group.glayout.addWidget(self.update_model_on_project_btn, 1,1,1,1)
         if project is False:
             self.update_model_on_project_btn.setEnabled(False)
 
-        self.prediction_btn = QPushButton('Predict single slice')
+        self.prediction_btn = QPushButton('Segment image')
         self.prediction_btn.setEnabled(False)
         self.predict_group.glayout.addWidget(self.prediction_btn, 0,0,1,1)
-        self.prediction_all_btn = QPushButton('Predict all slice')
+        self.prediction_all_btn = QPushButton('Segment stack')
         self.prediction_all_btn.setEnabled(False)
         self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
 
@@ -114,11 +129,6 @@ class ConvPaintWidget(QWidget):
         self.check_use_custom_model = QCheckBox('Use custom model')
         self.check_use_custom_model.setChecked(False)
         self.options_group.glayout.addWidget(self.check_use_custom_model, 0,0,1,1)
-
-        self.check_dims_is_channels = QCheckBox('Multichannel image')
-        self.check_dims_is_channels.setChecked(False)
-        self.check_dims_is_channels.setToolTip('If checked, the additional dimensions is not treated as time-lapse but as channels.')
-        self.options_group.glayout.addWidget(self.check_dims_is_channels, 0,1,1,1)
 
         self.spin_downsample = QSpinBox()
         self.spin_downsample.setMinimum(1)
@@ -245,7 +255,19 @@ class ConvPaintWidget(QWidget):
         if self.select_layer_widget.value is None:
             self.add_layers_btn.setEnabled(False)
         else:
-            self.add_layers_btn.setEnabled(True)      
+            self.add_layers_btn.setEnabled(True)
+
+        if self.select_layer_widget.value is not None:
+            if self.select_layer_widget.value.rgb:
+                self.radio_rgb.setChecked(True)
+                self.radio_multi_channel.setEnabled(False)
+                self.radio_single_channel.setEnabled(False)
+            elif self.select_layer_widget.value.ndim == 2:
+                self.radio_single_channel.setChecked(True)
+                self.radio_multi_channel.setEnabled(False)
+                self.radio_rgb.setEnabled(False)
+            else:
+                self.radio_rgb.setEnabled(False)  
 
     def reset_model(self, event=None):
 
@@ -255,6 +277,10 @@ class ConvPaintWidget(QWidget):
         self.prediction_btn.setEnabled(False)
         self.prediction_all_btn.setEnabled(False)
         self.save_model_btn.setEnabled(False)
+        self.radio_single_channel.setEnabled(True)
+        self.radio_multi_channel.setEnabled(True)
+        self.radio_rgb.setEnabled(True)
+        self.radio_single_channel.setChecked(True)
 
     def add_annotation_layer(self):
         """Add annotation and prediction layers to viewer."""
@@ -264,7 +290,7 @@ class ConvPaintWidget(QWidget):
         
         if self.viewer.layers[self.selected_channel].rgb:
             layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
-        elif self.check_dims_is_channels.isChecked():
+        elif self.radio_multi_channel.isChecked():
             layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
         else:
             layer_shape = self.viewer.layers[self.selected_channel].data.shape
@@ -275,7 +301,7 @@ class ConvPaintWidget(QWidget):
             )
         self.viewer.add_labels(
             data=np.zeros((layer_shape), dtype=np.uint8),
-            name='prediction'
+            name='segmentation'
             )
         self.viewer.layers.selection.active = self.viewer.layers['annotations']
 
@@ -351,7 +377,7 @@ class ConvPaintWidget(QWidget):
                         self.set_default_model()
                 
                 else:
-                    if self.check_dims_is_channels.isChecked():
+                    if self.radio_multi_channel.isChecked():
                         if self.viewer.layers[self.selected_channel].data.shape[0] != 3:
                             raise Exception(f'your input has dimensions {self.viewer.layers[self.selected_channel].data.shape}, but the default model only works with 3 channel images')
                         self.set_default_model(keep_rgb=True)
@@ -456,7 +482,7 @@ class ConvPaintWidget(QWidget):
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
             pbr.set_description(f"Prediction")
-            if (self.viewer.dims.ndim > 2) & (not self.check_dims_is_channels.isChecked()):
+            if (self.viewer.dims.ndim > 2) & (not self.radio_multi_channel.isChecked()):
                 step = self.viewer.dims.current_step[0]
                 image = self.viewer.layers[self.selected_channel].data[step]
                 predicted_image = predict_image(
@@ -466,7 +492,7 @@ class ConvPaintWidget(QWidget):
                     device=device, normalize=self.check_normalize.isChecked(),
                     image_downsample=self.spin_downsample.value()
                 )
-                self.viewer.layers['prediction'].data[step] = predicted_image
+                self.viewer.layers['segmentation'].data[step] = predicted_image
             else:
 
                 data_to_pass = self.viewer.layers[self.selected_channel].data
@@ -479,9 +505,9 @@ class ConvPaintWidget(QWidget):
                     device=device, normalize=self.check_normalize.isChecked(),
                     image_downsample=self.spin_downsample.value()
                 )
-                self.viewer.layers['prediction'].data = predicted_image
+                self.viewer.layers['segmentation'].data = predicted_image
             
-            self.viewer.layers['prediction'].refresh()
+            self.viewer.layers['segmentation'].refresh()
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def predict_all(self):
@@ -510,24 +536,24 @@ class ConvPaintWidget(QWidget):
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device, normalize=self.check_normalize.isChecked(),
                 image_downsample=self.spin_downsample.value())
-            self.viewer.layers['prediction'].data[step] = predicted_image
+            self.viewer.layers['segmentation'].data[step] = predicted_image
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def check_prediction_layer_exists(self):
 
         layer_names = [x.name for x in self.viewer.layers]
-        if 'prediction' not in layer_names:
+        if 'segmentation' not in layer_names:
 
             if self.viewer.layers[self.selected_channel].rgb:
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
-            elif self.check_dims_is_channels.isChecked():
+            elif self.radio_multi_channel.isChecked():
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
             else:
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape
 
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8),
-                name='prediction'
+                name='segmentation'
             )
 
     def save_model(self, event=None, save_file=None):
