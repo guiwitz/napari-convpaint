@@ -216,6 +216,9 @@ class ConvPaintWidget(QWidget):
         self.add_connections()
         self.select_layer()
 
+        self.viewer.bind_key('a', self.hide_annotation)
+        self.viewer.bind_key('r', self.hide_prediction)
+
     def _add_project(self, event=None):
         """Add widget for multi-image project management"""
 
@@ -278,6 +281,22 @@ class ConvPaintWidget(QWidget):
         else:
             if self.viewer.layers:
                 self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)'''
+
+    def hide_annotation(self, event=None):
+        """Hide annotation layer."""
+
+        if self.viewer.layers['annotations'].visible == False:
+            self.viewer.layers['annotations'].visible = True
+        else:
+            self.viewer.layers['annotations'].visible = False
+
+    def hide_prediction(self, event=None):
+        """Hide prediction layer."""
+
+        if self.viewer.layers['prediction'].visible == False:
+            self.viewer.layers['prediction'].visible = True
+        else:
+            self.viewer.layers['prediction'].visible = False
 
     def select_layer(self, newtext=None):
         
@@ -467,6 +486,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('No files found')
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
+        self.viewer.layers.events.removed.disconnect(self.reset_model)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             self.current_model_path.setText('In training')
@@ -504,6 +524,7 @@ class ConvPaintWidget(QWidget):
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
+        self.viewer.layers.events.removed.connect(self.reset_model)
         
 
     def predict(self):
