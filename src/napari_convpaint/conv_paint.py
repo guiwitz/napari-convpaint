@@ -91,8 +91,11 @@ class ConvPaintWidget(QWidget):
 
         self.button_group_channels = QButtonGroup()
         self.radio_single_channel = QRadioButton('Single channel image/stack')
+        self.radio_single_channel.setToolTip('Use this option for 2d images or 3d images where additional dimension is not channels')
         self.radio_multi_channel = QRadioButton('Multichannel image')
+        self.radio_multi_channel.setToolTip('Use this option for 3d images where additional dimension is channels')
         self.radio_rgb = QRadioButton('RGB image')
+        self.radio_rgb.setToolTip('Use this option images displayed as RGB')
         self.radio_single_channel.setChecked(True)
         [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]]
         self.button_group_channels.addButton(self.radio_single_channel, id=1)
@@ -105,26 +108,32 @@ class ConvPaintWidget(QWidget):
         self.update_model_btn = QPushButton('Train')
         self.train_group.glayout.addWidget(self.update_model_btn, 0,0,1,1)
         self.check_use_project = QCheckBox('Use multiple files')
+        self.check_use_project.setToolTip('Activate Files Tab to use multiple files to train the model')
         self.check_use_project.setChecked(False)
         self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
 
         self.update_model_on_project_btn = QPushButton('Train on multiple images')
+        self.update_model_on_project_btn.setToolTip('Train on all images in project select in Files Tab')
         self.train_group.glayout.addWidget(self.update_model_on_project_btn, 1,1,1,1)
         if project is False:
             self.update_model_on_project_btn.setEnabled(False)
 
         self.prediction_btn = QPushButton('Segment image')
         self.prediction_btn.setEnabled(False)
+        self.prediction_btn.setToolTip('Segment 2D image or current slice of 3D image')
         self.predict_group.glayout.addWidget(self.prediction_btn, 0,0,1,1)
         self.prediction_all_btn = QPushButton('Segment stack')
+        self.prediction_all_btn.setToolTip('Segment all slices of 3D image')
         self.prediction_all_btn.setEnabled(False)
         self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
 
         self.save_model_btn = QPushButton('Save trained model')
+        self.save_model_btn.setToolTip('Save model as *.joblib file')
         self.save_model_btn.setEnabled(False)
         self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
 
         self.load_model_btn = QPushButton('Load trained model')
+        self.load_model_btn.setToolTip('Select *.joblib file to load as trained model')
         self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
         self.reset_model_btn = QPushButton('Reset model')
@@ -136,6 +145,7 @@ class ConvPaintWidget(QWidget):
         self.load_save_group.glayout.addWidget(self.current_model_path, 2,1,1,1)
 
         self.check_use_custom_model = QCheckBox('Use custom model')
+        self.check_use_custom_model.setToolTip('Activate Model Tab to customize model')
         self.check_use_custom_model.setChecked(False)
         self.options_group.glayout.addWidget(self.check_use_custom_model, 0,0,1,1)
 
@@ -150,12 +160,15 @@ class ConvPaintWidget(QWidget):
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
             'vgg16', 'efficient_netb0', 'single_layer_vgg16'])#, 'single_layer_vgg16_rgb'])
+        self.qcombo_model_type.setToolTip('Select model architecture')
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
         self.load_nnmodel_btn = QPushButton('Load nn model')
+        self.load_nnmodel_btn.setToolTip('Load neural network model to display its layers')
         self.tabs.add_named_tab('Model', self.load_nnmodel_btn, [1,0,1,2])
 
         self.set_nnmodel_outputs_btn = QPushButton('Set model outputs')
+        self.set_nnmodel_outputs_btn.setToolTip('Select layers to use as feature extractors')
         self.tabs.add_named_tab('Model', self.set_nnmodel_outputs_btn, [2,0,1,2])
 
         self.model_output_selection = QListWidget()
@@ -170,22 +183,26 @@ class ConvPaintWidget(QWidget):
 
         self.check_use_min_features = QCheckBox('Use min features')
         self.check_use_min_features.setChecked(False)
+        self.check_use_min_features.setToolTip('Use same number of features from each layer. Otherwise use all features from each layer.')
         self.tabs.add_named_tab('Model', self.check_use_min_features, [5,0,1,2])
 
         self.spin_interpolation_order = QSpinBox()
         self.spin_interpolation_order.setMinimum(0)
         self.spin_interpolation_order.setMaximum(5)
         self.spin_interpolation_order.setValue(1)
+        self.spin_interpolation_order.setToolTip('Interpolation order for image rescaling')
         self.tabs.add_named_tab('Model', QLabel('Interpolation order'), [6,0,1,1])
         self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
 
         self.check_normalize = QCheckBox('Normalize')
         self.check_normalize.setChecked(True)
+        self.check_normalize.setToolTip('Normalize each channel to mean 0 and std 1')
         self.tabs.add_named_tab('Model', self.check_normalize, [7,0,1,1])
 
         self.check_use_cuda = QCheckBox('Use cuda')
         self.check_use_cuda.setChecked(False)
+        self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
         self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,1,1,1])
 
         self.check_multi_channel_training = QCheckBox('Multi channel training')
