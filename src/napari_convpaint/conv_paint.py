@@ -94,6 +94,7 @@ class ConvPaintWidget(QWidget):
         self.radio_multi_channel = QRadioButton('Multichannel image')
         self.radio_rgb = QRadioButton('RGB image')
         self.radio_single_channel.setChecked(True)
+        [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]]
         self.button_group_channels.addButton(self.radio_single_channel, id=1)
         self.button_group_channels.addButton(self.radio_multi_channel, id=2)
         self.button_group_channels.addButton(self.radio_rgb, id=3)
@@ -126,9 +127,13 @@ class ConvPaintWidget(QWidget):
         self.load_model_btn = QPushButton('Load trained model')
         self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
-        self.load_save_group.glayout.addWidget(QLabel('Current model:'), 1,0,1,1)
+        self.reset_model_btn = QPushButton('Reset model')
+        self.reset_model_btn.setToolTip('Suppress current model and reset to default')
+        self.load_save_group.glayout.addWidget(self.reset_model_btn, 1,0,1,1)
+
+        self.load_save_group.glayout.addWidget(QLabel('Current model:'), 2,0,1,1)
         self.current_model_path = QLabel('None')
-        self.load_save_group.glayout.addWidget(self.current_model_path, 1,1,1,1)
+        self.load_save_group.glayout.addWidget(self.current_model_path, 2,1,1,1)
 
         self.check_use_custom_model = QCheckBox('Use custom model')
         self.check_use_custom_model.setChecked(False)
@@ -228,7 +233,6 @@ class ConvPaintWidget(QWidget):
     def add_connections(self):
         
         self.select_layer_widget.changed.connect(self.select_layer)
-        #self.viewer.layers.events.removed.connect(self.reset_model)
         self.num_scales_combo.currentIndexChanged.connect(self.update_scalings)
 
         self.add_layers_btn.clicked.connect(self.add_annotation_layer)
@@ -238,6 +242,7 @@ class ConvPaintWidget(QWidget):
         self.prediction_all_btn.clicked.connect(self.predict_all)
         self.save_model_btn.clicked.connect(self.save_model)
         self.load_model_btn.clicked.connect(self.load_classifier)
+        self.reset_model_btn.clicked.connect(self.reset_model)
         self.check_use_project.stateChanged.connect(self._add_project)
         self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
 
@@ -282,18 +287,19 @@ class ConvPaintWidget(QWidget):
 
     def reset_model(self, event=None):
 
-        if len(self.viewer.layers) == 0:
-            self.model = None
-            self.random_forest = None
+        self.model = None
+        self.random_forest = None
         self.prediction_btn.setEnabled(False)
         self.prediction_all_btn.setEnabled(False)
         self.save_model_btn.setEnabled(False)
-        self.radio_single_channel.setEnabled(True)
-        self.radio_multi_channel.setEnabled(True)
-        self.radio_rgb.setEnabled(True)
-        self.radio_single_channel.setChecked(True)
         self.current_model_path.setText('None')
 
+
+        if self.select_layer_widget.value is None:
+            [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]]
+        else:
+            self.select_layer()
+        
     def add_annotation_layer(self):
         """Add annotation and prediction layers to viewer."""
 
