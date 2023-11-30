@@ -144,7 +144,7 @@ class ConvPaintWidget(QWidget):
 
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
-            'vgg16', 'efficient_netb0', 'single_layer_vgg16', 'single_layer_vgg16_rgb'])
+            'vgg16', 'efficient_netb0', 'single_layer_vgg16'])#, 'single_layer_vgg16_rgb'])
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
         self.load_nnmodel_btn = QPushButton('Load nn model')
@@ -183,6 +183,10 @@ class ConvPaintWidget(QWidget):
         self.check_use_cuda.setChecked(False)
         self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,1,1,1])
 
+        self.check_multi_channel_training = QCheckBox('Multi channel training')
+        self.check_multi_channel_training.setChecked(True)
+        self.check_multi_channel_training.setToolTip('If checked, extract features from each channe. Otherwise average all channels.')
+        self.tabs.add_named_tab('Model', self.check_multi_channel_training, grid_pos=[8,0,1,1])
 
         if project is True:
             self._add_project()
@@ -260,7 +264,7 @@ class ConvPaintWidget(QWidget):
             self.add_layers_btn.setEnabled(False)
         else:
             self.add_layers_btn.setEnabled(True)
-
+        
         if self.select_layer_widget.value is not None:
             if self.select_layer_widget.value.rgb:
                 self.radio_rgb.setChecked(True)
@@ -271,7 +275,10 @@ class ConvPaintWidget(QWidget):
                 self.radio_multi_channel.setEnabled(False)
                 self.radio_rgb.setEnabled(False)
             else:
-                self.radio_rgb.setEnabled(False)  
+                self.radio_rgb.setEnabled(False)
+                self.radio_multi_channel.setEnabled(True)
+                self.radio_single_channel.setEnabled(True)
+                self.radio_single_channel.setChecked(True)
 
     def reset_model(self, event=None):
 
@@ -352,12 +359,13 @@ class ConvPaintWidget(QWidget):
             self.set_nnmodel_outputs_btn.setEnabled(True)
             self.model_output_selection.setEnabled(True)
 
-    def set_default_model(self, keep_rgb=False):
+    def set_default_model(self):#, keep_rgb=False):
         """Set default model."""
-        if keep_rgb:
+        '''if keep_rgb:
             self.qcombo_model_type.setCurrentText('single_layer_vgg16_rgb')
         else:
-            self.qcombo_model_type.setCurrentText('single_layer_vgg16')
+            self.qcombo_model_type.setCurrentText('single_layer_vgg16')'''
+        self.qcombo_model_type.setCurrentText('single_layer_vgg16')
         self.num_scales_combo.setCurrentText('[1,2]')
         self.spin_interpolation_order.setValue(1)
         self.check_use_min_features.setChecked(True)
@@ -372,8 +380,8 @@ class ConvPaintWidget(QWidget):
         
         if self.model is None:
             if not self.check_use_custom_model.isChecked():
-                
-                # use 2d input for 2d images or if 3d input does not represent channels
+                self.set_default_model()
+                '''# use 2d input for 2d images or if 3d input does not represent channels
                 # use 3d input for rgb or if 3d input is channels and has dims 3
                 if self.viewer.layers[self.selected_channel].ndim == 2:
                     if self.viewer.layers[self.selected_channel].rgb:
@@ -388,6 +396,7 @@ class ConvPaintWidget(QWidget):
                         self.set_default_model(keep_rgb=True)
                     else:
                         self.set_default_model()
+                    self.set_default_model()'''
             else:
                 raise Exception('You have to define and load a model first')
         
@@ -410,7 +419,8 @@ class ConvPaintWidget(QWidget):
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device,
                 normalize=self.check_normalize.isChecked(),
-                image_downsample=self.spin_downsample.value()
+                image_downsample=self.spin_downsample.value(),
+                multi_channel_training=self.check_multi_channel_training.isChecked()
             )
             self.random_forest = train_classifier(features, targets)
             self.prediction_btn.setEnabled(True)
@@ -454,7 +464,8 @@ class ConvPaintWidget(QWidget):
                     use_min_features=self.check_use_min_features.isChecked(),
                     device=device,
                     normalize=self.check_normalize.isChecked(),
-                    image_downsample=self.spin_downsample.value()
+                    image_downsample=self.spin_downsample.value(),
+                    multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 if features is None:
                     continue
@@ -499,7 +510,8 @@ class ConvPaintWidget(QWidget):
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
                     device=device, normalize=self.check_normalize.isChecked(),
-                    image_downsample=self.spin_downsample.value()
+                    image_downsample=self.spin_downsample.value(),
+                    multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 self.viewer.layers['segmentation'].data[step] = predicted_image
             else:
@@ -512,7 +524,8 @@ class ConvPaintWidget(QWidget):
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
                     device=device, normalize=self.check_normalize.isChecked(),
-                    image_downsample=self.spin_downsample.value()
+                    image_downsample=self.spin_downsample.value(),
+                    multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 self.viewer.layers['segmentation'].data = predicted_image
             
@@ -544,7 +557,8 @@ class ConvPaintWidget(QWidget):
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device, normalize=self.check_normalize.isChecked(),
-                image_downsample=self.spin_downsample.value())
+                image_downsample=self.spin_downsample.value(),
+                multi_channel_training=self.check_multi_channel_training.isChecked())
             self.viewer.layers['segmentation'].data[step] = predicted_image
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
