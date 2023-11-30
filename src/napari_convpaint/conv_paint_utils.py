@@ -259,7 +259,8 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         if True, normalize each channel with its mean and std, by default False
     image_downsample: int, optional
         downsample image by this factor before extracting features, by default 1
-
+    multi_channel_training: bool, optional
+        if True, extract features from each channel separately, otherwise average all channels
 
     Returns
     -------
@@ -368,6 +369,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
+    multi_channel_training: bool, optional
+        if True, extract features from each channel separately, otherwise average all channels
 
     Returns
     -------
@@ -434,6 +437,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
+    multi_channel_training: bool, optional
+        if True, extract features from each channel separately, otherwise average all channels
 
     Returns
     -------

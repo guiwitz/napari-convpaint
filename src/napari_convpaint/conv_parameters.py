@@ -19,6 +19,7 @@ class Param:
     use_min_features: bool = None
     image_downsample: int = None
     normalize: bool = None
+    multi_channel_training: bool = None
 
 
 
