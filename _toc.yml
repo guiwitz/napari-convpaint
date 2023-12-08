@@ -5,6 +5,7 @@ parts:
   - caption: Getting started
     chapters:
     - file: book/Installation
+    - file: book/First_steps
   - caption: Examples
     chapters:
     - file: book/Timelapse
