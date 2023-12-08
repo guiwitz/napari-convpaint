@@ -7,3 +7,5 @@ Head to the [Getting Started section](https://guiwitz.github.io/napari-convpaint
 Head to the [Examples section](https://guiwitz.github.io/napari-convpaint/book/Timelapse.html) to discover how to use the plugin on a few examples.
 
 Head to the [In-depth explanation section](https://guiwitz.github.io/napari-convpaint/book/Description.html) to learn how the classifier is built.
+
+![napari-convpaint](https://github.com/guiwitz/napari-convpaint/raw/main/images/convpaint.gif)
