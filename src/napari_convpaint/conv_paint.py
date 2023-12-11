@@ -358,6 +358,7 @@ class ConvPaintWidget(QWidget):
             name='segmentation'
             )
         self.viewer.layers.selection.active = self.viewer.layers['annotations']
+        self.select_annotation_layer_widget.value = self.viewer.layers['annotations']
 
     def update_scalings(self):
 
