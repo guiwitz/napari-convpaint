@@ -25,6 +25,51 @@ from torch.nn.functional import interpolate as torch_interpolate
 from .conv_parameters import Param
 
 
+
+def normalize_image(arr, multi_channel_training):
+    """
+    Normalize a numpy array with 2-4 dimensions.
+
+    If the array has multiple channels (determined by the multi_channel_training flag), 
+    each channel is normalized independently. If there are multiple time or z frames, 
+    they are normalized together.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array to be normalized. Must have 2-4 dimensions.
+    multi_channel_training : bool
+        Flag to determine whether the third dimension represents channels (True) or time/z (False).
+
+    Returns
+    -------
+    arr : np.ndarray
+        Normalized array.
+
+    Raises
+    ------
+    ValueError
+        If the input array does not have 2-4 dimensions.
+    """
+    arr_norm = arr.copy()
+
+    
+    if arr.ndim < 2 or arr.ndim > 4:
+        raise ValueError("Array must have 2-4 dimensions")
+
+    # Normalize each channel independently
+    if arr.ndim == 4:  # If array has 4 dimensions, assume it's (t/z, y, x, c)
+        arr_norm = (arr - arr.mean(axis=(0, 1, 2), keepdims=True)) / arr.std(axis=(0, 1, 2), keepdims=True)
+    elif arr.ndim == 3:  # If array has 3 dimensions
+        if multi_channel_training:  # If third dimension represents channels
+            arr_norm = (arr - arr.mean(axis=(0, 1), keepdims=True)) / arr.std(axis=(0, 1), keepdims=True)
+        else:  # If third dimension represents time/z
+            arr_norm = (arr - arr.mean()) / arr.std()
+    else:  # If array has 2 dimensions, assume it's (y, x)
+        arr_norm = (arr - arr.mean()) / arr.std()
+
+    return arr_norm
+
 def filter_image(image, model, scalings):
     """
     Filter an image with the first layer of a VGG16 model.
@@ -268,7 +313,7 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         predicted image with classes
 
     """
-
+    
     if multi_channel_training:
         filter_fun = filter_image_multichannels
     else:
@@ -281,7 +326,6 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
             device=device, normalize=normalize, image_downsample=image_downsample)
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         tot_filters = max_features * len(all_scales)
-        tot_filters2 = np.sum(a.shape[1] for a in all_scales)
 
     else:
         # max_features = np.max(model.features_per_layer)
@@ -461,7 +505,12 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
 
     all_values = []
     all_targets = []
+
+    if normalize:
+        image = normalize_image(image, multi_channel_training=multi_channel_training)
+
     # iterating over non_empty iteraties of t/z for 3D data
+
     for ind, t in enumerate(non_empty):
 
         if annotations.ndim == 2:
@@ -474,7 +523,7 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         extracted_features = get_multiscale_features(
             model, current_image, current_annot, scalings,
             order=order, use_min_features=use_min_features,
-            device=device, normalize=normalize,
+            device=device, normalize=False, # we already normalized above
             image_downsample=image_downsample, multi_channel_training=multi_channel_training)
         all_values.append(extracted_features)
         
@@ -1141,6 +1190,7 @@ class Classifier():
             scalings=[1,2],
             order=1,
             use_min_features=False,
+            normalize=True,
         )
 
     def save_classifier(self, save_path):
@@ -1189,6 +1239,9 @@ class Classifier():
         else:
             im_out = np.zeros(image.shape, dtype=np.uint8)
 
+        if self.param.normalize:
+            image = normalize_image(image)
+
         for i in range(image.shape[0]):
             im_out[i] = predict_image(
                 image=image[i],
@@ -1198,7 +1251,7 @@ class Classifier():
                 order=self.param.order,
                 use_min_features=self.param.use_min_features,
                 device='cpu',
-                normalize=self.param.normalize,
+                normalize=False, #we already normalized above
                 image_downsample=self.param.image_downsample)
 
         if save_path is None:
