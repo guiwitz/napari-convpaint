@@ -213,8 +213,8 @@ class ConvPaintWidget(QWidget):
         self.add_connections()
         self.select_layer()
 
-        self.viewer.bind_key('a', self.hide_annotation)
-        self.viewer.bind_key('r', self.hide_prediction)
+        self.viewer.bind_key('a', self.hide_annotation, overwrite=True)
+        self.viewer.bind_key('r', self.hide_prediction, overwrite=True)
 
     def _add_project(self, event=None):
         """Add widget for multi-image project management"""
