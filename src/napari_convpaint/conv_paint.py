@@ -15,7 +15,7 @@ import yaml
 
 from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
-from .conv_paint_utils import predict_image
+from .conv_paint_utils import predict_image, normalize_image
 from .conv_parameters import Param
 from .conv_paint_utils import (Hookmodel, get_features_current_layers,
                                train_classifier, load_trained_classifier)
@@ -546,34 +546,38 @@ class ConvPaintWidget(QWidget):
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
+            if self.check_normalize.isChecked():
+                pbr.set_description(f"Normalization")
+                image_stack = normalize_image(self.viewer.layers[self.selected_channel].data,
+                                                multi_channel_training=self.check_multi_channel_training.isChecked())
+            else:
+                image_stack = self.viewer.layers[self.selected_channel].data
             pbr.set_description(f"Prediction")
             if (self.viewer.dims.ndim > 2) & (not self.radio_multi_channel.isChecked()):
                 step = self.viewer.dims.current_step[0]
-                image = self.viewer.layers[self.selected_channel].data[step]
+                image = image_stack[step]
+                
                 predicted_image = predict_image(
                     image, self.model, self.random_forest, self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
-                    device=device, normalize=self.check_normalize.isChecked(),
+                    device=device, normalize=False, #We already normalized the image
                     image_downsample=self.spin_downsample.value(),
                     multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 self.viewer.layers['segmentation'].data[step] = predicted_image
             else:
-
-                data_to_pass = self.viewer.layers[self.selected_channel].data
                 if self.viewer.layers[self.selected_channel].rgb:
-                    data_to_pass = np.moveaxis(data_to_pass, 2, 0)
+                    image_stack = np.moveaxis(image_stack, 2, 0)
                 predicted_image = predict_image(
-                    data_to_pass, self.model, self.random_forest, self.param.scalings,
+                    image_stack, self.model, self.random_forest, self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
-                    device=device, normalize=self.check_normalize.isChecked(),
+                    device=device, normalize=False, #We already normalized the image
                     image_downsample=self.spin_downsample.value(),
                     multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 self.viewer.layers['segmentation'].data = predicted_image
-            
             self.viewer.layers['segmentation'].refresh()
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
@@ -595,13 +599,19 @@ class ConvPaintWidget(QWidget):
         self.check_prediction_layer_exists()
 
         self.viewer.window._status_bar._toggle_activity_dock(True)
+
+        if self.check_normalize.isChecked():
+            image_stack = normalize_image(self.viewer.layers[self.selected_channel].data,
+                                                multi_channel_training=self.check_multi_channel_training.isChecked())
+        else:
+            image_stack = self.viewer.layers[self.selected_channel].data      
         for step in progress(range(self.viewer.dims.nsteps[0])):
-            image = self.viewer.layers[self.selected_channel].data[step]
+            image = image_stack[step]
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device, normalize=self.check_normalize.isChecked(),
+                device=device, normalize=False, # We already normalized above
                 image_downsample=self.spin_downsample.value(),
                 multi_channel_training=self.check_multi_channel_training.isChecked())
             self.viewer.layers['segmentation'].data[step] = predicted_image
