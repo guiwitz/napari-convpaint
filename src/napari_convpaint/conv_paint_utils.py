@@ -26,7 +26,7 @@ from .conv_parameters import Param
 
 
 
-def normalize_image(arr, multi_channel_training):
+def normalize_image(image, multi_channel_training):
     """
     Normalize a numpy array with 2-4 dimensions.
 
@@ -36,7 +36,7 @@ def normalize_image(arr, multi_channel_training):
 
     Parameters
     ----------
-    arr : np.ndarray
+    image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
     multi_channel_training : bool
         Flag to determine whether the third dimension represents channels (True) or time/z (False).
@@ -51,22 +51,20 @@ def normalize_image(arr, multi_channel_training):
     ValueError
         If the input array does not have 2-4 dimensions.
     """
-    arr_norm = arr.copy()
-
     
-    if arr.ndim < 2 or arr.ndim > 4:
+    if image.ndim < 2 or image.ndim > 4:
         raise ValueError("Array must have 2-4 dimensions")
 
     # Normalize each channel independently
-    if arr.ndim == 4:  # If array has 4 dimensions, assume it's (t/z, y, x, c)
-        arr_norm = (arr - arr.mean(axis=(0, 1, 2), keepdims=True)) / arr.std(axis=(0, 1, 2), keepdims=True)
-    elif arr.ndim == 3:  # If array has 3 dimensions
+    if image.ndim == 4:  # If array has 4 dimensions, assume it's (t/z, y, x, c)
+        arr_norm = (image - image.mean(axis=(0, 1, 2), keepdims=True)) / image.std(axis=(0, 1, 2), keepdims=True)
+    elif image.ndim == 3:  # If array has 3 dimensions
         if multi_channel_training:  # If third dimension represents channels
-            arr_norm = (arr - arr.mean(axis=(0, 1), keepdims=True)) / arr.std(axis=(0, 1), keepdims=True)
+            arr_norm = (image - image.mean(axis=(0, 1), keepdims=True)) / image.std(axis=(0, 1), keepdims=True)
         else:  # If third dimension represents time/z
-            arr_norm = (arr - arr.mean()) / arr.std()
+            arr_norm = (image - image.mean()) / image.std()
     else:  # If array has 2 dimensions, assume it's (y, x)
-        arr_norm = (arr - arr.mean()) / arr.std()
+        arr_norm = (image - image.mean()) / image.std()
 
     return arr_norm
 
