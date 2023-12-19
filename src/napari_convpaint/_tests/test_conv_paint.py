@@ -88,14 +88,13 @@ def test_multi_channel_prediction(make_napari_viewer, capsys):
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
-    viewer.add_image(im)
-    my_widget.check_multi_channel_training.setChecked(False)
+    viewer.add_image(np.moveaxis(im,2,0))
     my_widget.add_annotation_layer()
-    viewer.layers['annotations'].data = im_annot
+    viewer.layers['annotations'].data[1,:,:] = im_annot
     my_widget.update_classifier()
     my_widget.predict()
 
-    recovered = viewer.layers['segmentation'].data[ground_truth==1]
+    recovered = viewer.layers['segmentation'].data[1][ground_truth==1]
     precision, recall = compute_precision_recall(ground_truth, recovered)
     
     assert precision < 0.9, f"Precision: {precision} is too high for non multi-channel training"

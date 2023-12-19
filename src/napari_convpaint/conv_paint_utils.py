@@ -26,7 +26,7 @@ from .conv_parameters import Param
 
 
 
-def normalize_image(image, multi_channel_training):
+def normalize_image(image, image_mean, image_std):
     """
     Normalize a numpy array with 2-4 dimensions.
 
@@ -38,13 +38,19 @@ def normalize_image(image, multi_channel_training):
     ----------
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
-    multi_channel_training : bool
-        Flag to determine whether the third dimension represents channels (True) or time/z (False).
-
+    image_mean : float or nd.array
+        Mean of the input array along non-channel dimensions. If None, the mean is calculated from the input array.
+    image_std : float or nd.array
+        Standard deviation of the input array along non-channel dimensions. If None, the standard deviation is calculated from the input array.
+        
     Returns
     -------
     arr : np.ndarray
         Normalized array.
+    image_mean : float or nd.array
+        Mean of the input array along non-channel dimensions
+    image_std : float or nd.array
+        Standard deviation of the input array along non-channel dimensions
 
     Raises
     ------
@@ -55,18 +61,55 @@ def normalize_image(image, multi_channel_training):
     if image.ndim < 2 or image.ndim > 4:
         raise ValueError("Array must have 2-4 dimensions")
 
-    # Normalize each channel independently
-    if image.ndim == 4:  # If array has 4 dimensions, assume it's (t/z, y, x, c)
-        arr_norm = (image - image.mean(axis=(0, 1, 2), keepdims=True)) / image.std(axis=(0, 1, 2), keepdims=True)
-    elif image.ndim == 3:  # If array has 3 dimensions
-        if multi_channel_training:  # If third dimension represents channels
-            arr_norm = (image - image.mean(axis=(0, 1), keepdims=True)) / image.std(axis=(0, 1), keepdims=True)
-        else:  # If third dimension represents time/z
-            arr_norm = (image - image.mean()) / image.std()
-    else:  # If array has 2 dimensions, assume it's (y, x)
-        arr_norm = (image - image.mean()) / image.std()
+    # The computing of stats and image normalization is split into two function. This will
+    # allow to normalize even a single image of the stack with the same stats as the whole stack.
+    # This is done in the perspective of handling large stacks that cannot be loaded in memory.
+    # This needs to be implemented:
+        # - computing stats stack by stack and combining the result at the end
+        # - allow to normalize a single image from a stack
+    arr_norm = (image - image_mean) / image_std
 
     return arr_norm
+
+def compute_image_stats(image, first_dim_is_channel=False):
+    """
+    Compute mean and standard deviation of a numpy array with 2-4 dimensions.
+
+    If the array has multiple channels (determined by the first_dim_is_channel option), 
+    each channel is normalized independently. Channels can only be the first dimension of the array.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input array to be normalized. Must have 2-4 dimensions.
+    first_dim_is_channel : bool
+        Option to specify whether first dimension of array with ndim>2 represents channels (True) or time/z (False).
+        
+    Returns
+    -------
+    image_mean : float or nd.array
+        Mean of the input array along non-channel dimensions
+    image_std : float or nd.array
+        Standard deviation of the input array along non-channel dimensions
+
+    Raises
+    ------
+    ValueError
+        If the input array does not have 2-4 dimensions.
+    """
+    
+    if image.ndim < 2 or image.ndim > 4:
+        raise ValueError("Array must have 2-4 dimensions")
+    
+    if (image.ndim == 2) | (not first_dim_is_channel):
+        image_mean = image.mean()
+        image_std = image.std()
+    else:
+        image_mean = image.mean(axis=tuple(range(1,image.ndim)), keepdims=True)
+        image_std = image.std(axis=tuple(range(1,image.ndim)), keepdims=True)
+
+    return image_mean, image_std
+
 
 def filter_image(image, model, scalings):
     """
@@ -109,7 +152,7 @@ def filter_image(image, model, scalings):
 
 
 def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='cpu',
-                              normalize=False, image_downsample=1):
+                              image_downsample=1):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object.
     
@@ -126,8 +169,6 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
         by default 0
     device : str, optional
         Device to use for computation, by default 'cpu'
-    normalize : bool, optional
-        If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -154,9 +195,6 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
             warnings.warn(f'Image has {image.shape[0]} channels, model expects {input_channels}. Using mean projection.')
             image = np.mean(image, axis=0)
             image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
-
-    if normalize:
-        image = (image - image.mean(axis=(1, 2), keepdims=True)) / image.std(axis=(1, 2), keepdims=True)
 
     int_mode = 'bilinear' if order > 0 else 'nearest'
     align_corners = False if order > 0 else None
@@ -193,7 +231,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
 
 
 def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='cpu',
-                              normalize=False, image_downsample=1):
+                              image_downsample=1):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object. If image has multiple channels, each channel
     is processed separately.
@@ -211,8 +249,6 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
         by default 0
     device : str, optional
         Device to use for computation, by default 'cpu'
-    normalize : bool, optional
-        If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -236,9 +272,6 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
     elif image.ndim == 3:
         image = image[:, ::image_downsample, ::image_downsample]
         image_series = [np.ones((input_channels, im.shape[0], im.shape[1]), dtype=np.float32) * im for im in image]
-
-    if normalize:
-        image_series = [(im - im.mean(axis=(1, 2), keepdims=True)) / im.std(axis=(1, 2), keepdims=True) for im in image_series]
 
     int_mode = 'bilinear' if order > 0 else 'nearest'
     align_corners = False if order > 0 else None
@@ -276,8 +309,8 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
 
 
 def predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True, device='cpu', normalize=False, image_downsample=1,
-                  multi_channel_training=False):
+                  use_min_features=True, device='cpu', image_downsample=1,
+                  ):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -298,12 +331,8 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         if True, use the minimum number of features per layer
     device: str, optional
         device to use for computation, by default 'cpu'
-    normalize: bool, optional
-        if True, normalize each channel with its mean and std, by default False
     image_downsample: int, optional
         downsample image by this factor before extracting features, by default 1
-    multi_channel_training: bool, optional
-        if True, extract features from each channel separately, otherwise average all channels
 
     Returns
     -------
@@ -312,16 +341,13 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
 
     """
     
-    if multi_channel_training:
-        filter_fun = filter_image_multichannels
-    else:
-        filter_fun = filter_image_multioutputs
+    filter_fun = filter_image_multichannels
 
     if use_min_features:
         max_features = np.min(model.features_per_layer)
         all_scales = filter_fun(
             image, model, scalings=scalings, order=order,
-            device=device, normalize=normalize, image_downsample=image_downsample)
+            device=device, image_downsample=image_downsample)
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         tot_filters = max_features * len(all_scales)
 
@@ -329,7 +355,7 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         # max_features = np.max(model.features_per_layer)
         all_scales = filter_fun(
             image, model, scalings=scalings, order=order,
-            device=device, normalize=normalize, image_downsample=image_downsample)
+            device=device, image_downsample=image_downsample)
         tot_filters = np.sum(a.shape[1] for a in all_scales)
     
     tot_filters = int(tot_filters)
@@ -388,7 +414,7 @@ def load_single_layer_vgg16(keep_rgb=False):
 
 def get_multiscale_features(model, image, annotations, scalings, order=0,
                             use_min_features=True, device='cpu',
-                            normalize=False, image_downsample=1, multi_channel_training=False):
+                            image_downsample=1):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -407,12 +433,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         Use minimal number of features, by default True
     device : str, optional
         Device to use for computation, by default 'cpu'
-    normalize : bool, optional
-        If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
-    multi_channel_training: bool, optional
-        if True, extract features from each channel separately, otherwise average all channels
 
     Returns
     -------
@@ -420,10 +442,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         Extracted features. Dimensions npixels x nfeatures * nbscales
     """
 
-    if multi_channel_training:
-        filter_fun = filter_image_multichannels
-    else:
-        filter_fun = filter_image_multioutputs
+    filter_fun = filter_image_multichannels
 
     if use_min_features:
         max_features = np.min(model.features_per_layer)
@@ -437,7 +456,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
     all_scales = filter_fun(
         image, model, scalings, order=order, device=device,
-        normalize=normalize, image_downsample=image_downsample)
+        image_downsample=image_downsample)
     if use_min_features:
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
     all_values_scales = []
@@ -454,7 +473,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
 def get_features_current_layers(model, image, annotations, scalings=[1],
                                 order=0, use_min_features=True, device='cpu',
-                                normalize=False, image_downsample=1, multi_channel_training=False):
+                                image_downsample=1, multi_channel_training=False):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -475,12 +494,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         Use minimal number of features, by default True
     device : str, optional
         Device to use for computation, by default 'cpu'
-    normalize : bool, optional
-        If True, normalize each channel with its mean and std, by default False
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
-    multi_channel_training: bool, optional
-        if True, extract features from each channel separately, otherwise average all channels
 
     Returns
     -------
@@ -504,9 +519,6 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
     all_values = []
     all_targets = []
 
-    if normalize:
-        image = normalize_image(image, multi_channel_training=multi_channel_training)
-
     # iterating over non_empty iteraties of t/z for 3D data
 
     for ind, t in enumerate(non_empty):
@@ -521,8 +533,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         extracted_features = get_multiscale_features(
             model, current_image, current_annot, scalings,
             order=order, use_min_features=use_min_features,
-            device=device, normalize=False, # we already normalized above
-            image_downsample=image_downsample, multi_channel_training=multi_channel_training)
+            device=device,
+            image_downsample=image_downsample)
         all_values.append(extracted_features)
         
         all_targets.append(current_annot[::image_downsample, ::image_downsample]
@@ -1238,7 +1250,8 @@ class Classifier():
             im_out = np.zeros(image.shape, dtype=np.uint8)
 
         if self.param.normalize:
-            image = normalize_image(image)
+            image_mean, image_std = compute_image_stats(image)
+            image = normalize_image(image, image_mean, image_std)
 
         for i in range(image.shape[0]):
             im_out[i] = predict_image(
@@ -1249,7 +1262,6 @@ class Classifier():
                 order=self.param.order,
                 use_min_features=self.param.use_min_features,
                 device='cpu',
-                normalize=False, #we already normalized above
                 image_downsample=self.param.image_downsample)
 
         if save_path is None:

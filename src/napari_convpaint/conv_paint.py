@@ -15,7 +15,7 @@ import yaml
 
 from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
-from .conv_paint_utils import predict_image, normalize_image
+from .conv_paint_utils import predict_image, normalize_image, compute_image_stats
 from .conv_parameters import Param
 from .conv_paint_utils import (Hookmodel, get_features_current_layers,
                                train_classifier, load_trained_classifier)
@@ -45,6 +45,8 @@ class ConvPaintWidget(QWidget):
         self.project_widget = None
         self.features_per_layer = None
         self.selected_channel = None
+        self.image_mean = None
+        self.image_std = None
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -205,11 +207,6 @@ class ConvPaintWidget(QWidget):
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
         self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,1,1,1])
 
-        self.check_multi_channel_training = QCheckBox('Multi channel training')
-        self.check_multi_channel_training.setChecked(True)
-        self.check_multi_channel_training.setToolTip('If checked, extract features from each channe. Otherwise average all channels.')
-        self.tabs.add_named_tab('Model', self.check_multi_channel_training, grid_pos=[8,0,1,1])
-
         if project is True:
             self._add_project()
 
@@ -269,18 +266,10 @@ class ConvPaintWidget(QWidget):
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
-    '''def update_layer_list(self, event):
-        
-        keep_channel = None
-        if self.selected_channel is not None:
-            keep_channel = self.selected_channel
-        self.select_layer_widget.clear()
-        self.select_layer_widget.addItems([x.name for x in self.viewer.layers])
-        if keep_channel in [x.name for x in self.viewer.layers]:
-            self.select_layer_widget.setCurrentText(keep_channel)
-        else:
-            if self.viewer.layers:
-                self.select_layer_widget.setCurrentText(self.viewer.layers[0].name)'''
+        self.radio_multi_channel.toggled.connect(self.update_image_stats)
+        self.radio_single_channel.toggled.connect(self.update_image_stats)
+        self.radio_rgb.toggled.connect(self.update_image_stats)
+
 
     def hide_annotation(self, event=None):
         """Hide annotation layer."""
@@ -306,6 +295,7 @@ class ConvPaintWidget(QWidget):
         else:
             self.add_layers_btn.setEnabled(True)
         
+        # set radio buttons depending on selected image type
         if self.select_layer_widget.value is not None:
             if self.select_layer_widget.value.rgb:
                 self.radio_rgb.setChecked(True)
@@ -320,6 +310,19 @@ class ConvPaintWidget(QWidget):
                 self.radio_multi_channel.setEnabled(True)
                 self.radio_single_channel.setEnabled(True)
                 self.radio_single_channel.setChecked(True)
+
+            self.update_image_stats()
+
+    def update_image_stats(self):
+        # update stack stats for normalization
+        if self.check_normalize.isChecked():
+            data = self.viewer.layers[self.selected_channel].data
+            if self.viewer.layers[self.selected_channel].rgb:
+                data = np.moveaxis(data, 2, 0)
+            
+            self.image_mean, self.image_std = compute_image_stats(
+                image=data,
+                first_dim_is_channel=not self.radio_single_channel.isChecked())
 
     def reset_model(self, event=None):
 
@@ -414,40 +417,37 @@ class ConvPaintWidget(QWidget):
         self.check_use_min_features.setChecked(True)
         self._on_load_nnmodel()
 
+    def get_data_train(self):
+
+        image_stack = self.viewer.layers[self.selected_channel].data
+    
+        if self.viewer.layers[self.selected_channel].rgb:
+            image_stack = np.moveaxis(image_stack, 2, 0)
+
+        if self.check_normalize.isChecked():
+            image_stack = normalize_image(
+                image=image_stack,
+                image_mean=self.image_mean,
+                image_std=self.image_std)
+            
+        return image_stack
+
     def update_classifier(self):
         """Given a set of new annotations, update the random forest model."""
 
         unique_labels = np.unique(self.select_annotation_layer_widget.value.data)
         if (not 1 in unique_labels) | (not 2 in unique_labels):
-            raise Exception('You need annoations for foreground and background')
+            raise Exception('You need annotations for foreground and background')
         
         if self.model is None:
             if not self.check_use_custom_model.isChecked():
                 self.set_default_model()
-                '''# use 2d input for 2d images or if 3d input does not represent channels
-                # use 3d input for rgb or if 3d input is channels and has dims 3
-                if self.viewer.layers[self.selected_channel].ndim == 2:
-                    if self.viewer.layers[self.selected_channel].rgb:
-                        self.set_default_model(keep_rgb=True)
-                    else:
-                        self.set_default_model()
-                
-                else:
-                    if self.radio_multi_channel.isChecked():
-                        if self.viewer.layers[self.selected_channel].data.shape[0] != 3:
-                            raise Exception(f'your input has dimensions {self.viewer.layers[self.selected_channel].data.shape}, but the default model only works with 3 channel images')
-                        self.set_default_model(keep_rgb=True)
-                    else:
-                        self.set_default_model()
-                    self.set_default_model()'''
             else:
                 raise Exception('You have to define and load a model first')
         
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
-        data_to_pass = self.viewer.layers[self.selected_channel].data
-        if self.viewer.layers[self.selected_channel].rgb:
-            data_to_pass = np.moveaxis(data_to_pass, 2, 0)
+        image_stack = self.get_data_train()
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
@@ -455,15 +455,13 @@ class ConvPaintWidget(QWidget):
             pbr.set_description(f"Training")
             features, targets = get_features_current_layers(
                 model=self.model,
-                image=data_to_pass,
+                image=image_stack,
                 annotations=self.select_annotation_layer_widget.value.data,
                 scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device,
-                normalize=self.check_normalize.isChecked(),
                 image_downsample=self.spin_downsample.value(),
-                multi_channel_training=self.check_multi_channel_training.isChecked()
             )
             self.random_forest = train_classifier(features, targets)
             self.prediction_btn.setEnabled(True)
@@ -473,7 +471,8 @@ class ConvPaintWidget(QWidget):
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def update_classifier_on_project(self):
-        """Train classifier on all annotations in project."""
+        """Train classifier on all annotations in project.
+        !!!! Need to double-check if normalization is done correctly for projects !!!!"""
 
         if self.model is None:
             if not self.check_use_custom_model.isChecked():
@@ -495,21 +494,17 @@ class ConvPaintWidget(QWidget):
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
 
-                data_to_pass = self.viewer.layers[self.selected_channel].data
-                if self.viewer.layers[self.selected_channel].rgb:
-                    data_to_pass = np.moveaxis(data_to_pass, 2, 0)
+                image_stack = self.get_data_train()
 
                 features, targets = get_features_current_layers(
                     model=self.model,
-                    image=data_to_pass,
+                    image=image_stack,
                     annotations=self.select_annotation_layer_widget.value.data,
                     scalings=self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
                     device=device,
-                    normalize=self.check_normalize.isChecked(),
                     image_downsample=self.spin_downsample.value(),
-                    multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 if features is None:
                     continue
@@ -546,36 +541,38 @@ class ConvPaintWidget(QWidget):
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
-            if self.check_normalize.isChecked():
-                pbr.set_description(f"Normalization")
-                image_stack = normalize_image(self.viewer.layers[self.selected_channel].data,
-                                                multi_channel_training=self.check_multi_channel_training.isChecked())
-            else:
-                image_stack = self.viewer.layers[self.selected_channel].data
+            
             pbr.set_description(f"Prediction")
             if (self.viewer.dims.ndim > 2) & (not self.radio_multi_channel.isChecked()):
                 step = self.viewer.dims.current_step[0]
-                image = image_stack[step]
+                image = self.viewer.layers[self.selected_channel].data[step]
+                if self.check_normalize.isChecked():
+                    image = normalize_image(image=image,
+                                             image_mean=self.image_mean,
+                                             image_std=self.image_std)                      
                 
                 predicted_image = predict_image(
                     image, self.model, self.random_forest, self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
-                    device=device, normalize=False, #We already normalized the image
+                    device=device,
                     image_downsample=self.spin_downsample.value(),
-                    multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 self.viewer.layers['segmentation'].data[step] = predicted_image
             else:
+                image_stack = self.viewer.layers[self.selected_channel].data
                 if self.viewer.layers[self.selected_channel].rgb:
                     image_stack = np.moveaxis(image_stack, 2, 0)
+                if self.check_normalize.isChecked():
+                    image_stack = normalize_image(image=image_stack,
+                                                image_mean=self.image_mean,
+                                                image_std=self.image_std)
                 predicted_image = predict_image(
                     image_stack, self.model, self.random_forest, self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
-                    device=device, normalize=False, #We already normalized the image
+                    device=device,
                     image_downsample=self.spin_downsample.value(),
-                    multi_channel_training=self.check_multi_channel_training.isChecked()
                 )
                 self.viewer.layers['segmentation'].data = predicted_image
             self.viewer.layers['segmentation'].refresh()
@@ -601,8 +598,9 @@ class ConvPaintWidget(QWidget):
         self.viewer.window._status_bar._toggle_activity_dock(True)
 
         if self.check_normalize.isChecked():
-            image_stack = normalize_image(self.viewer.layers[self.selected_channel].data,
-                                                multi_channel_training=self.check_multi_channel_training.isChecked())
+            image_stack = normalize_image(image=self.viewer.layers[self.selected_channel].data,
+                                          image_mean=self.image_mean,
+                                          image_std=self.image_std)
         else:
             image_stack = self.viewer.layers[self.selected_channel].data      
         for step in progress(range(self.viewer.dims.nsteps[0])):
@@ -611,9 +609,9 @@ class ConvPaintWidget(QWidget):
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device, normalize=False, # We already normalized above
-                image_downsample=self.spin_downsample.value(),
-                multi_channel_training=self.check_multi_channel_training.isChecked())
+                device=device,
+                image_downsample=self.spin_downsample.value()
+            )
             self.viewer.layers['segmentation'].data[step] = predicted_image
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
@@ -660,7 +658,6 @@ class ConvPaintWidget(QWidget):
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.image_downsample = self.spin_downsample.value()
         self.param.normalize = self.check_normalize.isChecked()
-        self.param.multi_channel_training = self.check_multi_channel_training.isChecked()
 
     
     def load_classifier(self, event=None, save_file=None):
@@ -694,4 +691,3 @@ class ConvPaintWidget(QWidget):
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
         self.check_normalize.setChecked(self.param.normalize)
-        self.check_multi_channel_training.setChecked(self.param.multi_channel_training)
