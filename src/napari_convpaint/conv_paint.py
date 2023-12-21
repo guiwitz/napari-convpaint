@@ -278,13 +278,13 @@ class ConvPaintWidget(QWidget):
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
-        self.radio_multi_channel.toggled.connect(self.reset_dims_settings)
-        self.radio_single_channel.toggled.connect(self.reset_dims_settings)
-        self.radio_rgb.toggled.connect(self.reset_dims_settings)
+        self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
+        self.radio_single_channel.toggled.connect(self.reset_radio_norm_settings)
+        self.radio_rgb.toggled.connect(self.reset_radio_norm_settings)
 
-        self.radio_no_normalize.toggled.connect(self.reset_dims_settings)
-        self.radio_normalized_over_stack.toggled.connect(self.reset_dims_settings)
-        self.radio_normalize_by_image.toggled.connect(self.reset_dims_settings)
+        self.radio_no_normalize.toggled.connect(self.reset_stats)
+        self.radio_normalized_over_stack.toggled.connect(self.reset_stats)
+        self.radio_normalize_by_image.toggled.connect(self.reset_stats)
 
 
     def hide_annotation(self, event=None):
@@ -332,20 +332,27 @@ class ConvPaintWidget(QWidget):
                 self.radio_single_channel.setEnabled(False)
                 self.radio_multi_channel.setChecked(True)
 
-            if self.select_layer_widget.value.ndim == 2:
-                self.radio_normalize_by_image.setEnabled(False)
-                self.radio_normalized_over_stack.setEnabled(True)
-                self.radio_normalized_over_stack.setChecked(True)
-            else:
-                self.radio_normalize_by_image.setEnabled(True)
-                self.radio_normalized_over_stack.setEnabled(True)
-                self.radio_normalized_over_stack.setChecked(True)
+            self.reset_radio_norm_settings()
 
-            self.image_mean, self.image_std = None, None
+    def reset_stats(self):
+        self.image_mean, self.image_std = None, None
 
-    def reset_dims_settings(self, event=None):
+    def reset_radio_norm_settings(self, event=None):
         
         self.image_mean, self.image_std = None, None
+
+        if self.select_layer_widget.value.ndim == 2:
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalize_by_image.setChecked(True)
+            self.radio_normalized_over_stack.setEnabled(False)
+        elif (self.select_layer_widget.value.ndim == 3) and (self.radio_multi_channel.isChecked()):
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalize_by_image.setChecked(True)
+            self.radio_normalized_over_stack.setEnabled(False)
+        else:
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalized_over_stack.setEnabled(True)
+            self.radio_normalized_over_stack.setChecked(True)
 
             
     def get_image_stats(self):
@@ -363,6 +370,7 @@ class ConvPaintWidget(QWidget):
                     image=data,
                     ignore_n_first_dims=None)
         elif self.radio_normalize_by_image.isChecked():
+            # also takes into account CXY case (2D multi-channel image) as first dim is dropped
             self.image_mean, self.image_std = compute_image_stats(
                 image=data,
                 ignore_n_first_dims=data.ndim-2)
