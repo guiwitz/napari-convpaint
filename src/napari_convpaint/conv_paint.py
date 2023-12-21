@@ -657,6 +657,8 @@ class ConvPaintWidget(QWidget):
             )
             if self.viewer.dims.ndim == 2:
                 self.viewer.layers['segmentation'].data = predicted_image
+            elif (self.viewer.dims.ndim == 3) and  (self.radio_multi_channel.isChecked()):
+                self.viewer.layers['segmentation'].data = predicted_image
             else:
                 self.viewer.layers['segmentation'].data[step] = predicted_image
             self.viewer.layers['segmentation'].refresh()
