@@ -321,11 +321,16 @@ class ConvPaintWidget(QWidget):
                 self.radio_single_channel.setChecked(True)
                 self.radio_multi_channel.setEnabled(False)
                 self.radio_rgb.setEnabled(False)
-            else:
+            elif self.select_layer_widget.value.ndim == 3:
                 self.radio_rgb.setEnabled(False)
                 self.radio_multi_channel.setEnabled(True)
                 self.radio_single_channel.setEnabled(True)
                 self.radio_single_channel.setChecked(True)
+            elif self.select_layer_widget.value.ndim == 4:
+                self.radio_rgb.setEnabled(False)
+                self.radio_multi_channel.setEnabled(True)
+                self.radio_single_channel.setEnabled(False)
+                self.radio_multi_channel.setChecked(True)
 
             if self.select_layer_widget.value.ndim == 2:
                 self.radio_normalize_by_image.setEnabled(False)
@@ -782,4 +787,4 @@ class ConvPaintWidget(QWidget):
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
-        self.button_group_normalize.id(self.param.normalize).setChecked()
+        self.button_group_normalize.button(self.param.normalize).setChecked(True)
