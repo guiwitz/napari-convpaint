@@ -333,6 +333,7 @@ class ConvPaintWidget(QWidget):
                 self.radio_multi_channel.setChecked(True)
 
             self.reset_radio_norm_settings()
+            self.reset_predict_buttons_after_training()
 
     def reset_stats(self):
         self.image_mean, self.image_std = None, None
@@ -524,11 +525,25 @@ class ConvPaintWidget(QWidget):
                 image_downsample=self.spin_downsample.value(),
             )
             self.random_forest = train_classifier(features, targets)
-            self.prediction_btn.setEnabled(True)
-            self.prediction_all_btn.setEnabled(True)
+            self.reset_predict_buttons_after_training()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
+
+    def reset_predict_buttons_after_training(self):
+        
+        if (self.model is not None) and (self.select_layer_widget.value is not None):
+            self.prediction_btn.setEnabled(True)
+            if self.select_layer_widget.value == 2:
+                self.prediction_all_btn.setEnabled(False)
+            elif self.select_layer_widget.value.ndim == 3:
+                if self.radio_multi_channel.isChecked():
+                    self.prediction_all_btn.setEnabled(False)
+                else:
+                    self.prediction_all_btn.setEnabled(True)
+            else:
+                self.prediction_all_btn.setEnabled(True)
+
 
     def update_classifier_on_project(self):
         """Train classifier on all annotations in project.
@@ -575,8 +590,7 @@ class ConvPaintWidget(QWidget):
             all_targets = np.concatenate(all_targets, axis=0)
 
             self.random_forest = train_classifier(all_features, all_targets)
-            self.prediction_btn.setEnabled(True)
-            self.prediction_all_btn.setEnabled(True)
+            self.reset_predict_buttons_after_training()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
@@ -775,8 +789,7 @@ class ConvPaintWidget(QWidget):
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
         self.random_forest, self.param = load_trained_classifier(save_file)
-        self.prediction_btn.setEnabled(True)
-        self.prediction_all_btn.setEnabled(True)
+        self.reset_predict_buttons_after_training()
         self.current_model_path.setText(save_file.name)
 
         self.update_gui_from_params()
