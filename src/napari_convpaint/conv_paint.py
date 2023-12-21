@@ -12,6 +12,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import yaml
+from dask.distributed import Client, LocalCluster
 
 from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
@@ -47,6 +48,7 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = None
         self.image_mean = None
         self.image_std = None
+        self.client = None
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -285,6 +287,11 @@ class ConvPaintWidget(QWidget):
         self.radio_no_normalize.toggled.connect(self.reset_dims_settings)
         self.radio_normalized_over_stack.toggled.connect(self.reset_dims_settings)
         self.radio_normalize_by_image.toggled.connect(self.reset_dims_settings)
+
+    def initialize_client(self):
+
+        cluster = LocalCluster()
+        self.client = Client(cluster)
 
 
     def hide_annotation(self, event=None):
@@ -695,6 +702,11 @@ class ConvPaintWidget(QWidget):
             num_steps = image_stack.shape[0]
         elif image_stack.ndim == 4:
             num_steps = image_stack.shape[1]           
+        
+        if self.client is None:
+            self.initialize_client()
+        
+        predict_tasks= []
         for step in progress(range(num_steps)):
             if image_stack.ndim == 3:
                 image = image_stack[step]
@@ -702,14 +714,30 @@ class ConvPaintWidget(QWidget):
                 image = image_stack[:, step]
             else:
                 raise Exception(f'Image stack has wrong dimensionality {image_stack.ndim}')
-            predicted_image = predict_image(
+            predict_tasks.append(self.client.submit(
+                predict_image,
+                image=image,
+                model=self.model,
+                classifier=self.random_forest,
+                scalings=self.param.scalings,
+                order=self.spin_interpolation_order.value(),
+                use_min_features=self.check_use_min_features.isChecked(),
+                device=device,
+                image_downsample=self.spin_downsample.value()
+            ))
+            '''predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 device=device,
                 image_downsample=self.spin_downsample.value()
-            )
-            self.viewer.layers['segmentation'].data[step] = predicted_image
+            )'''
+        if len(predict_tasks) > 0:
+            for step in progress(range(num_steps)):
+                future = predict_tasks[step]
+                predicted_image = future.result()
+                future.cancel()
+                self.viewer.layers['segmentation'].data[step] = predicted_image
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def check_prediction_layer_exists(self):
