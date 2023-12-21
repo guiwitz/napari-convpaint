@@ -6,6 +6,7 @@ from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
+import joblib
 from joblib import dump, load
 from pathlib import Path
 import warnings
@@ -522,7 +523,9 @@ class ConvPaintWidget(QWidget):
                 device=device,
                 image_downsample=self.spin_downsample.value(),
             )
-            self.random_forest = train_classifier(features, targets)
+            
+            with joblib.parallel_backend('dask'):
+                self.random_forest = train_classifier(features, targets)
             self.prediction_btn.setEnabled(True)
             self.prediction_all_btn.setEnabled(True)
             self.save_model_btn.setEnabled(True)
@@ -654,7 +657,7 @@ class ConvPaintWidget(QWidget):
                     image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
                                 
-                
+            #with joblib.parallel_backend('dask'):
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
@@ -707,7 +710,7 @@ class ConvPaintWidget(QWidget):
             self.initialize_client()
         
         predict_tasks= []
-        for step in progress(range(num_steps)):
+        for step in progress(range(num_steps), desc='Segmenting'):
             if image_stack.ndim == 3:
                 image = image_stack[step]
             elif image_stack.ndim == 4:
@@ -725,19 +728,14 @@ class ConvPaintWidget(QWidget):
                 device=device,
                 image_downsample=self.spin_downsample.value()
             ))
-            '''predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings,
-                order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(),
-                device=device,
-                image_downsample=self.spin_downsample.value()
-            )'''
-        if len(predict_tasks) > 0:
-            for step in progress(range(num_steps)):
-                future = predict_tasks[step]
-                predicted_image = future.result()
-                future.cancel()
-                self.viewer.layers['segmentation'].data[step] = predicted_image
+            
+        with progress(total=0) as pbr:
+            pbr.set_description(f"Gathering results")
+            if len(predict_tasks) > 0:
+                predicted_image = self.client.gather(predict_tasks)
+                predicted_image = np.stack(predicted_image, axis=0)
+                self.viewer.layers['segmentation'].data = predicted_image
+                self.client.cancel(predict_tasks)
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def check_prediction_layer_exists(self):
