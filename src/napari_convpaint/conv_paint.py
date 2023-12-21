@@ -498,7 +498,7 @@ class ConvPaintWidget(QWidget):
 
         unique_labels = np.unique(self.select_annotation_layer_widget.value.data)
         if (not 1 in unique_labels) | (not 2 in unique_labels):
-            raise Exception('You need annotations for foreground and background')
+            raise Exception('You need annotations for at least foreground and background')
         
         if self.model is None:
             if not self.check_use_custom_model.isChecked():
