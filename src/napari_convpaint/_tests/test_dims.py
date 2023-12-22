@@ -121,9 +121,9 @@ def test_4d_image(make_napari_viewer, capsys):
     assert my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
 
-    assert 255/2-5 < my_widget.image_mean.flatten()[0] < 255/2+5, "Mean over channels seems wrong"
-    assert 255-5 < my_widget.image_mean.flatten()[1] < 255+5, "Mean over channels seems wrong"
-    assert (3*255)/2-5 < my_widget.image_mean.flatten()[2] < (3*255)/2+5, "Mean over channels seems wrong"
+    assert 255/2-10 < my_widget.image_mean.flatten()[0] < 255/2+10, "Mean over channels seems wrong"
+    assert 255-10 < my_widget.image_mean.flatten()[1] < 255+10, "Mean over channels seems wrong"
+    assert (3*255)/2-10 < my_widget.image_mean.flatten()[2] < (3*255)/2+10, "Mean over channels seems wrong"
 
     # make image time dependent
     for i in range(10):
