@@ -3,6 +3,106 @@ from napari_convpaint.utils import generate_synthetic_square, generate_synthetic
 import numpy as np
 import os
 
+def test_3d_single_channel(make_napari_viewer, capsys):
+    """A 3D stack where 3rd dim is z or t"""
+
+    multid_3d = np.stack([(i+1) * np.random.randint(0, 255, (100,100)) for i in range(3)], axis=0)
+    viewer = make_napari_viewer()
+    my_widget = ConvPaintWidget(viewer)
+    viewer.add_image(multid_3d)
+
+    my_widget.add_annotation_layer()
+
+    assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
+
+    # get stats and check dimensions and values
+    my_widget.get_image_stats()
+
+    # check that mean is single number ~127
+    assert my_widget.image_mean.shape == ()
+    assert 250 < my_widget.image_mean < 260
+
+    normalized = my_widget.get_selectedlayer_data()
+
+    # check that normalized image has correct dims
+    assert normalized.shape == (3,100,100)
+
+    # check that mean by channel is [<0, 0, >0]
+    assert normalized[0].mean() < 0
+    np.testing.assert_almost_equal(normalized[1].mean(), 0, decimal=1)
+    assert normalized[2].mean() > 0.1
+
+    # switch to by channel normalization
+    my_widget.radio_normalize_by_image.setChecked(True)
+    assert my_widget.image_mean is None, "Bad reset of image stats"
+    my_widget.get_image_stats()
+    assert my_widget.image_mean.shape == (3,1,1)
+
+    normalized = my_widget.get_selectedlayer_data()
+    # check that mean over each full channel is 0
+    np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
+
+def test_3d_multi_channel(make_napari_viewer, capsys):
+    """A 3D stack where 3rd dim is channel"""
+    
+    multid_3d = np.stack([(i+1) * np.random.randint(0, 255, (100,100)) for i in range(3)], axis=0)
+    viewer = make_napari_viewer()
+    my_widget = ConvPaintWidget(viewer)
+    viewer.add_image(multid_3d)
+
+    my_widget.radio_multi_channel.setChecked(True)
+    my_widget.add_annotation_layer()
+
+    # check that stack normalization is off
+    assert my_widget.radio_normalized_over_stack.isEnabled() == False
+
+    assert viewer.layers['annotations'].data.ndim == 2, "Annotation layer should be 2D"
+
+    # get stats and check dimensions and values
+    my_widget.get_image_stats()
+
+    # check that mean is single number ~127
+    assert my_widget.image_mean.shape == (3,1,1)
+
+    # check that mean is taken per channel
+    assert 127-10 < my_widget.image_mean.flatten()[0] < 127+10
+    assert 3*127-10 < my_widget.image_mean.flatten()[2] < 3*127+10
+
+    # check that normalization per channel gives 0
+    normalized = my_widget.get_selectedlayer_data()
+    # check that mean over each full channel is 0
+    np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
+
+def test_RGB(make_napari_viewer, capsys):
+    """A 3D stack where 3rd dim is channel"""
+    
+    multid_rgb = np.stack([(i+1) * np.random.randint(0, 255, (100,100)) for i in range(3)], axis=2)
+    viewer = make_napari_viewer()
+    my_widget = ConvPaintWidget(viewer)
+    viewer.add_image(multid_rgb)
+
+    my_widget.add_annotation_layer()
+
+    # check that stack normalization is off
+    assert my_widget.radio_normalized_over_stack.isEnabled() == False
+
+    assert viewer.layers['annotations'].data.ndim == 2, "Annotation layer should be 2D"
+
+    # get stats and check dimensions and values
+    my_widget.get_image_stats()
+
+    # check that mean is single number ~127
+    assert my_widget.image_mean.shape == (3,1,1)
+
+    # check that mean is taken per channel
+    assert 127-10 < my_widget.image_mean.flatten()[0] < 127+10
+    assert 3*127-10 < my_widget.image_mean.flatten()[2] < 3*127+10
+
+    # check that normalization per channel gives 0
+    normalized = my_widget.get_selectedlayer_data()
+    # check that mean over each full channel is 0
+    np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
+
 def test_4d_image(make_napari_viewer, capsys):
     """For a 4D data (C, T, X, Y) check that normalization is done properly
     per channel and per stack or image"""
