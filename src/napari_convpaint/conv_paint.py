@@ -632,10 +632,10 @@ class ConvPaintWidget(QWidget):
                     step = self.viewer.dims.current_step[0]
                     image = self.viewer.layers[self.selected_channel].data[step]
                     if not self.radio_no_normalize.isChecked():
-                        if self.image_mean.ndim==0:
+                        if self.radio_normalized_over_stack.isChecked():
                             image_mean = self.image_mean
                             image_std = self.image_std
-                        else:
+                        elif self.radio_normalize_by_image.isChecked():
                             image_mean = self.image_mean[step]
                             image_std = self.image_std[step]
                         image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)  
@@ -654,10 +654,8 @@ class ConvPaintWidget(QWidget):
                         image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
                         
             elif self.viewer.dims.ndim == 4:
-                if self.radio_rgb.isChecked():
-                    step = self.viewer.dims.current_step[0]
-                else:
-                    step = self.viewer.dims.current_step[1]
+                # for 4D channel is always first, t/z second
+                step = self.viewer.dims.current_step[1]
                 image = self.viewer.layers[self.selected_channel].data[:, step]
                 if not self.radio_no_normalize.isChecked():
                     if self.radio_normalized_over_stack.isChecked():
@@ -668,8 +666,6 @@ class ConvPaintWidget(QWidget):
                         image_std = self.image_std[:,step]
                     image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
-                                
-                
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
@@ -679,7 +675,7 @@ class ConvPaintWidget(QWidget):
             )
             if self.viewer.dims.ndim == 2:
                 self.viewer.layers['segmentation'].data = predicted_image
-            elif (self.viewer.dims.ndim == 3) and  (self.radio_multi_channel.isChecked()):
+            elif (self.viewer.dims.ndim == 3) and (self.radio_multi_channel.isChecked()):
                 self.viewer.layers['segmentation'].data = predicted_image
             else:
                 self.viewer.layers['segmentation'].data[step] = predicted_image
