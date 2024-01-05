@@ -1,4 +1,3 @@
-
 [![License](https://img.shields.io/pypi/l/napari-convpaint.svg?color=green)](https://github.com/guiwitz/napari-convpaint/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/napari-convpaint.svg?color=green)](https://pypi.org/project/napari-convpaint)
 [![Python Version](https://img.shields.io/pypi/pyversions/napari-convpaint.svg?color=green)](https://python.org)
@@ -6,17 +5,15 @@
 [![codecov](https://codecov.io/gh/guiwitz/napari-convpaint/branch/main/graph/badge.svg)](https://codecov.io/gh/guiwitz/napari-convpaint)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-convpaint)](https://napari-hub.org/plugins/napari-convpaint)
 
-# napari-convpaint
+![napari-conv-paint](./images/logo.png)
 
-![overview conv-paint](/images/overview_github.png)
 This napari plugin can be used to segment objects in images based on a few brush strokes providing examples of foreground and background. Based on the same idea as other tools like ilastik, its main strength is that it provides good results without adjusting any parameters. The filters used to generate features for classification are indeed taken from layers of trained deep learning networks and don't need to be chosen manually. Find more information in the [docs](https://guiwitz.github.io/napari-convpaint/).
 
-![overview conv-paint](/images/network_github.png)
-
 **The idea behind the plugin comes directly from the work of Lucien Hinderling (University of Bern) and can be found here: https://github.com/hinderling/napari_pixel_classifier.**
+
 ## Installation
 
-You can install `napari-convpaint` via [pip]
+You can install `napari-convpaint` via [pip]:
 
     pip install napari-convpaint
 
