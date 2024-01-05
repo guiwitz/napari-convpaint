@@ -12,6 +12,7 @@ parts:
     - file: book/RGB
     - file: book/Workflow
     - file: book/Multifiles
+    - file: book/IMC_data
   - caption: In-depth explanations
     chapters:
     - file: book/Description
