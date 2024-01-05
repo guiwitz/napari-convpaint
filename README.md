@@ -6,10 +6,7 @@
 [![codecov](https://codecov.io/gh/guiwitz/napari-convpaint/branch/main/graph/badge.svg)](https://codecov.io/gh/guiwitz/napari-convpaint)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-convpaint)](https://napari-hub.org/plugins/napari-convpaint)
 
-#
-<img src="./images/logo.png" width="60%" />
 
-#
 
 ![overview conv-paint](/images/overview_github.png)
 This napari plugin can be used to segment objects in images based on a few brush strokes providing examples of foreground and background. Based on the same idea as other tools like ilastik, its main strength is that it provides good results without adjusting any parameters. The filters used to generate features for classification are indeed taken from layers of trained deep learning networks and don't need to be chosen manually.
