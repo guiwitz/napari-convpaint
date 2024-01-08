@@ -45,12 +45,8 @@ def normalize_image(image, image_mean, image_std):
         
     Returns
     -------
-    arr : np.ndarray
+    arr_norm : np.ndarray
         Normalized array.
-    image_mean : float or nd.array
-        Mean of the input array along non-channel dimensions
-    image_std : float or nd.array
-        Standard deviation of the input array along non-channel dimensions
 
     Raises
     ------
@@ -71,7 +67,7 @@ def normalize_image(image, image_mean, image_std):
 
     return arr_norm
 
-def compute_image_stats(image, first_dim_is_channel=False):
+def compute_image_stats(image, ignore_n_first_dims=None):
     """
     Compute mean and standard deviation of a numpy array with 2-4 dimensions.
 
@@ -82,8 +78,10 @@ def compute_image_stats(image, first_dim_is_channel=False):
     ----------
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
-    first_dim_is_channel : bool
-        Option to specify whether first dimension of array with ndim>2 represents channels (True) or time/z (False).
+    ignore_n_first_dims : int
+        Number of first dimensions to ignore when computing the mean and standard deviation.
+        For example if the input array has 3 dimensions CHW and ignore_n_first_dims=1, the mean
+        and standard deviation will be computed for each channel C.
         
     Returns
     -------
@@ -101,12 +99,12 @@ def compute_image_stats(image, first_dim_is_channel=False):
     if image.ndim < 2 or image.ndim > 4:
         raise ValueError("Array must have 2-4 dimensions")
     
-    if (image.ndim == 2) | (not first_dim_is_channel):
+    if ignore_n_first_dims is None:
         image_mean = image.mean()
         image_std = image.std()
     else:
-        image_mean = image.mean(axis=tuple(range(1,image.ndim)), keepdims=True)
-        image_std = image.std(axis=tuple(range(1,image.ndim)), keepdims=True)
+        image_mean = image.mean(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
+        image_std = image.std(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
 
     return image_mean, image_std
 
@@ -264,7 +262,7 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
 
     input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
-
+    
     if image.ndim == 2:
         image = image[::image_downsample, ::image_downsample]
         image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
@@ -473,7 +471,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
 def get_features_current_layers(model, image, annotations, scalings=[1],
                                 order=0, use_min_features=True, device='cpu',
-                                image_downsample=1, multi_channel_training=False):
+                                image_downsample=1):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -527,8 +525,12 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
             current_image = image
             current_annot = annotations
         else:
-            current_image = image[t]
-            current_annot = annotations[t]
+            if image.ndim == 3:
+                current_image = image[t]
+                current_annot = annotations[t]
+            elif image.ndim == 4:
+                current_image = image[:, t]
+                current_annot = annotations[t]
 
         extracted_features = get_multiscale_features(
             model, current_image, current_annot, scalings,

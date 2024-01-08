@@ -159,6 +159,23 @@ class ConvPaintWidget(QWidget):
         self.options_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
         self.options_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
 
+        self.button_group_normalize = QButtonGroup()
+        self.radio_no_normalize = QRadioButton('No normalization')
+        self.radio_no_normalize.setToolTip('No normalization is applied')
+        self.radio_normalized_over_stack = QRadioButton('Normalize over stack')
+        self.radio_normalized_over_stack.setToolTip('Normalize over complete z or t stack')
+        self.radio_normalize_by_image = QRadioButton('Normalized by plane')
+        self.radio_normalize_by_image.setToolTip('Normalize each plane individually')
+        self.radio_normalized_over_stack.setChecked(True)
+        #[x.setEnabled(False) for x in [self.radio_no_normalize, self.radio_normalized_over_stack, self.radio_normalize_by_image]]
+        self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
+        self.button_group_normalize.addButton(self.radio_normalized_over_stack, id=2)
+        self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
+        self.options_group.glayout.addWidget(self.radio_no_normalize, 2,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 3,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_normalize_by_image, 4,0,1,1)
+
+
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems([
             'vgg16', 'efficient_netb0', 'single_layer_vgg16'])#, 'single_layer_vgg16_rgb'])
@@ -197,15 +214,10 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
 
-        self.check_normalize = QCheckBox('Normalize')
-        self.check_normalize.setChecked(True)
-        self.check_normalize.setToolTip('Normalize each channel to mean 0 and std 1')
-        self.tabs.add_named_tab('Model', self.check_normalize, [7,0,1,1])
-
         self.check_use_cuda = QCheckBox('Use cuda')
         self.check_use_cuda.setChecked(False)
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
-        self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,1,1,1])
+        self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,0,1,1])
 
         if project is True:
             self._add_project()
@@ -266,9 +278,13 @@ class ConvPaintWidget(QWidget):
         self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
-        self.radio_multi_channel.toggled.connect(self.update_image_stats)
-        self.radio_single_channel.toggled.connect(self.update_image_stats)
-        self.radio_rgb.toggled.connect(self.update_image_stats)
+        self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
+        self.radio_single_channel.toggled.connect(self.reset_radio_norm_settings)
+        self.radio_rgb.toggled.connect(self.reset_radio_norm_settings)
+
+        self.radio_no_normalize.toggled.connect(self.reset_stats)
+        self.radio_normalized_over_stack.toggled.connect(self.reset_stats)
+        self.radio_normalize_by_image.toggled.connect(self.reset_stats)
 
 
     def hide_annotation(self, event=None):
@@ -305,24 +321,63 @@ class ConvPaintWidget(QWidget):
                 self.radio_single_channel.setChecked(True)
                 self.radio_multi_channel.setEnabled(False)
                 self.radio_rgb.setEnabled(False)
-            else:
+            elif self.select_layer_widget.value.ndim == 3:
                 self.radio_rgb.setEnabled(False)
                 self.radio_multi_channel.setEnabled(True)
                 self.radio_single_channel.setEnabled(True)
                 self.radio_single_channel.setChecked(True)
+            elif self.select_layer_widget.value.ndim == 4:
+                self.radio_rgb.setEnabled(False)
+                self.radio_multi_channel.setEnabled(True)
+                self.radio_single_channel.setEnabled(False)
+                self.radio_multi_channel.setChecked(True)
 
-            self.update_image_stats()
+            self.reset_radio_norm_settings()
+            self.reset_predict_buttons_after_training()
 
-    def update_image_stats(self):
-        # update stack stats for normalization
-        if self.check_normalize.isChecked():
-            data = self.viewer.layers[self.selected_channel].data
-            if self.viewer.layers[self.selected_channel].rgb:
-                data = np.moveaxis(data, 2, 0)
+    def reset_stats(self):
+        self.image_mean, self.image_std = None, None
+
+    def reset_radio_norm_settings(self, event=None):
+        
+        self.image_mean, self.image_std = None, None
+        if 'annotations' in self.viewer.layers:
+            self.viewer.layers.remove('annotations')
+        self.add_annotation_layer()
+
+        if self.select_layer_widget.value.ndim == 2:
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalize_by_image.setChecked(True)
+            self.radio_normalized_over_stack.setEnabled(False)
+        elif (self.select_layer_widget.value.ndim == 3) and (self.radio_multi_channel.isChecked()):
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalize_by_image.setChecked(True)
+            self.radio_normalized_over_stack.setEnabled(False)
+        else:
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalized_over_stack.setEnabled(True)
+            self.radio_normalized_over_stack.setChecked(True)
+
             
+    def get_image_stats(self):
+        
+        # put channels in format (C)(T,Z)YX
+        data = self.get_data_channel_first()
+
+        if self.radio_normalized_over_stack.isChecked():
+            if self.radio_multi_channel.isChecked() | self.radio_rgb.isChecked():
+                self.image_mean, self.image_std = compute_image_stats(
+                    image=data,
+                    ignore_n_first_dims=1)
+            else:
+                self.image_mean, self.image_std = compute_image_stats(
+                    image=data,
+                    ignore_n_first_dims=None)
+        elif self.radio_normalize_by_image.isChecked():
+            # also takes into account CXY case (2D multi-channel image) as first dim is dropped
             self.image_mean, self.image_std = compute_image_stats(
                 image=data,
-                first_dim_is_channel=not self.radio_single_channel.isChecked())
+                ignore_n_first_dims=data.ndim-2)
 
     def reset_model(self, event=None):
 
@@ -346,9 +401,9 @@ class ConvPaintWidget(QWidget):
             raise Exception('Please select an image layer first')
         
         if self.viewer.layers[self.selected_channel].rgb:
-            layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
+            layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:-1]
         elif self.radio_multi_channel.isChecked():
-            layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
+            layer_shape = self.viewer.layers[self.selected_channel].data.shape[1::]
         else:
             layer_shape = self.viewer.layers[self.selected_channel].data.shape
 
@@ -417,14 +472,23 @@ class ConvPaintWidget(QWidget):
         self.check_use_min_features.setChecked(True)
         self._on_load_nnmodel()
 
-    def get_data_train(self):
-
+    def get_data_channel_first(self):
+        """Get data from selected channel. If RGB, move channel axis to first position."""
+            
         image_stack = self.viewer.layers[self.selected_channel].data
-    
         if self.viewer.layers[self.selected_channel].rgb:
-            image_stack = np.moveaxis(image_stack, 2, 0)
+            image_stack = np.moveaxis(image_stack, -1, 0)
+        return image_stack
 
-        if self.check_normalize.isChecked():
+    def get_selectedlayer_data(self):
+        """Get data from selected channel. Output has channel (if present) in 
+        first position and is normalized."""
+
+        image_stack = self.get_data_channel_first()
+        if self.image_mean is None:
+            self.get_image_stats()
+
+        if not self.radio_no_normalize.isChecked():
             image_stack = normalize_image(
                 image=image_stack,
                 image_mean=self.image_mean,
@@ -437,7 +501,7 @@ class ConvPaintWidget(QWidget):
 
         unique_labels = np.unique(self.select_annotation_layer_widget.value.data)
         if (not 1 in unique_labels) | (not 2 in unique_labels):
-            raise Exception('You need annotations for foreground and background')
+            raise Exception('You need annotations for at least foreground and background')
         
         if self.model is None:
             if not self.check_use_custom_model.isChecked():
@@ -447,7 +511,7 @@ class ConvPaintWidget(QWidget):
         
         device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
-        image_stack = self.get_data_train()
+        image_stack = self.get_selectedlayer_data()
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
@@ -464,11 +528,25 @@ class ConvPaintWidget(QWidget):
                 image_downsample=self.spin_downsample.value(),
             )
             self.random_forest = train_classifier(features, targets)
-            self.prediction_btn.setEnabled(True)
-            self.prediction_all_btn.setEnabled(True)
+            self.reset_predict_buttons_after_training()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
+
+    def reset_predict_buttons_after_training(self):
+        
+        if (self.model is not None) and (self.select_layer_widget.value is not None):
+            self.prediction_btn.setEnabled(True)
+            if self.select_layer_widget.value == 2:
+                self.prediction_all_btn.setEnabled(False)
+            elif self.select_layer_widget.value.ndim == 3:
+                if self.radio_multi_channel.isChecked():
+                    self.prediction_all_btn.setEnabled(False)
+                else:
+                    self.prediction_all_btn.setEnabled(True)
+            else:
+                self.prediction_all_btn.setEnabled(True)
+
 
     def update_classifier_on_project(self):
         """Train classifier on all annotations in project.
@@ -494,7 +572,7 @@ class ConvPaintWidget(QWidget):
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
 
-                image_stack = self.get_data_train()
+                image_stack = self.get_selectedlayer_data()
 
                 features, targets = get_features_current_layers(
                     model=self.model,
@@ -515,8 +593,7 @@ class ConvPaintWidget(QWidget):
             all_targets = np.concatenate(all_targets, axis=0)
 
             self.random_forest = train_classifier(all_features, all_targets)
-            self.prediction_btn.setEnabled(True)
-            self.prediction_all_btn.setEnabled(True)
+            self.reset_predict_buttons_after_training()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
         self.viewer.window._status_bar._toggle_activity_dock(False)
@@ -538,43 +615,73 @@ class ConvPaintWidget(QWidget):
             self.update_classifier()
 
         self.check_prediction_layer_exists()
+
+        if self.image_mean is None:
+            self.get_image_stats()
         
         self.viewer.window._status_bar._toggle_activity_dock(True)
         with progress(total=0) as pbr:
             
             pbr.set_description(f"Prediction")
-            if (self.viewer.dims.ndim > 2) & (not self.radio_multi_channel.isChecked()):
-                step = self.viewer.dims.current_step[0]
-                image = self.viewer.layers[self.selected_channel].data[step]
-                if self.check_normalize.isChecked():
-                    image = normalize_image(image=image,
-                                             image_mean=self.image_mean,
-                                             image_std=self.image_std)                      
-                
-                predicted_image = predict_image(
-                    image, self.model, self.random_forest, self.param.scalings,
-                    order=self.spin_interpolation_order.value(),
-                    use_min_features=self.check_use_min_features.isChecked(),
-                    device=device,
-                    image_downsample=self.spin_downsample.value(),
-                )
-                self.viewer.layers['segmentation'].data[step] = predicted_image
-            else:
-                image_stack = self.viewer.layers[self.selected_channel].data
-                if self.viewer.layers[self.selected_channel].rgb:
-                    image_stack = np.moveaxis(image_stack, 2, 0)
-                if self.check_normalize.isChecked():
-                    image_stack = normalize_image(image=image_stack,
-                                                image_mean=self.image_mean,
-                                                image_std=self.image_std)
-                predicted_image = predict_image(
-                    image_stack, self.model, self.random_forest, self.param.scalings,
-                    order=self.spin_interpolation_order.value(),
-                    use_min_features=self.check_use_min_features.isChecked(),
-                    device=device,
-                    image_downsample=self.spin_downsample.value(),
-                )
+
+            if self.viewer.dims.ndim == 2:
+                image = self.get_selectedlayer_data()
+
+
+            elif self.viewer.dims.ndim == 3:
+                if self.radio_multi_channel.isChecked():
+                    image = self.get_selectedlayer_data()
+                elif self.radio_single_channel.isChecked():
+                    step = self.viewer.dims.current_step[0]
+                    image = self.viewer.layers[self.selected_channel].data[step]
+                    if not self.radio_no_normalize.isChecked():
+                        if self.radio_normalized_over_stack.isChecked():
+                            image_mean = self.image_mean
+                            image_std = self.image_std
+                        elif self.radio_normalize_by_image.isChecked():
+                            image_mean = self.image_mean[step]
+                            image_std = self.image_std[step]
+                        image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)  
+                elif self.radio_rgb.isChecked():
+                    step = self.viewer.dims.current_step[0]
+                    image = self.viewer.layers[self.selected_channel].data[step]
+                    image = np.moveaxis(image, -1, 0)
+                    
+                    if not self.radio_no_normalize.isChecked():
+                        if self.radio_normalized_over_stack.isChecked():
+                            image_mean = self.image_mean[:,0,::]
+                            image_std = self.image_std[:,0,::]
+                        else:
+                            image_mean = self.image_mean[:,step]
+                            image_std = self.image_std[:,step]
+                        image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
+                        
+            elif self.viewer.dims.ndim == 4:
+                # for 4D channel is always first, t/z second
+                step = self.viewer.dims.current_step[1]
+                image = self.viewer.layers[self.selected_channel].data[:, step]
+                if not self.radio_no_normalize.isChecked():
+                    if self.radio_normalized_over_stack.isChecked():
+                        image_mean = self.image_mean[:,0,::]
+                        image_std = self.image_std[:,0,::]
+                    else:
+                        image_mean = self.image_mean[:,step]
+                        image_std = self.image_std[:,step]
+                    image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
+
+            predicted_image = predict_image(
+                image, self.model, self.random_forest, self.param.scalings,
+                order=self.spin_interpolation_order.value(),
+                use_min_features=self.check_use_min_features.isChecked(),
+                device=device,
+                image_downsample=self.spin_downsample.value(),
+            )
+            if self.viewer.dims.ndim == 2:
                 self.viewer.layers['segmentation'].data = predicted_image
+            elif (self.viewer.dims.ndim == 3) and (self.radio_multi_channel.isChecked()):
+                self.viewer.layers['segmentation'].data = predicted_image
+            else:
+                self.viewer.layers['segmentation'].data[step] = predicted_image
             self.viewer.layers['segmentation'].refresh()
         self.viewer.window._status_bar._toggle_activity_dock(False)
 
@@ -595,16 +702,29 @@ class ConvPaintWidget(QWidget):
 
         self.check_prediction_layer_exists()
 
+        if self.image_mean is None:
+            self.get_image_stats()
+
         self.viewer.window._status_bar._toggle_activity_dock(True)
 
-        if self.check_normalize.isChecked():
-            image_stack = normalize_image(image=self.viewer.layers[self.selected_channel].data,
+        image_stack = self.viewer.layers[self.selected_channel].data
+        if self.radio_rgb.isChecked():
+            image_stack = np.moveaxis(image_stack, -1, 0)
+        if not self.radio_no_normalize.isChecked():
+            image_stack = normalize_image(image=image_stack,
                                           image_mean=self.image_mean,
                                           image_std=self.image_std)
-        else:
-            image_stack = self.viewer.layers[self.selected_channel].data      
-        for step in progress(range(self.viewer.dims.nsteps[0])):
-            image = image_stack[step]
+        if image_stack.ndim == 3:
+            num_steps = image_stack.shape[0]
+        elif image_stack.ndim == 4:
+            num_steps = image_stack.shape[1]           
+        for step in progress(range(num_steps)):
+            if image_stack.ndim == 3:
+                image = image_stack[step]
+            elif image_stack.ndim == 4:
+                image = image_stack[:, step]
+            else:
+                raise Exception(f'Image stack has wrong dimensionality {image_stack.ndim}')
             predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
@@ -657,7 +777,7 @@ class ConvPaintWidget(QWidget):
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.image_downsample = self.spin_downsample.value()
-        self.param.normalize = self.check_normalize.isChecked()
+        self.param.normalize = self.button_group_normalize.checkedId()
 
     
     def load_classifier(self, event=None, save_file=None):
@@ -668,8 +788,7 @@ class ConvPaintWidget(QWidget):
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
         self.random_forest, self.param = load_trained_classifier(save_file)
-        self.prediction_btn.setEnabled(True)
-        self.prediction_all_btn.setEnabled(True)
+        self.reset_predict_buttons_after_training()
         self.current_model_path.setText(save_file.name)
 
         self.update_gui_from_params()
@@ -690,4 +809,4 @@ class ConvPaintWidget(QWidget):
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
-        self.check_normalize.setChecked(self.param.normalize)
+        self.button_group_normalize.button(self.param.normalize).setChecked(True)
