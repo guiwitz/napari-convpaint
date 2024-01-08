@@ -341,6 +341,9 @@ class ConvPaintWidget(QWidget):
     def reset_radio_norm_settings(self, event=None):
         
         self.image_mean, self.image_std = None, None
+        if 'annotations' in self.viewer.layers:
+            self.viewer.layers.remove('annotations')
+        self.add_annotation_layer()
 
         if self.select_layer_widget.value.ndim == 2:
             self.radio_normalize_by_image.setEnabled(True)
