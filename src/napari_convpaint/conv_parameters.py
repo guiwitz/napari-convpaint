@@ -17,11 +17,14 @@ class Param:
     scalings: list[int] = None
     order: int = None
     use_min_features: bool = None
+    image_downsample: int = None
+    normalize: int = None
+    multi_channel_training: bool = None
 
 
 
     def __post_init__(self):
-        self.scalings = [1]
+        self.scalings = [1, 2]
 
     def save_parameters(self, save_path):
         """Save parameters as yml file.

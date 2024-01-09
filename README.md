@@ -1,4 +1,3 @@
-# napari-convpaint
 
 [![License](https://img.shields.io/pypi/l/napari-convpaint.svg?color=green)](https://github.com/guiwitz/napari-convpaint/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/napari-convpaint.svg?color=green)](https://pypi.org/project/napari-convpaint)
@@ -7,17 +6,19 @@
 [![codecov](https://codecov.io/gh/guiwitz/napari-convpaint/branch/main/graph/badge.svg)](https://codecov.io/gh/guiwitz/napari-convpaint)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-convpaint)](https://napari-hub.org/plugins/napari-convpaint)
 
-This napari plugin can be used the segment images into multiple classes based on a pixel classifier trained with sparse manual annotations. The features used for classification are extracted using the filters from the first layer of a VGG16 Neural Network trained on natural images. To include features at multiple scales, the image as well as multiple downscaled versions of it are used to generate features (for example using the raw image as well as one downscaled 2x, one obtains 2*64=128 features per pixel). The features are then classified using scikit-learn's Random Forest classifier. The trained classifier is saved and can be reused either directly in the plugin on other images or in a separate pipeline.
+# napari-convpaint
 
-**The idea behind the plugin comes directly from the work of Lucien Hinderling (University of Bern) and can be found here: https://github.com/hinderling/napari_pixel_classifier).**
+![overview conv-paint](/images/overview_github.png)
+This napari plugin can be used to segment objects in images based on a few brush strokes providing examples of foreground and background. Based on the same idea as other tools like ilastik, its main strength is that it provides good results without adjusting any parameters. The filters used to generate features for classification are indeed taken from layers of trained deep learning networks and don't need to be chosen manually. Find more information in the [docs](https://guiwitz.github.io/napari-convpaint/).
 
+![overview conv-paint](/images/network_github.png)
+
+**The idea behind the plugin comes directly from the work of Lucien Hinderling (University of Bern) and can be found here: https://github.com/hinderling/napari_pixel_classifier.**
 ## Installation
 
-**------Not on pypi yet------**
-You can install `napari-convpaint` via [pip]:
+You can install `napari-convpaint` via [pip]
 
     pip install napari-convpaint
-**------Not on pypi yet------**
 
 To install latest development version :
 
@@ -32,6 +33,15 @@ the coverage at least stays the same before you submit a pull request.
 
 Distributed under the terms of the [BSD-3] license,
 "napari-convpaint" is free and open source software
+
+## Contributing
+
+Contributions are very welcome. Tests can be run with [tox], please ensure
+the coverage at least stays the same before you submit a pull request.
+
+# Authors
+
+The idea behind this napari plugin was first developed by Lucien Hinderling in the group of [Olivier Pertz](https://www.pertzlab.net/), at the Institute of Cell Biology, University of Bern. The code has first been shared as open source resource in form of a [Jupyter Notebook](https://github.com/hinderling/napari_pixel_classifier). With the desire to make this resource accessible to a broader public in the scientific community, the Pertz lab obtained a CZI napari plugin development grant with the title ["Democratizing Image Analysis with an Easy-to-Train Classifier"](https://chanzuckerberg.com/science/programs-resources/imaging/napari/democratizing-image-analysis-with-an-easy-to-train-classifier/) which supported the adaptation of the initial concept as a napari plugin called napari-convpaint. The plugin has been developed by Guillaume Witz, Mykhailo Vladymyrov and Ana Stojiljkovic at the [Data Science Lab](https://www.dsl.unibe.ch/), University of Bern, in tight collaboration with the Pertz lab.
 
 ## Issues
 

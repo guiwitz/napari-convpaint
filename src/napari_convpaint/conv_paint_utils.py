@@ -31,6 +31,91 @@ def get_device(use_cuda=None):
         device = torch.device('cpu')
     return device
     
+
+
+def normalize_image(image, image_mean, image_std):
+    """
+    Normalize a numpy array with 2-4 dimensions.
+
+    If the array has multiple channels (determined by the multi_channel_training flag), 
+    each channel is normalized independently. If there are multiple time or z frames, 
+    they are normalized together.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input array to be normalized. Must have 2-4 dimensions.
+    image_mean : float or nd.array
+        Mean of the input array along non-channel dimensions. If None, the mean is calculated from the input array.
+    image_std : float or nd.array
+        Standard deviation of the input array along non-channel dimensions. If None, the standard deviation is calculated from the input array.
+        
+    Returns
+    -------
+    arr_norm : np.ndarray
+        Normalized array.
+
+    Raises
+    ------
+    ValueError
+        If the input array does not have 2-4 dimensions.
+    """
+    
+    if image.ndim < 2 or image.ndim > 4:
+        raise ValueError("Array must have 2-4 dimensions")
+
+    # The computing of stats and image normalization is split into two function. This will
+    # allow to normalize even a single image of the stack with the same stats as the whole stack.
+    # This is done in the perspective of handling large stacks that cannot be loaded in memory.
+    # This needs to be implemented:
+        # - computing stats stack by stack and combining the result at the end
+        # - allow to normalize a single image from a stack
+    arr_norm = (image - image_mean) / image_std
+
+    return arr_norm
+
+def compute_image_stats(image, ignore_n_first_dims=None):
+    """
+    Compute mean and standard deviation of a numpy array with 2-4 dimensions.
+
+    If the array has multiple channels (determined by the first_dim_is_channel option), 
+    each channel is normalized independently. Channels can only be the first dimension of the array.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input array to be normalized. Must have 2-4 dimensions.
+    ignore_n_first_dims : int
+        Number of first dimensions to ignore when computing the mean and standard deviation.
+        For example if the input array has 3 dimensions CHW and ignore_n_first_dims=1, the mean
+        and standard deviation will be computed for each channel C.
+        
+    Returns
+    -------
+    image_mean : float or nd.array
+        Mean of the input array along non-channel dimensions
+    image_std : float or nd.array
+        Standard deviation of the input array along non-channel dimensions
+
+    Raises
+    ------
+    ValueError
+        If the input array does not have 2-4 dimensions.
+    """
+    
+    if image.ndim < 2 or image.ndim > 4:
+        raise ValueError("Array must have 2-4 dimensions")
+    
+    if ignore_n_first_dims is None:
+        image_mean = image.mean()
+        image_std = image.std()
+    else:
+        image_mean = image.mean(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
+        image_std = image.std(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
+
+    return image_mean, image_std
+
+
 def filter_image(image, model, scalings):
     """
     Filter an image with the first layer of a VGG16 model.
@@ -71,7 +156,8 @@ def filter_image(image, model, scalings):
     return all_scales
 
 
-def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0):
+def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0,
+                              image_downsample=1):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object.
     
@@ -86,19 +172,30 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0):
     order : int, optional
         Interpolation order for low scale resizing,
         by default 0
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
     all_scales : list of np.ndarray
-        List of filtered images. The number of image is the sum over 
-        selected output layers of NxS where N is the number of filters
-        of the layer and S the number of scaling factors.
+        List of filtered images. There are N x S images, N being the number of layers
+        of the model, and S the number of scaling factors. Each element has shape [1, F, H, W]
+        where F is the number of filters of the layer.
         
     """
 
     input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
-    image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
+
+    if image.ndim == 2:
+        image = image[::image_downsample, ::image_downsample]
+        image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
+    elif image.ndim == 3:
+        image = image[:, ::image_downsample, ::image_downsample]
+        if image.shape[0] != input_channels:
+            warnings.warn(f'Image has {image.shape[0]} channels, model expects {input_channels}. Using mean projection.')
+            image = np.mean(image, axis=0)
+            image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
 
     int_mode = 'bilinear' if order > 0 else 'nearest'
     align_corners = False if order > 0 else None
@@ -131,8 +228,87 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0):
     return all_scales
 
 
+def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='cpu',
+                              image_downsample=1):
+    """Recover the outputs of chosen layers of a pytorch model. Layers and model are
+    specified in the hookmodel object. If image has multiple channels, each channel
+    is processed separately.
+    
+    Parameters
+    ----------
+    image : np.ndarray
+        2d Image to filter
+    hookmodel : Hookmodel
+        Model to extract features from
+    scalings : list of ints, optional
+        Downsampling factors, by default None
+    order : int, optional
+        Interpolation order for low scale resizing,
+        by default 0
+    device : str, optional
+        Device to use for computation, by default 'cpu'
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
+
+    Returns
+    -------
+    all_scales : list of np.ndarray
+        List of filtered images. The number of images is C x Sum_i(F_i x S) where C is the number of channels,
+        F_i is the number of filters of the ith layer and S the number of scaling factors.
+        
+    """
+
+    is_model_cuda = device == 'cuda'
+
+    input_channels = hookmodel.named_modules[0][1].in_channels
+    image = np.asarray(image, dtype=np.float32)
+    
+    if image.ndim == 2:
+        image = image[::image_downsample, ::image_downsample]
+        image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
+        image_series = [image]
+    elif image.ndim == 3:
+        image = image[:, ::image_downsample, ::image_downsample]
+        image_series = [np.ones((input_channels, im.shape[0], im.shape[1]), dtype=np.float32) * im for im in image]
+
+    int_mode = 'bilinear' if order > 0 else 'nearest'
+    align_corners = False if order > 0 else None
+
+    all_scales = []
+    for image in image_series:
+        for s in scalings:
+            im_tot = image[:, ::s, ::s]
+            im_torch = torch.from_numpy(im_tot[np.newaxis, ::])
+            # im_torch = hookmodel.transform(im_torch)
+            hookmodel.outputs = []
+            try:
+                if is_model_cuda:
+                    im_torch = im_torch.cuda()
+
+                _ = hookmodel(im_torch)
+            except:
+                pass
+
+            for im in hookmodel.outputs:
+                if image.shape[1:3] != im.shape[2:4]:
+                    im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
+                    '''out_np = skimage.transform.resize(
+                        image=out_np,
+                        output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
+                        preserve_range=True, order=order)'''
+
+                if is_model_cuda:
+                    im = im.to('cpu')
+
+                out_np = im.detach().numpy()
+                all_scales.append(out_np)
+
+    return all_scales
+
+
 def predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True):
+                  use_min_features=True, image_downsample=1,
+                  ):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -151,6 +327,8 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         interpolation order for low scale resizing
     use_min_features: bool
         if True, use the minimum number of features per layer
+    image_downsample: int, optional
+        downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
@@ -158,33 +336,43 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         predicted image with classes
 
     """
+    
+    filter_fun = filter_image_multichannels
 
     if use_min_features:
         max_features = np.min(model.features_per_layer)
-        all_scales = filter_image_multioutputs(
-            image, model, scalings=scalings, order=order)
+        all_scales = filter_fun(
+            image, model, scalings=scalings, order=order,
+            image_downsample=image_downsample)
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         tot_filters = max_features * len(all_scales)
 
     else:
         # max_features = np.max(model.features_per_layer)
-        all_scales = filter_image_multioutputs(
-            image, model, scalings=scalings, order=order)
-        # MV:  why this?         (64, 256, 512)                2            / 3
-        tot_filters = np.sum(model.features_per_layer) * len(all_scales) / len(model.features_per_layer)
-
+        all_scales = filter_fun(
+            image, model, scalings=scalings, order=order,
+            image_downsample=image_downsample)
+        tot_filters = np.sum(a.shape[1] for a in all_scales)
+    
     tot_filters = int(tot_filters)
+    rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
+    cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
     all_pixels = pd.DataFrame(
-        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, image.shape[0] * image.shape[1])).T)
+        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, rows * cols)).T)
 
     predictions = classifier.predict(all_pixels)
 
-    predicted_image = np.reshape(predictions, image.shape)
+    predicted_image = np.reshape(predictions, [rows, cols])
+    if image_downsample > 1:
+        predicted_image = skimage.transform.resize(
+            image=predicted_image,
+            output_shape=(image.shape[-2], image.shape[-1]),
+            preserve_range=True, order=1).astype(np.uint8)
 
     return predicted_image
 
 
-def load_single_layer_vgg16():
+def load_single_layer_vgg16(keep_rgb=False):
     """Load VGG16 model from torchvision, keep first layer only
     
     Parameters
@@ -194,24 +382,35 @@ def load_single_layer_vgg16():
     -------
     model: torch model
         model for pixel feature extraction
+    keep_rgb: bool
+        if True, keep model with three input channels, otherwise convert to single channel
     
     """
 
     vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-    model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(1, 64, 3, 1, 1))]))
-
     pretrained_dict = vgg16.state_dict()
+    
+    if keep_rgb:
+        model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(3, 64, 3, 1, 1))]))
+    else:
+        model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(1, 64, 3, 1, 1))]))
+
     reduced_dict = model.state_dict()
 
-    reduced_dict['conv1.weight'][:, 0, :, :] = pretrained_dict['features.0.weight'][:, :, :, :].sum(axis=1)
-    reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
+    if keep_rgb:
+        reduced_dict['conv1.weight'] = pretrained_dict['features.0.weight']
+        reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
+    else:
+        reduced_dict['conv1.weight'][:, 0, :, :] = pretrained_dict['features.0.weight'][:, :, :, :].sum(axis=1)
+        reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
 
     model.load_state_dict(reduced_dict)
 
     return model
 
 def get_multiscale_features(model, image, annotations, scalings, order=0,
-                            use_min_features=True):
+                            use_min_features=True,
+                            image_downsample=1):
     """Given an image and a set of annotations, extract multiscale features
     
     Parameters
@@ -219,7 +418,7 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
     model : Hookmodel
         Model to extract features from
     image : np.ndarray
-        Image to extract features from (currently 2D only)
+        Image to extract features from (currently 2D only or 2D multichannel (C,H,W))
     annotations : np.ndarray
         Annotations (1,2) to extract features from (currently 2D only)
     scalings : list of ints
@@ -228,6 +427,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         Interpolation order for low scale resizing, by default 0
     use_min_features : bool, optional
         Use minimal number of features, by default True
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
@@ -235,17 +436,21 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
         Extracted features. Dimensions npixels x nfeatures * nbscales
     """
 
+    filter_fun = filter_image_multichannels
+
     if use_min_features:
         max_features = np.min(model.features_per_layer)
     else:
         max_features = np.max(model.features_per_layer)
     # test with minimal number of features i.e. taking only n first features
+    rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
+    cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
+    full_annotation = np.ones((max_features, rows, cols), dtype=np.bool_)
+    full_annotation = full_annotation * annotations[::image_downsample, ::image_downsample] > 0
 
-    full_annotation = np.ones((max_features, image.shape[0], image.shape[1]), dtype=np.bool_)
-    full_annotation = full_annotation * annotations > 0
-
-    all_scales = filter_image_multioutputs(
-        image, model, scalings, order=order)
+    all_scales = filter_fun(
+        image, model, scalings, order=order,
+        image_downsample=image_downsample)
     if use_min_features:
         all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
     all_values_scales = []
@@ -261,7 +466,8 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
 
 
 def get_features_current_layers(model, image, annotations, scalings=[1],
-                                order=0, use_min_features=True):
+                                order=0, use_min_features=True,
+                                image_downsample=1):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -270,7 +476,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
     model : Hookmodel
         Model to extract features from
     image : np.ndarray
-        2D or 3D Image to extract features from
+        2D or 3D Image to extract features from. If 3D but annotations are 2D,
+        image is treated as multichannel and not image series
     annotations : np.ndarray
         2D, 3D Annotations (1,2) to extract features from
     scalings : list of ints
@@ -279,6 +486,8 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         Interpolation order for low scale resizing, by default 0
     use_min_features : bool, optional
         Use minimal number of features, by default True
+    image_downsample : int, optional
+        Downsample image by this factor before extracting features, by default 1
 
     Returns
     -------
@@ -300,25 +509,36 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         raise Exception('Annotations must be 2D or 3D')
 
     all_values = []
+    all_targets = []
+
     # iterating over non_empty iteraties of t/z for 3D data
+
     for ind, t in enumerate(non_empty):
 
-        if image.ndim == 2:
+        if annotations.ndim == 2:
             current_image = image
             current_annot = annotations
         else:
-            current_image = image[t]
-            current_annot = annotations[t]
+            if image.ndim == 3:
+                current_image = image[t]
+                current_annot = annotations[t]
+            elif image.ndim == 4:
+                current_image = image[:, t]
+                current_annot = annotations[t]
 
         extracted_features = get_multiscale_features(
             model, current_image, current_annot, scalings,
-            order=order, use_min_features=use_min_features)
+            order=order, use_min_features=use_min_features,
+            image_downsample=image_downsample)
         all_values.append(extracted_features)
+        
+        all_targets.append(current_annot[::image_downsample, ::image_downsample]
+                           [current_annot[::image_downsample, ::image_downsample] > 0])
+        
 
     all_values = np.concatenate(all_values, axis=0)
     features = pd.DataFrame(all_values)
-    target_im = current_annot[current_annot > 0]
-    targets = pd.Series(target_im)
+    targets = pd.Series(np.concatenate(all_targets, axis=0))
 
     return features, targets
 
@@ -852,7 +1072,8 @@ class Hookmodel():
     Parameters
     ----------
     model_name : str
-        Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16' are supported.
+        Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16',
+         'single_layer_vgg16_rgb' are supported.
     model : torch model, optional
         Model to extract features from, by default None
     use_cuda : bool, optional
@@ -887,7 +1108,9 @@ class Hookmodel():
             elif model_name == 'efficient_netb0':
                 self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
             elif model_name == 'single_layer_vgg16':
-                self.model = load_single_layer_vgg16()
+                self.model = load_single_layer_vgg16(keep_rgb=False)
+            elif model_name == 'single_layer_vgg16_rgb':
+                self.model = load_single_layer_vgg16(keep_rgb=True)
             elif model_name == 'dino_vits16':
                 self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
 
@@ -994,6 +1217,7 @@ class Classifier():
             scalings=[1,2],
             order=1,
             use_min_features=False,
+            normalize=True,
         )
 
     def save_classifier(self, save_path):
@@ -1042,6 +1266,10 @@ class Classifier():
         else:
             im_out = np.zeros(image.shape, dtype=np.uint8)
 
+        if self.param.normalize:
+            image_mean, image_std = compute_image_stats(image)
+            image = normalize_image(image, image_mean, image_std)
+
         for i in range(image.shape[0]):
             im_out[i] = predict_image(
                 image=image[i],
@@ -1049,7 +1277,8 @@ class Classifier():
                 classifier=self.random_forest,
                 scalings=self.param.scalings,
                 order=self.param.order,
-                use_min_features=self.param.use_min_features)
+                use_min_features=self.param.use_min_features,
+                image_downsample=self.param.image_downsample)
 
         if save_path is None:
             if single_image:

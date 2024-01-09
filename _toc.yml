@@ -1,0 +1,18 @@
+format: jb-book
+root: book/Landing
+
+parts:
+  - caption: Getting started
+    chapters:
+    - file: book/Installation
+    - file: book/First_steps
+  - caption: Examples
+    chapters:
+    - file: book/Timelapse
+    - file: book/RGB
+    - file: book/Workflow
+    - file: book/Multifiles
+  - caption: In-depth explanations
+    chapters:
+    - file: book/Description
+    - file: book/convpaint_api
