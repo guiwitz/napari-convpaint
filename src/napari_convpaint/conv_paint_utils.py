@@ -228,7 +228,7 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0,
     return all_scales
 
 
-def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='cpu',
+def filter_image_multichannels(image, hookmodel, scalings=[1], order=0,
                               image_downsample=1):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object. If image has multiple channels, each channel
@@ -245,8 +245,6 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
     order : int, optional
         Interpolation order for low scale resizing,
         by default 0
-    device : str, optional
-        Device to use for computation, by default 'cpu'
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -257,8 +255,6 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
         F_i is the number of filters of the ith layer and S the number of scaling factors.
         
     """
-
-    is_model_cuda = device == 'cuda'
 
     input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
@@ -275,33 +271,29 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
     align_corners = False if order > 0 else None
 
     all_scales = []
-    for image in image_series:
-        for s in scalings:
-            im_tot = image[:, ::s, ::s]
-            im_torch = torch.from_numpy(im_tot[np.newaxis, ::])
-            # im_torch = hookmodel.transform(im_torch)
-            hookmodel.outputs = []
-            try:
-                if is_model_cuda:
-                    im_torch = im_torch.cuda()
+    with torch.no_grad():
+        for image in image_series:
+            for s in scalings:
+                im_tot = image[:, ::s, ::s]
+                im_torch = torch.tensor(im_tot[np.newaxis, ::])
+                hookmodel.outputs = []
+                try:
+                    _ = hookmodel(im_torch)
+                except AssertionError as ea:
+                    pass
+                except Exception as ex:
+                    raise ex
 
-                _ = hookmodel(im_torch)
-            except:
-                pass
+                for im in hookmodel.outputs:
+                    if image.shape[1:3] != im.shape[2:4]:
+                        im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
+                        '''out_np = skimage.transform.resize(
+                            image=out_np,
+                            output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
+                            preserve_range=True, order=order)'''
 
-            for im in hookmodel.outputs:
-                if image.shape[1:3] != im.shape[2:4]:
-                    im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
-                    '''out_np = skimage.transform.resize(
-                        image=out_np,
-                        output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
-                        preserve_range=True, order=order)'''
-
-                if is_model_cuda:
-                    im = im.to('cpu')
-
-                out_np = im.detach().numpy()
-                all_scales.append(out_np)
+                    out_np = im.cpu().detach().numpy()
+                    all_scales.append(out_np)
 
     return all_scales
 
