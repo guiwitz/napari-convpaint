@@ -432,7 +432,7 @@ class ConvPaintWidget(QWidget):
         """Using hooks setup model to give outputs at selected layers."""
         
         model_type = self.qcombo_model_type.currentText()
-        self.model = Hookmodel(model_name=model_type)
+        self.model = Hookmodel(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
 
         selected_layers = self.get_selected_layers_names()
         self.model.register_hooks(selected_layers=selected_layers)
@@ -509,7 +509,7 @@ class ConvPaintWidget(QWidget):
             else:
                 raise Exception('You have to define and load a model first')
         
-        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
+        
 
         image_stack = self.get_selectedlayer_data()
         
@@ -524,7 +524,6 @@ class ConvPaintWidget(QWidget):
                 scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device,
                 image_downsample=self.spin_downsample.value(),
             )
             self.random_forest = train_classifier(features, targets)
@@ -557,7 +556,6 @@ class ConvPaintWidget(QWidget):
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
-        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
 
         num_files = len(self.project_widget.params.file_paths)
         if num_files == 0:
@@ -581,7 +579,6 @@ class ConvPaintWidget(QWidget):
                     scalings=self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
-                    device=device,
                     image_downsample=self.spin_downsample.value(),
                 )
                 if features is None:
@@ -609,7 +606,6 @@ class ConvPaintWidget(QWidget):
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
-        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
         
         if self.random_forest is None:
             self.update_classifier()
@@ -673,7 +669,6 @@ class ConvPaintWidget(QWidget):
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device,
                 image_downsample=self.spin_downsample.value(),
             )
             if self.viewer.dims.ndim == 2:
@@ -698,8 +693,6 @@ class ConvPaintWidget(QWidget):
             else:
                 raise Exception('You have to define and load a model first')
             
-        device = 'cuda' if self.check_use_cuda.isChecked() else 'cpu'
-
         self.check_prediction_layer_exists()
 
         if self.image_mean is None:
@@ -729,7 +722,6 @@ class ConvPaintWidget(QWidget):
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
-                device=device,
                 image_downsample=self.spin_downsample.value()
             )
             self.viewer.layers['segmentation'].data[step] = predicted_image
@@ -792,7 +784,7 @@ class ConvPaintWidget(QWidget):
         self.current_model_path.setText(save_file.name)
 
         self.update_gui_from_params()
-        self.model = Hookmodel(param=self.param)
+        self.model = Hookmodel(param=self.param, use_cuda=self.check_use_cuda.isChecked())
 
 
     def update_gui_from_params(self):
