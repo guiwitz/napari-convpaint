@@ -411,6 +411,8 @@ class ConvPaintWidget(QWidget):
             data=np.zeros((layer_shape), dtype=np.uint8),
             name='annotations'
             )
+        if 'segmentation' in self.viewer.layers:
+            self.viewer.layers.remove('segmentation')
         self.viewer.add_labels(
             data=np.zeros((layer_shape), dtype=np.uint8),
             name='segmentation'
