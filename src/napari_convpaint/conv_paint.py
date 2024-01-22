@@ -30,12 +30,15 @@ class ConvPaintWidget(QWidget):
     Parameters
     ----------
     napari_viewer: napari.Viewer
-        main napari viwer
+        main napari viewer
     project: bool
         use project widget for multi-image project management
+    third_party: bool
+        if True, widget is used as third party and will not add layers to the viewer
+        by default.
     """
     
-    def __init__(self, napari_viewer, parent=None, project=False):
+    def __init__(self, napari_viewer, parent=None, project=False, third_party=False):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         
@@ -47,6 +50,7 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = None
         self.image_mean = None
         self.image_std = None
+        self.third_party = third_party
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -341,9 +345,7 @@ class ConvPaintWidget(QWidget):
     def reset_radio_norm_settings(self, event=None):
         
         self.image_mean, self.image_std = None, None
-        if 'annotations' in self.viewer.layers:
-            self.viewer.layers.remove('annotations')
-        self.add_annotation_layer()
+        self.add_annotation_layer(force_add=False)
 
         if self.select_layer_widget.value.ndim == 2:
             self.radio_normalize_by_image.setEnabled(True)
@@ -394,9 +396,13 @@ class ConvPaintWidget(QWidget):
         else:
             self.select_layer()
         
-    def add_annotation_layer(self):
-        """Add annotation and prediction layers to viewer."""
+    def add_annotation_layer(self, event=None, force_add=True):
+        """Add annotation and prediction layers to viewer. If the layer already exists,
+        remove it and add a new one. If the widget is used as third party (self.third_party=True),
+        no layer is added if it didn't exist before, unless force_add=True (e.g. when the user click
+        on the add layer button)"""
 
+        self.event = event
         if self.select_layer_widget.value is None:
             raise Exception('Please select an image layer first')
         
@@ -407,18 +413,31 @@ class ConvPaintWidget(QWidget):
         else:
             layer_shape = self.viewer.layers[self.selected_channel].data.shape
 
-        self.viewer.add_labels(
-            data=np.zeros((layer_shape), dtype=np.uint8),
-            name='annotations'
-            )
+        annotation_exists = False
+        if 'annotations' in self.viewer.layers:
+            self.viewer.layers.remove('annotations')
+            annotation_exists = True
+
+        if (not self.third_party) | (force_add) | (self.third_party & annotation_exists):
+            self.viewer.add_labels(
+                data=np.zeros((layer_shape), dtype=np.uint8),
+                name='annotations'
+                )
+        
+        segmentation_exists = False
         if 'segmentation' in self.viewer.layers:
             self.viewer.layers.remove('segmentation')
-        self.viewer.add_labels(
-            data=np.zeros((layer_shape), dtype=np.uint8),
-            name='segmentation'
-            )
-        self.viewer.layers.selection.active = self.viewer.layers['annotations']
-        self.select_annotation_layer_widget.value = self.viewer.layers['annotations']
+            segmentation_exists = True
+
+        if (not self.third_party) | (force_add) | (self.third_party & segmentation_exists):
+            self.viewer.add_labels(
+                data=np.zeros((layer_shape), dtype=np.uint8),
+                name='segmentation'
+                )
+        
+        if 'annotations' in self.viewer.layers:
+            self.viewer.layers.selection.active = self.viewer.layers['annotations']
+            self.select_annotation_layer_widget.value = self.viewer.layers['annotations']
 
     def update_scalings(self):
 
