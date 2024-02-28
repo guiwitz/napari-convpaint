@@ -15,7 +15,8 @@ import yaml
 
 from napari_guitils.gui_structures import VHGroup, TabSet
 #from napari_annotation_project.project_widget import ProjectWidget 
-from .conv_paint_utils import predict_image, normalize_image, compute_image_stats
+from .conv_paint_utils import (predict_image, parallel_predict_image, 
+                               normalize_image, compute_image_stats)
 from .conv_parameters import Param
 from .conv_paint_utils import (Hookmodel, get_features_current_layers,
                                train_classifier, load_trained_classifier)
@@ -163,6 +164,11 @@ class ConvPaintWidget(QWidget):
         self.options_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
         self.options_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
 
+        self.check_tile_image = QCheckBox('Tile image')
+        self.check_tile_image.setChecked(False)
+        self.check_tile_image.setToolTip('Tile image to reduce memory usage')
+        self.options_group.glayout.addWidget(self.check_tile_image, 2,0,1,1)
+
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
         self.radio_no_normalize.setToolTip('No normalization is applied')
@@ -175,9 +181,9 @@ class ConvPaintWidget(QWidget):
         self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
         self.button_group_normalize.addButton(self.radio_normalized_over_stack, id=2)
         self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
-        self.options_group.glayout.addWidget(self.radio_no_normalize, 2,0,1,1)
-        self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 3,0,1,1)
-        self.options_group.glayout.addWidget(self.radio_normalize_by_image, 4,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_no_normalize, 3,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 4,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_normalize_by_image, 5,0,1,1)
 
 
         self.qcombo_model_type = QComboBox()
@@ -686,12 +692,20 @@ class ConvPaintWidget(QWidget):
                         image_std = self.image_std[:,step]
                     image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
-            predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings,
-                order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(),
-                image_downsample=self.spin_downsample.value(),
-            )
+            if self.check_tile_image.isChecked():
+                predicted_image = parallel_predict_image(
+                    image, self.model, self.random_forest, self.param.scalings,
+                    order=self.spin_interpolation_order.value(),
+                    use_min_features=self.check_use_min_features.isChecked(),
+                    image_downsample=self.spin_downsample.value(),
+                    use_dask=False)
+            else:
+                predicted_image = predict_image(
+                    image, self.model, self.random_forest, self.param.scalings,
+                    order=self.spin_interpolation_order.value(),
+                    use_min_features=self.check_use_min_features.isChecked(),
+                    image_downsample=self.spin_downsample.value(),
+                )
             if self.viewer.dims.ndim == 2:
                 self.viewer.layers['segmentation'].data = predicted_image
             elif (self.viewer.dims.ndim == 3) and (self.radio_multi_channel.isChecked()):
@@ -739,7 +753,17 @@ class ConvPaintWidget(QWidget):
                 image = image_stack[:, step]
             else:
                 raise Exception(f'Image stack has wrong dimensionality {image_stack.ndim}')
-            predicted_image = predict_image(
+            
+            if self.check_tile_image.isChecked():
+                predicted_image = parallel_predict_image(
+                image, self.model, self.random_forest, self.param.scalings,
+                order=self.spin_interpolation_order.value(),
+                use_min_features=self.check_use_min_features.isChecked(),
+                image_downsample=self.spin_downsample.value(),
+                use_dask=False
+            )
+            else:
+                predicted_image = predict_image(
                 image, self.model, self.random_forest, self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
