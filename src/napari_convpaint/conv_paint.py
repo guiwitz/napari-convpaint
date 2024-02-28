@@ -825,11 +825,12 @@ class ConvPaintWidget(QWidget):
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
         save_file = Path(save_file)
         self.random_forest, self.param = load_trained_classifier(save_file)
-        self.reset_predict_buttons_after_training()
         self.current_model_path.setText(save_file.name)
 
         self.update_gui_from_params()
         self.model = Hookmodel(param=self.param, use_cuda=self.check_use_cuda.isChecked())
+
+        self.reset_predict_buttons_after_training()
 
 
     def update_gui_from_params(self):
