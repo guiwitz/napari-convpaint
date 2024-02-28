@@ -364,6 +364,131 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
     return predicted_image
 
 
+def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
+                  use_min_features=True, image_downsample=1, use_dask=False):
+    """
+    Given a filter model and a classifier, predict the class of 
+    each pixel in an image.
+
+    Parameters
+    ----------
+    image: 2d array
+        image to segment
+    model: Hookmodel
+        model to extract features from
+    classifier: sklearn classifier
+        classifier to use for prediction
+    scalings: list of ints
+        downsampling factors
+    order: int
+        interpolation order for low scale resizing
+    use_min_features: bool
+        if True, use the minimum number of features per layer
+    image_downsample: int, optional
+        downsample image by this factor before extracting features, by default 1
+    use_dask: bool
+        if True, use dask for parallel processing
+
+    Returns
+    -------
+    predicted_image: 2d array
+        predicted image with classes
+
+    """
+    
+    maxblock = 1000
+    nblocks_rows = image.shape[-2] // maxblock
+    nblocks_cols = image.shape[-1] // maxblock
+    margin = 50
+
+    predicted_image_complete = np.zeros(image.shape[-2:], dtype=(np.uint8))
+    
+    if use_dask:
+        from dask.distributed import Client
+        import dask
+        dask.config.set({'distributed.worker.daemon': False})
+        client = Client()
+        processes = []
+
+    min_row_ind_collection = []
+    min_col_ind_collection = []
+    max_row_ind_collection = []
+    max_col_ind_collection = []
+    new_max_col_ind_collection = []
+    new_max_row_ind_collection = []
+    new_min_col_ind_collection = []
+    new_min_row_ind_collection = []
+
+    for row in range(nblocks_rows+1):
+        for col in range(nblocks_cols+1):
+            #print(f'row {row}/{nblocks_rows}, col {col}/{nblocks_cols}')
+            max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
+            max_col = np.min([image.shape[-1], (col+1)*maxblock+margin])
+            min_row = np.max([0, row*maxblock-margin])
+            min_col = np.max([0, col*maxblock-margin])
+
+            min_row_ind = 0
+            new_min_row_ind = 0
+            if min_row > 0:
+                min_row_ind = min_row + margin
+                new_min_row_ind = margin
+            min_col_ind = 0
+            new_min_col_ind = 0
+            if min_col > 0:
+                min_col_ind = min_col + margin
+                new_min_col_ind = margin
+
+            max_col = (col+1)*maxblock+margin
+            max_col_ind = np.min([min_col_ind+maxblock,image.shape[-1]])
+            new_max_col_ind = new_min_col_ind + (max_col_ind-min_col_ind)
+            if max_col > image.shape[-1]:
+                max_col = image.shape[-1]
+
+            max_row = (row+1)*maxblock+margin
+            max_row_ind = np.min([min_row_ind+maxblock,image.shape[-2]])
+            new_max_row_ind = new_min_row_ind + (max_row_ind-min_row_ind)
+            if max_row > image.shape[-2]:
+                max_row = image.shape[-2]
+
+            image_block = image[..., min_row:max_row, min_col:max_col]
+
+            if use_dask:
+                processes.append(client.submit(
+                    predict_image, image_block, model, classifier,
+                    scalings, order, use_min_features, image_downsample))
+                
+                min_row_ind_collection.append(min_row_ind)
+                min_col_ind_collection.append(min_col_ind)
+                max_row_ind_collection.append(max_row_ind)
+                max_col_ind_collection.append(max_col_ind)
+                new_max_col_ind_collection.append(new_max_col_ind)
+                new_max_row_ind_collection.append(new_max_row_ind)
+                new_min_col_ind_collection.append(new_min_col_ind)
+                new_min_row_ind_collection.append(new_min_row_ind)
+
+            else:
+                predicted_image = predict_image(image_block, model, classifier,
+                    scalings, order, use_min_features, image_downsample)
+                crop_pred = predicted_image[
+                    new_min_row_ind: new_max_row_ind,
+                    new_min_col_ind: new_max_col_ind]
+
+                predicted_image_complete[min_row_ind:max_row_ind, min_col_ind:max_col_ind] = crop_pred.astype(np.uint8)
+
+    if use_dask:
+        for k in range(len(processes)):
+            future = processes[k]
+            out = future.result()
+            future.cancel()
+            del future
+            predicted_image_complete[
+                min_row_ind_collection[k]:max_row_ind_collection[k],
+                min_col_ind_collection[k]:max_col_ind_collection[k]] = out.astype(np.uint8)
+        client.close()
+    
+    return predicted_image_complete
+
+
 def load_single_layer_vgg16(keep_rgb=False):
     """Load VGG16 model from torchvision, keep first layer only
     
@@ -518,14 +643,27 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
                 current_image = image[:, t]
                 current_annot = annotations[t]
 
-        extracted_features = get_multiscale_features(
-            model, current_image, current_annot, scalings,
-            order=order, use_min_features=use_min_features,
-            image_downsample=image_downsample)
-        all_values.append(extracted_features)
-        
-        all_targets.append(current_annot[::image_downsample, ::image_downsample]
-                           [current_annot[::image_downsample, ::image_downsample] > 0])
+        annot_regions = skimage.morphology.label(current_annot > 0)
+        boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+
+        for i in range(len(boxes['label'])):
+            im_crop = current_image[...,
+                boxes['bbox-0'][i]:boxes['bbox-2'][i],
+                boxes['bbox-1'][i]:boxes['bbox-3'][i]
+            ]
+            annot_crop = current_annot[
+                boxes['bbox-0'][i]:boxes['bbox-2'][i],
+                boxes['bbox-1'][i]:boxes['bbox-3'][i]
+            ]
+
+            extracted_features = get_multiscale_features(
+                model, im_crop, annot_crop, scalings,
+                order=order, use_min_features=use_min_features,
+                image_downsample=image_downsample)
+            all_values.append(extracted_features)
+
+            all_targets.append(annot_crop[::image_downsample, ::image_downsample]
+                                [annot_crop[::image_downsample, ::image_downsample] > 0])
         
 
     all_values = np.concatenate(all_values, axis=0)
@@ -1039,6 +1177,11 @@ def train_classifier(features, targets):
 
     # train a random forest classififer
     random_forest = RandomForestClassifier(n_estimators=100)
+    #random_forest = RandomForestClassifier(n_estimators=100, n_jobs=8, max_depth=5)
+    #import xgboost as xgb
+    #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
+    #random_forest.fit(X, y-1)
+
     random_forest.fit(X, y)
 
     return random_forest
