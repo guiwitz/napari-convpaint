@@ -525,6 +525,38 @@ def load_single_layer_vgg16(keep_rgb=False):
 
     return model
 
+def get_max_kernel_size(hookmodel):
+    """
+    Given a hookmodel, find the maximum kernel size needed for the deepest layer.
+
+    Parameters
+    ----------
+    hookmodel: Hookmodel
+        model to find the maximum kernel size for
+
+    Returns
+    -------
+    max_kernel_size: int
+        maximum kernel size needed for the deepest layer
+    """
+    # Initialize variables
+    max_kernel_size = 1
+    current_total_pool = 1
+    # Find out which is the deepest layer
+    latest_layer = hookmodel.module_dict[hookmodel.selected_layers[-1]]
+    # Iterate over all layers to find the maximum kernel size
+    for curr_layer_key, curr_layer in hookmodel.module_dict.items():
+        # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
+        if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+            current_total_pool *= curr_layer.kernel_size
+        # For each convolution, multiply the kernel size with the current total pool
+        elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+            max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
+        # Only iterate until the latest selected layer
+        if curr_layer == latest_layer:
+            break
+    return max_kernel_size
+
 def get_multiscale_features(model, image, annotations, scalings, order=0,
                             use_min_features=True,
                             image_downsample=1):
@@ -646,14 +678,25 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
         annot_regions = skimage.morphology.label(current_annot > 0)
         boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
 
+        # get max kernel size (amount of surrounding needed for deepest layer)
+        max_kernel_size = get_max_kernel_size(model)
+
         for i in range(len(boxes['label'])):
+            
+            # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
+            pad_size = max_kernel_size//2
+            x_min = boxes['bbox-1'][i]-pad_size
+            x_max = boxes['bbox-3'][i]+pad_size
+            y_min = boxes['bbox-0'][i]-pad_size
+            y_max = boxes['bbox-2'][i]+pad_size
+
             im_crop = current_image[...,
-                boxes['bbox-0'][i]:boxes['bbox-2'][i],
-                boxes['bbox-1'][i]:boxes['bbox-3'][i]
+                x_min:x_max,
+                y_min:y_max
             ]
             annot_crop = current_annot[
-                boxes['bbox-0'][i]:boxes['bbox-2'][i],
-                boxes['bbox-1'][i]:boxes['bbox-3'][i]
+                x_min:x_max,
+                y_min:y_max
             ]
 
             extracted_features = get_multiscale_features(
