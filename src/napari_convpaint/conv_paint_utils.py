@@ -1169,20 +1169,22 @@ def get_features_all_samples_rich(model, images, annotations, scalings=[1],
 def train_classifier(features, targets):
     """Train a random forest classifier given a set of features and targets."""
 
-    # train model
-    # split train/test
-    X, X_test, y, y_test = train_test_split(features, targets,
-                                            test_size=0.2,
-                                            random_state=42)
+    # split train/test - not necessary, since we are training a random forest
+    # split_dataset = train_test_split(features, targets,
+    #                                  test_size=0.2,
+    #                                  random_state=42)
+    # features_train, features_test, labels_train, labels_test = split_dataset
+    # instead use all features for training
+    features_train, labels_train = features, targets
 
     # train a random forest classififer
     random_forest = RandomForestClassifier(n_estimators=100)
     #random_forest = RandomForestClassifier(n_estimators=100, n_jobs=8, max_depth=5)
     #import xgboost as xgb
     #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
-    #random_forest.fit(X, y-1)
+    #random_forest.fit(features_train, labels_train-1)
 
-    random_forest.fit(X, y)
+    random_forest.fit(features_train, labels_train)
 
     return random_forest
 
