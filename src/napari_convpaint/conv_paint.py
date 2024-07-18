@@ -6,20 +6,26 @@ from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
-from joblib import dump, load
+from joblib import dump
 from pathlib import Path
-import warnings
 import numpy as np
-import pandas as pd
-import yaml
+
 
 from napari_guitils.gui_structures import VHGroup, TabSet
-#from napari_annotation_project.project_widget import ProjectWidget 
-from .conv_paint_utils import (predict_image, parallel_predict_image, 
+from .conv_paint_utils import (parallel_predict_image, 
                                normalize_image, compute_image_stats)
 from .conv_parameters import Param
-from .conv_paint_utils import (Hookmodel, get_features_current_layers,
-                               train_classifier, load_trained_classifier)
+from .conv_paint_utils import (get_features_current_layers,
+                               train_classifier)
+from .conv_paint_classifier import load_trained_classifier
+
+from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
+from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
+from napari_convpaint.conv_paint_gaussian import GaussianFeatures
+from .conv_paint_nnlayers import Hookmodel
+
+ALL_MODELS = {x: Hookmodel for x in NN_MODELS}
+ALL_MODELS.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
 
 class ConvPaintWidget(QWidget):
     """
@@ -139,9 +145,9 @@ class ConvPaintWidget(QWidget):
         self.save_model_btn.setEnabled(False)
         self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
 
-        self.load_model_btn = QPushButton('Load trained model')
-        self.load_model_btn.setToolTip('Select *.joblib file to load as trained model')
-        self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
+        self.load_classifier_btn = QPushButton('Load trained model')
+        self.load_classifier_btn.setToolTip('Select *.joblib file to load as trained model')
+        self.load_save_group.glayout.addWidget(self.load_classifier_btn, 0,1,1,1)
 
         self.reset_model_btn = QPushButton('Reset model')
         self.reset_model_btn.setToolTip('Suppress current model and reset to default')
@@ -187,14 +193,13 @@ class ConvPaintWidget(QWidget):
 
 
         self.qcombo_model_type = QComboBox()
-        self.qcombo_model_type.addItems([
-            'vgg16', 'efficient_netb0', 'single_layer_vgg16'])#, 'single_layer_vgg16_rgb'])
+        self.qcombo_model_type.addItems(ALL_MODELS.keys())
         self.qcombo_model_type.setToolTip('Select model architecture')
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
-        self.load_nnmodel_btn = QPushButton('Load nn model')
-        self.load_nnmodel_btn.setToolTip('Load neural network model to display its layers')
-        self.tabs.add_named_tab('Model', self.load_nnmodel_btn, [1,0,1,2])
+        self.load_model_btn = QPushButton('Load model')
+        self.load_model_btn.setToolTip('Load feature extraction model')
+        self.tabs.add_named_tab('Model', self.load_model_btn, [1,0,1,2])
 
         self.set_nnmodel_outputs_btn = QPushButton('Set model outputs')
         self.set_nnmodel_outputs_btn.setToolTip('Select layers to use as feature extractors')
@@ -280,12 +285,12 @@ class ConvPaintWidget(QWidget):
         self.prediction_btn.clicked.connect(self.predict)
         self.prediction_all_btn.clicked.connect(self.predict_all)
         self.save_model_btn.clicked.connect(self.save_model)
-        self.load_model_btn.clicked.connect(self.load_classifier)
+        self.load_classifier_btn.clicked.connect(self.load_classifier)
         self.reset_model_btn.clicked.connect(self.reset_model)
         self.check_use_project.stateChanged.connect(self._add_project)
         self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
 
-        self.load_nnmodel_btn.clicked.connect(self._on_load_nnmodel)
+        self.load_model_btn.clicked.connect(self._on_load_model)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
         self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
@@ -459,7 +464,8 @@ class ConvPaintWidget(QWidget):
         """Using hooks setup model to give outputs at selected layers."""
         
         model_type = self.qcombo_model_type.currentText()
-        self.model = Hookmodel(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
+        model_class = ALL_MODELS[model_type]
+        self.model = model_class(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
 
         selected_layers = self.get_selected_layers_names()
         self.model.register_hooks(selected_layers=selected_layers)
@@ -472,20 +478,28 @@ class ConvPaintWidget(QWidget):
         return selected_layers
                                   
 
-    def _on_load_nnmodel(self, event=None):
+    def _on_load_model(self, event=None):
         """Load a neural network model. Create list of selectable layers."""
-            
-        self.model = Hookmodel(self.qcombo_model_type.currentText(), use_cuda=self.check_use_cuda.isChecked())
-        self._create_output_selection()
-        # if model has a single layer output, automatically initialize it
-        if len(self.model.named_modules) == 1:
-            self.model_output_selection.setCurrentRow(0)
-            self._on_click_define_model_outputs()
+
+        model_class = ALL_MODELS[self.qcombo_model_type.currentText()]
+        self.model = model_class(
+            model_name=self.qcombo_model_type.currentText(),
+            use_cuda=self.check_use_cuda.isChecked())
+        
+        if isinstance(model_class, Hookmodel):
+            self._create_output_selection()
+            # if model has a single layer output, automatically initialize it
+            if len(self.model.named_modules) == 1:
+                self.model_output_selection.setCurrentRow(0)
+                self._on_click_define_model_outputs()
+                self.set_nnmodel_outputs_btn.setEnabled(False)
+                self.model_output_selection.setEnabled(False)
+            else:
+                self.set_nnmodel_outputs_btn.setEnabled(True)
+                self.model_output_selection.setEnabled(True)
+        else:
             self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
-        else:
-            self.set_nnmodel_outputs_btn.setEnabled(True)
-            self.model_output_selection.setEnabled(True)
 
     def set_default_model(self):#, keep_rgb=False):
         """Set default model."""
@@ -497,7 +511,7 @@ class ConvPaintWidget(QWidget):
         self.num_scales_combo.setCurrentText('[1,2]')
         self.spin_interpolation_order.setValue(1)
         self.check_use_min_features.setChecked(True)
-        self._on_load_nnmodel()
+        self._on_load_model()
 
     def get_data_channel_first(self):
         """Get data from selected channel. If RGB, move channel axis to first position."""
@@ -545,9 +559,9 @@ class ConvPaintWidget(QWidget):
             self.current_model_path.setText('In training')
             pbr.set_description(f"Training")
             features, targets = get_features_current_layers(
-                model=self.model,
                 image=image_stack,
                 annotations=self.select_annotation_layer_widget.value.data,
+                model=self.model,
                 scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
@@ -694,14 +708,15 @@ class ConvPaintWidget(QWidget):
 
             if self.check_tile_image.isChecked():
                 predicted_image = parallel_predict_image(
-                    image, self.model, self.random_forest, self.param.scalings,
+                    image=image, model=self.model, classifier=self.random_forest,
+                    scalings=self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
                     image_downsample=self.spin_downsample.value(),
                     use_dask=False)
             else:
-                predicted_image = predict_image(
-                    image, self.model, self.random_forest, self.param.scalings,
+                predicted_image = self.model.predict_image(
+                    image=image, classifier=self.random_forest, scalings=self.param.scalings,
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
                     image_downsample=self.spin_downsample.value(),
@@ -763,8 +778,8 @@ class ConvPaintWidget(QWidget):
                 use_dask=False
             )
             else:
-                predicted_image = predict_image(
-                image, self.model, self.random_forest, self.param.scalings,
+                predicted_image = self.model.predict_image(
+                image=image, classifier=self.random_forest, scalings=self.param.scalings,
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 image_downsample=self.spin_downsample.value()
@@ -828,22 +843,27 @@ class ConvPaintWidget(QWidget):
         self.current_model_path.setText(save_file.name)
 
         self.update_gui_from_params()
-        self.model = Hookmodel(param=self.param, use_cuda=self.check_use_cuda.isChecked())
+        model_class = ALL_MODELS[self.param.model_name]
+        self.model = model_class(model_name=self.param.model_name,
+                                 param=self.param, use_cuda=self.check_use_cuda.isChecked())
 
         self.reset_predict_buttons_after_training()
 
 
     def update_gui_from_params(self):
-        """Update GUI from parameters and then update NN model with that info."""
+        """Update GUI from parameters and then update the model with that info."""
 
         self.qcombo_model_type.setCurrentText(self.param.model_name)
         # load model to get layer list
-        self._on_load_nnmodel()
+        self._on_load_model()
         #self.update_scalings()
         self.num_scales_combo.setCurrentText(str(self.param.scalings))
-        for sel in self.param.model_layers:
-            self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
-        self._on_click_define_model_outputs()
+        
+        if isinstance(self.model, Hookmodel):
+            for sel in self.param.model_layers:
+                self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
+            self._on_click_define_model_outputs()
+        
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
