@@ -67,11 +67,10 @@ class Hookmodel():
         self.selected_layers = []
 
         self.get_layer_dict()
-
         if model_name == 'single_layer_vgg16':
             self.register_hooks(list(self.module_dict.keys()))
 
-        if param is not None:
+        if (param is not None) and (model_name != 'single_layer_vgg16'):
             self.register_hooks(param.model_layers)
 
     def __call__(self, tensor_image):
@@ -90,7 +89,6 @@ class Hookmodel():
         self.features_per_layer = []
         self.selected_layers = selected_layers.copy()
         for ind in range(len(selected_layers)):
-
             self.features_per_layer.append(
                 self.module_dict[selected_layers[ind]].out_channels)
 
@@ -227,7 +225,7 @@ class Hookmodel():
         """
         
         if use_min_features:
-            max_features = np.min(self.model.features_per_layer)
+            max_features = np.min(self.features_per_layer)
             all_scales = self.filter_image_multichannels(
                 image, scalings=scalings, order=order,
                 image_downsample=image_downsample)
