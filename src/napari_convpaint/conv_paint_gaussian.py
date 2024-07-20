@@ -58,3 +58,6 @@ class GaussianFeatures:
         predictions = np.reshape(predictions, image_XY_dims)
 
         return predictions
+    
+    def get_padding(self):
+        return self.sigma
