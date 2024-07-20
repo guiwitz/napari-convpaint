@@ -607,7 +607,6 @@ def get_multiscale_features(model, image, annotations, scalings, order=0,
     for ind, a in enumerate(all_scales):
         n_features = a.shape[1]
         extract = a[0, full_annotation[0:n_features]]
-
         all_values_scales.append(np.reshape(extract, (n_features, int(extract.shape[0] / n_features))).T)
     extracted_features = np.concatenate(all_values_scales, axis=1)
 
@@ -677,18 +676,23 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
 
         annot_regions = skimage.morphology.label(current_annot > 0)
         boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
-
+        
         # get max kernel size (amount of surrounding needed for deepest layer)
         max_kernel_size = get_max_kernel_size(model)
 
         for i in range(len(boxes['label'])):
-            
             # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
             pad_size = max_kernel_size//2
-            x_min = boxes['bbox-1'][i]-pad_size
-            x_max = boxes['bbox-3'][i]+pad_size
-            y_min = boxes['bbox-0'][i]-pad_size
-            y_max = boxes['bbox-2'][i]+pad_size
+            x_min = boxes['bbox-0'][i]-pad_size
+            x_max = boxes['bbox-2'][i]+pad_size
+            y_min = boxes['bbox-1'][i]-pad_size
+            y_max = boxes['bbox-3'][i]+pad_size
+
+            # temporary check that bounds are not out of image
+            x_min = max(0, x_min)
+            x_max = min(current_image.shape[-2], x_max)
+            y_min = max(0, y_min)
+            y_max = min(current_image.shape[-1], y_max)
 
             im_crop = current_image[...,
                 x_min:x_max,
