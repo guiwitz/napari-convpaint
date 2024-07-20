@@ -224,6 +224,12 @@ class Hookmodel():
 
         """
         
+        padding = self.get_padding() * np.max(scalings)
+        if image.ndim == 2:
+            image = np.pad(image, ((padding, padding), (padding, padding)), mode='reflect')
+        elif image.ndim == 3:
+            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+
         if use_min_features:
             max_features = np.min(self.features_per_layer)
             all_scales = self.filter_image_multichannels(
@@ -253,6 +259,9 @@ class Hookmodel():
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
                 preserve_range=True, order=1).astype(np.uint8)
+            
+        predicted_image = predicted_image[padding:-padding, padding:-padding]
+        
 
         return predicted_image
 
@@ -282,7 +291,6 @@ class Hookmodel():
             F_i is the number of filters of the ith layer and S the number of scaling factors.
             
         """
-
         input_channels = self.named_modules[0][1].in_channels
         image = np.asarray(image, dtype=np.float32)
         
@@ -321,5 +329,37 @@ class Hookmodel():
 
                         out_np = im.cpu().detach().numpy()
                         all_scales.append(out_np)
-
         return all_scales
+    
+    def get_padding(self):
+        return self.get_max_kernel_size() // 2
+    
+    def get_max_kernel_size(self):
+        """
+        Given a hookmodel, find the maximum kernel size needed for the deepest layer.
+        
+        Parameters
+        ----------
+        
+        Returns
+        -------
+        max_kernel_size: int
+            maximum kernel size needed for the deepest layer
+        """
+        # Initialize variables
+        max_kernel_size = 1
+        current_total_pool = 1
+        # Find out which is the deepest layer
+        latest_layer = self.module_dict[self.selected_layers[-1]]
+        # Iterate over all layers to find the maximum kernel size
+        for curr_layer_key, curr_layer in self.module_dict.items():
+            # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
+            if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+                current_total_pool *= curr_layer.kernel_size
+            # For each convolution, multiply the kernel size with the current total pool
+            elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+                max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
+            # Only iterate until the latest selected layer
+            if curr_layer == latest_layer:
+                break
+        return max_kernel_size

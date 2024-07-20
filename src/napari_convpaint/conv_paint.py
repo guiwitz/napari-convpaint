@@ -549,8 +549,6 @@ class ConvPaintWidget(QWidget):
                 self.set_default_model()
             else:
                 raise Exception('You have to define and load a model first')
-        
-        
 
         image_stack = self.get_selectedlayer_data()
         

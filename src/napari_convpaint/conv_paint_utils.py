@@ -390,34 +390,38 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
     all_values = []
     all_targets = []
 
-    # iterating over non_empty iteraties of t/z for 3D data
+    # find maximal padding necessary
+    padding = model.get_padding() * np.max(scalings)
 
+    # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
 
         if annotations.ndim == 2:
-            current_image = image
-            current_annot = annotations
+            if image.ndim == 3:
+                current_image = np.pad(image, ((0,0), (padding,padding), (padding,padding)), mode='reflect')
+            else:
+                current_image = np.pad(image, padding, mode='reflect')
+            current_annot = np.pad(annotations, padding, mode='constant')
         else:
             if image.ndim == 3:
-                current_image = image[t]
-                current_annot = annotations[t]
+                current_image = np.pad(image[t], padding, mode='reflect')
+                current_annot = np.pad(annotations[t], padding, mode='constant')
             elif image.ndim == 4:
-                current_image = image[:, t]
-                current_annot = annotations[t]
+                current_image = np.pad(image[:, t], ((0,0),(padding, padding),(padding, padding)), mode='reflect')
+                current_annot = np.pad(annotations[t], padding, mode='constant')
 
         annot_regions = skimage.morphology.label(current_annot > 0)
         boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
 
         for i in range(len(boxes['label'])):
             im_crop = current_image[...,
-                boxes['bbox-0'][i]:boxes['bbox-2'][i],
-                boxes['bbox-1'][i]:boxes['bbox-3'][i]
+                boxes['bbox-0'][i]-padding:boxes['bbox-2'][i]+padding,
+                boxes['bbox-1'][i]-padding:boxes['bbox-3'][i]+padding
             ]
             annot_crop = current_annot[
-                boxes['bbox-0'][i]:boxes['bbox-2'][i],
-                boxes['bbox-1'][i]:boxes['bbox-3'][i]
+                boxes['bbox-0'][i]-padding:boxes['bbox-2'][i]+padding,
+                boxes['bbox-1'][i]-padding:boxes['bbox-3'][i]+padding
             ]
-
             extracted_features = model.get_features(
                 image=im_crop,
                 annotations=annot_crop,
@@ -438,7 +442,6 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
 
 
 rot_model = None
-
 
 def get_rot_model(device='cpu'):
     global rot_model
