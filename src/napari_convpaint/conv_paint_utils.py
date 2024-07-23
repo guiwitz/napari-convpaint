@@ -19,6 +19,8 @@ from torch.nn.functional import interpolate as torch_interpolate
 def get_device(use_cuda=None):
     if torch.cuda.is_available() and (use_cuda is None or use_cuda==True):
         device = torch.device('cuda:0')  # use first available GPU
+    elif torch.backends.mps.is_available() and (use_cuda is None or use_cuda==True): #check if mps is available
+        device = torch.device('mps')
     else:
         device = torch.device('cpu')
     return device
@@ -937,18 +939,13 @@ def train_classifier(features, targets):
     """Train a random forest classifier given a set of features and targets."""
 
     # train model
-    # split train/test
-    X, X_test, y, y_test = train_test_split(features, targets,
-                                            test_size=0.2,
-                                            random_state=42)
-
     # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=100)
+    random_forest = RandomForestClassifier(n_estimators=200)
     #random_forest = RandomForestClassifier(n_estimators=100, n_jobs=8, max_depth=5)
     #import xgboost as xgb
     #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
     #random_forest.fit(X, y-1)
 
-    random_forest.fit(X, y)
+    random_forest.fit(features, targets)
 
     return random_forest
