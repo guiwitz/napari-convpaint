@@ -178,6 +178,11 @@ class ConvPaintWidget(QWidget):
         self.check_tile_image.setToolTip('Tile image to reduce memory usage')
         self.options_group.glayout.addWidget(self.check_tile_image, 2,0,1,1)
 
+        self.check_tile_annotations = QCheckBox('Tile annotations')
+        self.check_tile_annotations.setChecked(False)
+        self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\nDisable for models that extract long range features (e.g. DINO)!')
+        self.options_group.glayout.addWidget(self.check_tile_annotations, 3,0,1,1)
+
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
         self.radio_no_normalize.setToolTip('No normalization is applied')
@@ -190,9 +195,9 @@ class ConvPaintWidget(QWidget):
         self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
         self.button_group_normalize.addButton(self.radio_normalized_over_stack, id=2)
         self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
-        self.options_group.glayout.addWidget(self.radio_no_normalize, 3,0,1,1)
-        self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 4,0,1,1)
-        self.options_group.glayout.addWidget(self.radio_normalize_by_image, 5,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_no_normalize, 4,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 5,0,1,1)
+        self.options_group.glayout.addWidget(self.radio_normalize_by_image, 6,0,1,1)
 
 
         self.qcombo_model_type = QComboBox()
@@ -567,6 +572,7 @@ class ConvPaintWidget(QWidget):
                 order=self.spin_interpolation_order.value(),
                 use_min_features=self.check_use_min_features.isChecked(),
                 image_downsample=self.spin_downsample.value(),
+                tile_annotations=self.check_tile_annotations.isChecked(),
             )
             self.random_forest = train_classifier(features, targets)
             self.reset_predict_buttons_after_training()
@@ -622,6 +628,7 @@ class ConvPaintWidget(QWidget):
                     order=self.spin_interpolation_order.value(),
                     use_min_features=self.check_use_min_features.isChecked(),
                     image_downsample=self.spin_downsample.value(),
+                    tile_annotations=self.check_tile_annotations.isChecked(),
                 )
                 if features is None:
                     continue

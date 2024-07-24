@@ -22,6 +22,8 @@ def get_device(use_cuda=None):
     elif torch.backends.mps.is_available() and (use_cuda is None or use_cuda==True): #check if mps is available
         device = torch.device('mps')
     else:
+        if use_cuda:
+            warnings.warn('CUDA or MPS is not available. Using CPU')
         device = torch.device('cpu')
     return device
 
@@ -309,7 +311,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
 
             if use_dask:
                 processes.append(client.submit(
-                    model.predict_image, image_block, model, classifier,
+                    model.predict_image, image_block, classifier,
                     scalings, order, use_min_features, image_downsample))
                 
                 min_row_ind_collection.append(min_row_ind)
@@ -322,7 +324,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                 new_min_row_ind_collection.append(new_min_row_ind)
 
             else:
-                predicted_image = model.predict_image(image_block, model, classifier,
+                predicted_image = model.predict_image(image_block, classifier,
                     scalings, order, use_min_features, image_downsample)
                 crop_pred = predicted_image[
                     new_min_row_ind: new_max_row_ind,
@@ -345,7 +347,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
 
 def get_features_current_layers(image, annotations, model=None, scalings=[1],
                                 order=0, use_min_features=True,
-                                image_downsample=1):
+                                image_downsample=1,tile_annotations=False):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -413,8 +415,11 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
                 current_annot = np.pad(annotations[t], padding, mode='constant')
 
         annot_regions = skimage.morphology.label(current_annot > 0)
-        boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
 
+        if tile_annotations:
+            boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+        else:
+            boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
         for i in range(len(boxes['label'])):
             im_crop = current_image[...,
                 boxes['bbox-0'][i]-padding:boxes['bbox-2'][i]+padding,
