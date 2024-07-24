@@ -11,10 +11,10 @@ class FeatureExtractor:
         Gets the features of an image.
 
         Parameters:
-        - image: The input image. Dimensions are CxHxW.
+        - image: The input image. Dimensions are [nb_channels, width, height]
 
         Returns:
-        - features: The extracted features of the image.
+        - features: The extracted features of the image. [nb_features, width, height]
         """
         raise NotImplementedError("Subclasses must implement get_features method.")
 

@@ -1,10 +1,11 @@
 import torch
 import numpy as np
 from .conv_paint_utils import get_device
+from .conv_paint_feature_extractor import FeatureExtractor
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
 
-class DinoFeatures():
+class DinoFeatures(FeatureExtractor):
     def __init__(self, model_name='dinov2_vits14_reg', use_cuda=False):
         self.model_name = model_name
         self.use_cuda = use_cuda
@@ -22,9 +23,13 @@ class DinoFeatures():
         self.model.eval()
 
     def _preprocess_image(self, image):
-        '''Input image is 3xHxW, normalize to image net stats,c return to 1xCxHxW tensor'''
+        '''Normalizes input image to image net stats, return to 1x3xHxW tensor.
+        Expects image to be 3xHxW'''
+
+        assert len(image.shape) == 3
+        assert image.shape[0] == 3
+
         #for uint8 or uint16 images, get divide by max value
-        print(image.dtype)
         if image.dtype == np.uint8:
             image = image.astype(np.float32)
             image = image / 255
@@ -76,25 +81,26 @@ class DinoFeatures():
         return features
     
     def _extract_features(self, image):
-        '''Extract features from image with arbitrary number of color channels, return features as np.array with dimensions  H x W x nfeatures'''
-        if image.ndim == 2:
-            image = np.expand_dims(image, axis=0)
-            image = np.repeat(image, 3, axis=0)
-            features = self._extract_features_rgb(image)
-        elif image.shape[0] == 3:
+        '''Extract features from image with arbitrary number of color channels, 
+        return features as np.array with dimensions  H x W x nfeatures'''
+        assert len(image.shape) == 3
+        if image.shape[0] == 3:
             features = self._extract_features_rgb(image)
         else:
             features = []
-            for i in range(image.shape[0]):
-                features_rgb = self._extract_features_rgb(image[i])
+            for channel_nb in range(image.shape[0]):
+                channel = np.expand_dims(image[channel_nb], axis=0)
+                channel = np.repeat(channel, 3, axis=0)
+                features_rgb = self._extract_features_rgb(channel)
                 features.append(features_rgb)
             features = np.concatenate(features, axis=-1)
         return features
 
+    def get_features(self, image, **kwargs):
+        '''Given an image, extract features.
+        Returns features with dimensions nb_features x H x W'''
 
-    def get_features(self, image, annotations, **kwargs):
         #make sure image is divisible by patch size
-        h, w = image.shape[-2:]
         h, w = image.shape[-2:]
         new_h = (h // self.patchsize) * self.patchsize
         new_w = (w // self.patchsize) * self.patchsize
@@ -104,25 +110,13 @@ class DinoFeatures():
         w_pad_right = w - new_w - w_pad_left
         image = image[:, h_pad_top:-h_pad_bottom, w_pad_left:-w_pad_right]
 
-        features = self._extract_features(image)
+        features = self._extract_features(image) #[H, W, nfeatures]
         features = np.repeat(features, self.patchsize, axis=0)
         features = np.repeat(features, self.patchsize, axis=1)
 
-        #add 0s padding to match original image size, with the dimension of features 
-        # (since we cropped to be divisible by patch size
-        features_padded = np.zeros((h, w, features.shape[-1]), dtype=np.float32)
-        features_padded[h_pad_top:-h_pad_bottom, w_pad_left:-w_pad_right,:] = features
-        features = features_padded
-
-        #extract features where there are annotations, return np.array with npixels x nfeatures
-        mask = annotations > 0
-        features = features[mask == 1]
-        features = np.reshape(features, (features.shape[0], -1))
+        #replace with padding where there are no annotations
+        pad_width = ((h_pad_top, h_pad_bottom), (w_pad_left, w_pad_right), (0,0))
+        features = np.pad(features, pad_width=pad_width, mode= 'edge')
+        features = np.moveaxis(features, -1, 0)
+        #print(features.shape) --> e.g. (384, 150, 95) 
         return features
-
-    def predict_image(self, image, classifier, **kwargs):
-        features = self.get_features(image, np.ones(image.shape[-2::], dtype=np.uint8))
-        predictions = classifier.predict(features)
-        predictions = np.reshape(predictions, image.shape[-2::])
-        return predictions
-    
