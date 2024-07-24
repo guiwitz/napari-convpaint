@@ -50,12 +50,16 @@ class FeatureExtractor:
 
         """
 
-        padding = self.get_padding()
         if image.ndim == 2:
-            image = np.pad(image, ((padding, padding), (padding, padding)), mode='reflect')
             image = np.expand_dims(image, axis=0)
-        elif image.ndim == 3:
-            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+
+        if image_downsample > 1:
+            image = image[:, ::image_downsample, ::image_downsample]
+
+        padding = self.get_padding()
+        image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+
+
 
         features_all_scales = []
         for s in scalings:

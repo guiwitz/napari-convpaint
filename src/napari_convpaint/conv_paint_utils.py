@@ -436,6 +436,9 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
                 use_min_features=use_min_features,
                 image_downsample=image_downsample)
             
+            if image_downsample > 1:
+                annot_crop = annot_crop[::image_downsample, ::image_downsample]
+                
             #from the [features, w, h] make a list of [features] with len nb_annotations
             mask = annot_crop > 0
             nb_features = extracted_features.shape[0]
@@ -443,8 +446,7 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
             extracted_features = extracted_features[mask]
             all_values.append(extracted_features)
 
-            annot_crop_downsampled = annot_crop[::image_downsample, ::image_downsample]
-            targets = annot_crop_downsampled[annot_crop_downsampled > 0]
+            targets = annot_crop[annot_crop > 0]
             targets = targets.flatten()
             all_targets.append(targets)
         
