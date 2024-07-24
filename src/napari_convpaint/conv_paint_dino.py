@@ -29,36 +29,36 @@ class DinoFeatures(FeatureExtractor):
         assert len(image.shape) == 3
         assert image.shape[0] == 3
 
-        #for uint8 or uint16 images, get divide by max value
+        # for uint8 or uint16 images, get divide by max value
         if image.dtype == np.uint8:
             image = image.astype(np.float32)
             image = image / 255
         elif image.dtype == np.uint16:
             image = image.astype(np.float32)
             image = image / 65535
-        #else just min max normalize to 0-1
+        # else just min max normalize to 0-1.
         else:
+            image = image.astype(np.float32)
             image = (image - np.min(image)) / (np.max(image) - np.min(image))
-        #normalize to imagenet stats
+
+        # normalize to imagenet stats
         mean = np.array([0.485, 0.456, 0.406])
         std = np.array([0.229, 0.224, 0.225])
         image = (image - mean[:, None, None]) / std[:, None, None]
+
 #       # make sure image is divisible by patch size
         h, w = image.shape[-2:]
         new_h = (h // self.patchsize) * self.patchsize
         new_w = (w // self.patchsize) * self.patchsize
         image = image[:, :new_h, :new_w]    
 
-        #add batch dimension
+        # add batch dimension
         image = np.expand_dims(image, axis=0)
     
-        #convert to tensor
-        image = torch.tensor(image, dtype=torch.float32,device=self.device)
-        return image
+        # convert to tensor
+        image_tensor = torch.tensor(image, dtype=torch.float32,device=self.device)
+        return image_tensor
 
-    def get_padding(self):
-        return self.padding
-    
     def _extract_features_rgb(self, image):
         '''Extract features from image, return features as np.array with dimensions  H x W x nfeatures.
         Input image has to be multiple of patch size'''
@@ -66,9 +66,9 @@ class DinoFeatures(FeatureExtractor):
         assert image.shape[-1] % self.patchsize == 0
         assert image.shape[0] == 3
 
-        image_preprocessed = self._preprocess_image(image)
+        image_tensor = self._preprocess_image(image)
         with torch.no_grad():
-            features_dict = self.model.forward_features(image_preprocessed)
+            features_dict = self.model.forward_features(image_tensor)
         features = features_dict['x_norm_patchtokens']
         if self.use_cuda:
             features = features.cpu()
@@ -81,7 +81,7 @@ class DinoFeatures(FeatureExtractor):
         return features
     
     def _extract_features(self, image):
-        '''Extract features from image with arbitrary number of color channels, 
+        '''Helper function to extract features from image with arbitrary number of color channels, 
         return features as np.array with dimensions  H x W x nfeatures'''
         assert len(image.shape) == 3
         if image.shape[0] == 3:
@@ -96,8 +96,11 @@ class DinoFeatures(FeatureExtractor):
             features = np.concatenate(features, axis=-1)
         return features
 
+    def get_padding(self):
+        return self.padding
+
     def get_features(self, image, **kwargs):
-        '''Given an image, extract features.
+        '''Given an CxWxH image, extract features.
         Returns features with dimensions nb_features x H x W'''
 
         #make sure image is divisible by patch size
@@ -116,7 +119,12 @@ class DinoFeatures(FeatureExtractor):
 
         #replace with padding where there are no annotations
         pad_width = ((h_pad_top, h_pad_bottom), (w_pad_left, w_pad_right), (0,0))
+        print(f"pad_width: {pad_width}")
+        print(features.shape)
         features = np.pad(features, pad_width=pad_width, mode= 'edge')
         features = np.moveaxis(features, -1, 0)
-        #print(features.shape) --> e.g. (384, 150, 95) 
+
+        print(features.shape)
+        print(image.shape)
+        assert features.shape[1] == h and features.shape[2] == w
         return features
