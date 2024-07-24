@@ -149,7 +149,6 @@ def test_4d_image(make_napari_viewer, capsys):
     assert my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,10,1,1), f"Wrong number of values, expected (3,10,1,1) got {my_widget.image_mean.shape}"
     normalized = my_widget.get_selectedlayer_data()
-    print(normalized)
 
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
