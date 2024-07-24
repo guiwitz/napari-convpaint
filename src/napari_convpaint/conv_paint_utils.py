@@ -424,21 +424,31 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
                 boxes['bbox-0'][i]-padding:boxes['bbox-2'][i]+padding,
                 boxes['bbox-1'][i]-padding:boxes['bbox-3'][i]+padding
             ]
-            extracted_features = model.get_features(
+            extracted_features = model.get_features_scaled(
                 image=im_crop,
-                annotations=annot_crop,
                 scalings=scalings,
-                order=order, use_min_features=use_min_features,
+                order=order,
+                use_min_features=use_min_features,
                 image_downsample=image_downsample)
+            
+            #from the [features, w, h] make a list of [features] with len nb_annotations
+            mask = annot_crop > 0
+            nb_features = extracted_features.shape[0]
+            extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
+            extracted_features = extracted_features[mask]
             all_values.append(extracted_features)
 
-            all_targets.append(annot_crop[::image_downsample, ::image_downsample]
-                                [annot_crop[::image_downsample, ::image_downsample] > 0])
+            annot_crop_downsampled = annot_crop[::image_downsample, ::image_downsample]
+            targets = annot_crop_downsampled[annot_crop_downsampled > 0]
+            targets = targets.flatten()
+            all_targets.append(targets)
         
 
     all_values = np.concatenate(all_values, axis=0)
     features = pd.DataFrame(all_values)
-    targets = pd.Series(np.concatenate(all_targets, axis=0))
+
+    all_targets = np.concatenate(all_targets, axis=0)
+    targets = pd.Series(all_targets)
 
     return features, targets
 
