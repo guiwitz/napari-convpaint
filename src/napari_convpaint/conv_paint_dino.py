@@ -2,6 +2,8 @@ import torch
 import numpy as np
 from .conv_paint_utils import get_device
 from .conv_paint_feature_extractor import FeatureExtractor
+import skimage
+import pandas as pd
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
 
@@ -98,8 +100,12 @@ class DinoFeatures(FeatureExtractor):
 
     def get_padding(self):
         return self.padding
+    
+    def get_features_scaled(self, image, scalings=[1], order=0, image_downsample=1, **kwargs):
+        #never use more than one scaling with DINO
+        return super().get_features_scaled(image, scalings=[1], order=order, image_downsample=image_downsample, **kwargs)
 
-    def get_features(self, image, **kwargs):
+    def get_features(self, image, return_patches=False, **kwargs):
         '''Given an CxWxH image, extract features.
         Returns features with dimensions nb_features x H x W'''
 
@@ -114,17 +120,56 @@ class DinoFeatures(FeatureExtractor):
         image = image[:, h_pad_top:-h_pad_bottom, w_pad_left:-w_pad_right]
 
         features = self._extract_features(image) #[H, W, nfeatures]
-        features = np.repeat(features, self.patchsize, axis=0)
-        features = np.repeat(features, self.patchsize, axis=1)
 
-        #replace with padding where there are no annotations
-        pad_width = ((h_pad_top, h_pad_bottom), (w_pad_left, w_pad_right), (0,0))
-        print(f"pad_width: {pad_width}")
-        print(features.shape)
-        features = np.pad(features, pad_width=pad_width, mode= 'edge')
-        features = np.moveaxis(features, -1, 0)
+        if not return_patches:
+            #upsample features to original size
+            features = np.repeat(features, self.patchsize, axis=0)
+            features = np.repeat(features, self.patchsize, axis=1)
 
-        print(features.shape)
-        print(image.shape)
-        assert features.shape[1] == h and features.shape[2] == w
-        return features
+            #replace with padding where there are no annotations
+            pad_width = ((h_pad_top, h_pad_bottom), (w_pad_left, w_pad_right), (0,0))
+
+            features = np.pad(features, pad_width=pad_width, mode= 'edge')
+            features = np.moveaxis(features, -1, 0) #[nb_features, H, W]
+
+            assert features.shape[1] == h and features.shape[2] == w
+            return features
+        
+        else:
+            #return patches
+            features = np.moveaxis(features, -1, 0) #[nb_features, H, W]
+            assert features.shape[1] == (h // self.patchsize) and features.shape[2] == (w // self.patchsize)
+            return features
+
+
+    def predict_image(self, image, classifier, scalings = [1], order=0, image_downsample=1, **kwargs):
+        '''Special predict function for feature extraction models that output patchwise features.
+        1. Extract patch wise features
+        2. Predict each patch with classifier
+        3. Scale up the predictions'''
+
+        features = self.get_features_scaled(image, return_patches=True)
+        w_patch = np.ceil(features.shape[-2] / image_downsample).astype(int)
+        h_path = np.ceil(features.shape[-1] / image_downsample).astype(int)
+
+        nb_features = features.shape[0] #[nb_features, width, height]
+
+        #move features to last dimension
+        features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
+        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features]
+
+
+        all_pixels = pd.DataFrame(features)
+        predictions = classifier.predict(all_pixels)
+
+        predicted_image = np.reshape(predictions, [w_patch, h_path])
+        if image_downsample > 1:
+            predicted_image = skimage.transform.resize(
+                image=predicted_image,
+                output_shape=(image.shape[-2], image.shape[-1]),
+                preserve_range=True, order=order).astype(np.uint8)
+        return predicted_image
+
+
+
+

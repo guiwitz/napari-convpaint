@@ -29,8 +29,7 @@ class FeatureExtractor:
 
     def get_features_scaled(self, image, scalings = [1], order=0, image_downsample=1, **kwargs):
         """
-        Given a filter model and a classifier, predict the class of 
-        each pixel in an image.
+        Given a filter model and an image, extract features at different scales.
 
         Parameters
         ----------
@@ -45,8 +44,8 @@ class FeatureExtractor:
 
         Returns
         -------
-        predicted_image: 2d array
-            predicted image with classes
+        features: [nb_features*nb_scales x width x height]
+            return extracted features
 
         """
 
@@ -62,7 +61,7 @@ class FeatureExtractor:
         features_all_scales = []
         for s in scalings:
             image_scaled = image[:, ::s, ::s]
-            features = self.get_features(image_scaled) #features have shape [nb_features, width, height]
+            features = self.get_features(image_scaled,kwargs) #features have shape [nb_features, width, height]
             nb_features = features.shape[0]
             features = skimage.transform.resize(
                                 image=features,
@@ -83,8 +82,8 @@ class FeatureExtractor:
         nb_features = features.shape[0] #[nb_features, width, height]
 
         #move features to last dimension
-        features = np.moveaxis(features, 0, -1)
-        features = np.reshape(features, (-1, nb_features))
+        features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
+        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features]
 
         rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
         cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
