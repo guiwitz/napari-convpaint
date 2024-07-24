@@ -311,8 +311,14 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
 
             if use_dask:
                 processes.append(client.submit(
-                    model.predict_image, image_block, classifier,
-                    scalings, order, use_min_features, image_downsample))
+                    model.predict_image,
+                    image=image_block,
+                    classifier=classifier,
+                    scalings=scalings,
+                    order=order,
+                    use_min_features=use_min_features,
+                    image_downsample=image_downsample))
+                
                 
                 min_row_ind_collection.append(min_row_ind)
                 min_col_ind_collection.append(min_col_ind)
@@ -324,8 +330,14 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                 new_min_row_ind_collection.append(new_min_row_ind)
 
             else:
-                predicted_image = model.predict_image(image_block, classifier,
-                    scalings, order, use_min_features, image_downsample)
+                predicted_image = model.predict_image(
+                    image=image_block,
+                    classifier=classifier,
+                    scalings=scalings,
+                    order=order,
+                    use_min_features=use_min_features,
+                    image_downsample=image_downsample
+                )
                 crop_pred = predicted_image[
                     new_min_row_ind: new_max_row_ind,
                     new_min_col_ind: new_max_col_ind]
@@ -438,7 +450,7 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
             
             if image_downsample > 1:
                 annot_crop = annot_crop[::image_downsample, ::image_downsample]
-                
+
             #from the [features, w, h] make a list of [features] with len nb_annotations
             mask = annot_crop > 0
             nb_features = extracted_features.shape[0]

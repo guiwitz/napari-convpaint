@@ -59,8 +59,6 @@ class FeatureExtractor:
         padding = self.get_padding()
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
-
-
         features_all_scales = []
         for s in scalings:
             image_scaled = image[:, ::s, ::s]
