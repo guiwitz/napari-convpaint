@@ -101,9 +101,74 @@ class DinoFeatures(FeatureExtractor):
     def get_padding(self):
         return self.padding
     
-    def get_features_scaled(self, image, scalings=[1], order=0, image_downsample=1, **kwargs):
-        #never use more than one scaling with DINO
-        return super().get_features_scaled(image, scalings=[1], order=order, image_downsample=image_downsample, **kwargs)
+    def get_features_scaled(self, image, order=0, image_downsample=1, return_patches = False, **kwargs):
+        """
+        Overwrite the get_features_scaled function, as we don't want to extract features at different scales for DINO.
+
+        Parameters
+        ----------
+        image: 2d array
+            image to segment
+        order: int
+            interpolation order for low scale resizing
+        image_downsample: int, optional
+            downsample image by this factor before extracting features, by default 1
+
+        Returns
+        -------
+        features: [nb_features x width x height]
+            return extracted features
+
+        """
+
+        if image.ndim == 2:
+            image = np.expand_dims(image, axis=0)
+
+        if image_downsample > 1:
+            image = image[:, ::image_downsample, ::image_downsample]
+
+        if not return_patches:
+            padding = self.get_padding()
+            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+        
+        features = self.get_features(image, order=order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
+        nb_features = features.shape[0]
+
+        if not return_patches:
+            features = skimage.transform.resize(
+                                image=features,
+                                output_shape=(nb_features, image.shape[-2], image.shape[-1]),
+                                preserve_range=True,
+                                order=order)
+            features = features[:, padding:-padding, padding:-padding]
+        return features
+    
+    def predict_image(self, image, classifier, scalings = [1], order=0, image_downsample=1, **kwargs):
+        features = self.get_features_scaled(image=image,
+                                            scalings=scalings,
+                                            order=order,
+                                            image_downsample=image_downsample,
+                                            return_patches=True)
+        nb_features = features.shape[0] #[nb_features, width, height]
+
+        #move features to last dimension
+        features = np.moveaxis(features, 0, -1)
+        features = np.reshape(features, (-1, nb_features))
+
+        rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
+        cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
+
+        all_pixels = pd.DataFrame(features)
+        predictions = classifier.predict(all_pixels)
+
+        predicted_image = np.reshape(predictions, [rows, cols])
+        if image_downsample > 1:
+            predicted_image = skimage.transform.resize(
+                image=predicted_image,
+                output_shape=(image.shape[-2], image.shape[-1]),
+                preserve_range=True, order=order).astype(np.uint8)
+        predicted_image = predicted_image +1#for XGBoost
+        return predicted_image
 
     def get_features(self, image, return_patches=False, **kwargs):
         '''Given an CxWxH image, extract features.
@@ -142,13 +207,13 @@ class DinoFeatures(FeatureExtractor):
             return features
 
 
-    def predict_image(self, image, classifier, scalings = [1], order=0, image_downsample=1, **kwargs):
+    def predict_image(self, image, classifier, image_downsample=1, order=0, **kwargs):
         '''Special predict function for feature extraction models that output patchwise features.
         1. Extract patch wise features
         2. Predict each patch with classifier
         3. Scale up the predictions'''
 
-        features = self.get_features_scaled(image, return_patches=True)
+        features = self.get_features_scaled(image, return_patches=True, **kwargs)
         w_patch = np.ceil(features.shape[-2] / image_downsample).astype(int)
         h_path = np.ceil(features.shape[-1] / image_downsample).astype(int)
 
@@ -156,20 +221,19 @@ class DinoFeatures(FeatureExtractor):
 
         #move features to last dimension
         features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
-        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features]
+        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features] (1d-array for RF)
 
 
         all_pixels = pd.DataFrame(features)
         predictions = classifier.predict(all_pixels)
 
         predicted_image = np.reshape(predictions, [w_patch, h_path])
-        if image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=order).astype(np.uint8)
+        print(predicted_image.shape)
+
+        predicted_image = skimage.transform.resize(
+            image=predicted_image,
+            output_shape=(image.shape[-2], image.shape[-1]),
+            preserve_range=True, order=order).astype(np.uint8)
+        
+        print(predicted_image.shape)
         return predicted_image
-
-
-
-

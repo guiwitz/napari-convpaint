@@ -44,7 +44,7 @@ class FeatureExtractor:
 
         Returns
         -------
-        features: [nb_features*nb_scales x width x height]
+        features: [nb_features x width x height]
             return extracted features
 
         """
@@ -61,7 +61,7 @@ class FeatureExtractor:
         features_all_scales = []
         for s in scalings:
             image_scaled = image[:, ::s, ::s]
-            features = self.get_features(image_scaled,kwargs) #features have shape [nb_features, width, height]
+            features = self.get_features(image_scaled, order=order, **kwargs) #features have shape [nb_features, width, height]
             nb_features = features.shape[0]
             features = skimage.transform.resize(
                                 image=features,
@@ -71,7 +71,8 @@ class FeatureExtractor:
             
             features_all_scales.append(features)
         features_all_scales = np.concatenate(features_all_scales, axis=0)
-        features_all_scales = features_all_scales[:, padding:-padding, padding:-padding]
+        if padding > 0:
+            features_all_scales = features_all_scales[:, padding:-padding, padding:-padding]
         return features_all_scales
     
     def predict_image(self, image, classifier, scalings = [1], order=0, image_downsample=1, **kwargs):
@@ -82,8 +83,8 @@ class FeatureExtractor:
         nb_features = features.shape[0] #[nb_features, width, height]
 
         #move features to last dimension
-        features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
-        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features]
+        features = np.moveaxis(features, 0, -1)
+        features = np.reshape(features, (-1, nb_features))
 
         rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
         cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
