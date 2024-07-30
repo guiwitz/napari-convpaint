@@ -8,6 +8,8 @@ import skimage.morphology as morph
 import pandas as pd
 from joblib import Parallel, delayed
 import einops as ein
+#import xgboost as xgb
+
 
 from torch import nn
 from sklearn.model_selection import train_test_split
@@ -454,7 +456,13 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
             #from the [features, w, h] make a list of [features] with len nb_annotations
             mask = annot_crop > 0
             nb_features = extracted_features.shape[0]
+            print("extracted_features.shape")
+            print(extracted_features.shape)
             extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
+            print("extracted_features.shape")
+            print(extracted_features.shape)
+            print("mask.shape")
+            print(mask.shape)
             extracted_features = extracted_features[mask]
             all_values.append(extracted_features)
 
@@ -967,14 +975,11 @@ def get_features_all_samples_rich(model, images, annotations, scalings=[1],
 def train_classifier(features, targets):
     """Train a random forest classifier given a set of features and targets."""
 
-    # train model
     # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=200)
-    #random_forest = RandomForestClassifier(n_estimators=100, n_jobs=8, max_depth=5)
-    #import xgboost as xgb
-    #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
-    #random_forest.fit(X, y-1)
-
+    random_forest = RandomForestClassifier(n_estimators=100, n_jobs=-1, max_depth=10)
     random_forest.fit(features, targets)
+    
+    #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
+    #random_forest.fit(features, targets-1)
 
     return random_forest
