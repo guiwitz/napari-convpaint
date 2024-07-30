@@ -22,13 +22,16 @@ from .conv_paint_classifier import load_trained_classifier
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
 from napari_convpaint.conv_paint_dino import AVAILABLE_MODELS as DINO_MODELS
+from napari_convpaint.conv_paint_cellpose import AVAILABLE_MODELS as CELLPOSE_MODELS
 from napari_convpaint.conv_paint_gaussian import GaussianFeatures
 from napari_convpaint.conv_paint_dino import DinoFeatures
+from napari_convpaint.conv_paint_cellpose import CellposeFeatures
 from .conv_paint_nnlayers import Hookmodel
 
 ALL_MODELS = {x: Hookmodel for x in NN_MODELS}
 ALL_MODELS.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
 ALL_MODELS.update({x: DinoFeatures for x in DINO_MODELS})
+ALL_MODELS.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
 
 class ConvPaintWidget(QWidget):
     """
