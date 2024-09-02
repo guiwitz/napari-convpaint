@@ -4,12 +4,14 @@ from .conv_paint_utils import get_device
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
 import pandas as pd
-from cellpose import models
 
  
 AVAILABLE_MODELS = ['cellpose_backbone']
 
+
 class CellposeFeatures(FeatureExtractor):
+    from cellpose import models
+
     def __init__(self, model_name='cellpose_backbone',use_cuda=False):
         self.model_name = model_name
         self.use_cuda = use_cuda
