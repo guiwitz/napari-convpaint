@@ -412,13 +412,10 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
 
         annot_regions = skimage.morphology.label(current_annot > 0)
         boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
-        
-        # get max kernel size (amount of surrounding needed for deepest layer)
-        max_kernel_size = get_max_kernel_size(model)
 
         for i in range(len(boxes['label'])):
             # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-            pad_size = max_kernel_size//2
+            pad_size = model.get_padding()
             x_min = boxes['bbox-0'][i]-pad_size
             x_max = boxes['bbox-2'][i]+pad_size
             y_min = boxes['bbox-1'][i]-pad_size
