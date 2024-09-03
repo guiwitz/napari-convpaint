@@ -9,13 +9,19 @@
 
 
 ![overview conv-paint](/images/overview_github.png)
-This napari plugin can be used to segment objects in images based on a few brush strokes providing examples of foreground and background. Based on the same idea as other tools like ilastik, its main strength is that it provides good results without adjusting any parameters. The filters used to generate features for classification are indeed taken from layers of trained deep learning networks and don't need to be chosen manually.
-
+This napari plugin can be used to segment objects or structures in images based on a few brush strokes providing examples of foreground and background. Based on the same idea as other tools like ilastik, its main strength is that it can use features from pretrained neural networks like VGG16 or DINOV2, enabling the segmentation of more complex images.
 
 **Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint](./paper/conv-paint.pdf).**
 
 
 ![overview conv-paint](/images/network_github.png)
+
+Here is an example segmenting different shark body parts using DINOv2 as feature extractor:
+
+<video width="600" controls>
+  <source src="./images/segmentation_shark.webm" type="video/webm">
+  Your browser does not support the video tag. You can download the video directly from <a href="./images/segmentation_shark.webm">here</a>.
+</video>
 
 
 ## Installation
@@ -43,10 +49,6 @@ Distributed under the terms of the [BSD-3] license,
 Contributions are very welcome. Tests can be run with [tox], please ensure
 the coverage at least stays the same before you submit a pull request.
 
-# Authors
-
-The idea behind this napari plugin was first developed by Lucien Hinderling in the group of [Olivier Pertz](https://www.pertzlab.net/), at the Institute of Cell Biology, University of Bern. The code has first been shared as open source resource in form of a [Jupyter Notebook](https://github.com/hinderling/napari_pixel_classifier). With the desire to make this resource accessible to a broader public in the scientific community, the Pertz lab obtained a CZI napari plugin development grant with the title ["Democratizing Image Analysis with an Easy-to-Train Classifier"](https://chanzuckerberg.com/science/programs-resources/imaging/napari/democratizing-image-analysis-with-an-easy-to-train-classifier/) which supported the adaptation of the initial concept as a napari plugin called napari-convpaint. The plugin has been developed by Guillaume Witz, Mykhailo Vladymyrov and Ana Stojiljkovic at the [Data Science Lab](https://www.dsl.unibe.ch/), University of Bern, in tight collaboration with the Pertz lab.
-
 ## Issues
 
 If you encounter any problems, please [file an issue] along with a detailed description.
@@ -68,3 +70,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
+
+# Authors
+
+The idea behind this napari plugin was first developed by Lucien Hinderling in the group of [Olivier Pertz](https://www.pertzlab.net/), at the Institute of Cell Biology, University of Bern. The code has first been shared as open source resource in form of a [Jupyter Notebook](https://github.com/hinderling/napari_pixel_classifier). With the desire to make this resource accessible to a broader public in the scientific community, the Pertz lab obtained a CZI napari plugin development grant with the title ["Democratizing Image Analysis with an Easy-to-Train Classifier"](https://chanzuckerberg.com/science/programs-resources/imaging/napari/democratizing-image-analysis-with-an-easy-to-train-classifier/) which supported the adaptation of the initial concept as a napari plugin called napari-convpaint. The plugin has been developed by Guillaume Witz, Mykhailo Vladymyrov and Ana Stojiljkovic at the [Data Science Lab](https://www.dsl.unibe.ch/), University of Bern, in tight collaboration with the Pertz lab.
