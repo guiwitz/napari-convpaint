@@ -15,7 +15,7 @@ This napari plugin can be used to segment objects or structures in images based 
 
 Here is an example segmenting different shark body parts using DINOv2 as feature extractor:
 
-![shark segmentation movie](/images/segmentation_shark.mp34)
+![shark segmentation movie](/images/segmentation_shark.mp4)
 
 
 
