@@ -29,7 +29,7 @@ To install latest development version :
 
 ## Example use case: Tracking shark body parts in a movie
 These are the scribble annotations provided for training:
-![](./images/annotations_shark.png)
+![](./images/shark_annot.png)
 
 And this is the resulting Convpaint segmentation:
 <video src="https://github.com/user-attachments/assets/6a2be1fe-25cc-4af1-9f50-aab9bc4123d9"></video>
