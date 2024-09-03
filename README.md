@@ -13,15 +13,10 @@ This napari plugin can be used to segment objects or structures in images based 
 
 **Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint](./paper/conv-paint.pdf).**
 
-
-![overview conv-paint](/images/network_github.png)
-
 Here is an example segmenting different shark body parts using DINOv2 as feature extractor:
 
-<video width="600" controls>
-  <source src="./images/segmentation_shark.webm" type="video/webm">
-  Your browser does not support the video tag. You can download the video directly from <a href="./images/segmentation_shark.webm">here</a>.
-</video>
+![shark segmentation movie](/images/segmentation_shark.mp34)
+
 
 
 ## Installation
