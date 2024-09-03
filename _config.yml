@@ -1,5 +1,5 @@
 title: napari-convpaint
-author: Ana Stojiljkovic and Guillaume Witz
+author: Ana Stojiljkovic, Lucien Hinderling and Guillaume Witz 
 #logo: docs/images/napari-roidynamics_logo.png
 
 execute:
@@ -8,3 +8,5 @@ execute:
 sphinx:
   config:
     html_extra_path: ['.','books/images']
+
+
