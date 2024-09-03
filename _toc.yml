@@ -12,6 +12,7 @@ parts:
     - file: book/RGB
     - file: book/Workflow
     - file: book/Multifiles
+    - file: book/Animal_tracking
     - file: book/IMC_data
     - file: book/Calcium_waves
   - caption: In-depth explanations
