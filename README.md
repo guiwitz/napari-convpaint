@@ -16,12 +16,6 @@ This napari plugin can be used to segment objects or structures in images based 
 
 ![overview conv-paint](/images/network_github.png)
 
-Here is an example segmenting different shark body parts using DINOv2 as feature extractor:
-
-<video src="https://github.com/user-attachments/assets/6a2be1fe-25cc-4af1-9f50-aab9bc4123d9"></video>
-
-
-
 ## Installation
 
 You can install `napari-convpaint` via [pip]
@@ -31,6 +25,16 @@ You can install `napari-convpaint` via [pip]
 To install latest development version :
 
     pip install git+https://github.com/guiwitz/napari-convpaint.git
+
+
+## Example use case: Tracking shark body parts in a movie
+These are the scribble annotations provided for training:
+![](./images/annotations_shark.png)
+
+And this is the resulting Convpaint segmentation:
+<video src="https://github.com/user-attachments/assets/6a2be1fe-25cc-4af1-9f50-aab9bc4123d9"></video>
+
+Check out the documentation or the paper for more usecases!
 
 ## Contributing
 
