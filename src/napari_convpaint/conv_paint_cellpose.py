@@ -76,8 +76,7 @@ class CellposeFeatures(FeatureExtractor):
         #append the original image
         out_t.append(img)
         out_t = np.concatenate(out_t,axis=0)
-        print("out_t shape")
-        print(out_t.shape)
+ 
         return out_t
         
     def get_padding(self):

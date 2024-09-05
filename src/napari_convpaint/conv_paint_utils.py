@@ -456,13 +456,9 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
             #from the [features, w, h] make a list of [features] with len nb_annotations
             mask = annot_crop > 0
             nb_features = extracted_features.shape[0]
-            print("extracted_features.shape")
-            print(extracted_features.shape)
+
             extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
-            print("extracted_features.shape")
-            print(extracted_features.shape)
-            print("mask.shape")
-            print(mask.shape)
+
             extracted_features = extracted_features[mask]
             all_values.append(extracted_features)
 

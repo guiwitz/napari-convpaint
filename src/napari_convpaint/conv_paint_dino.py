@@ -228,12 +228,9 @@ class DinoFeatures(FeatureExtractor):
         predictions = classifier.predict(all_pixels)
 
         predicted_image = np.reshape(predictions, [w_patch, h_path])
-        print(predicted_image.shape)
-
         predicted_image = skimage.transform.resize(
             image=predicted_image,
             output_shape=(image.shape[-2], image.shape[-1]),
             preserve_range=True, order=order).astype(np.uint8)
         
-        print(predicted_image.shape)
         return predicted_image
