@@ -987,6 +987,15 @@ class ConvPaintWidget(QWidget):
             self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
 
+        #if model is DINOv2, set some recommended settings
+        if model_type == 'dinov2_vits14_reg':
+            self.spin_interpolation_order.setValue(0)
+            self.check_use_min_features.setChecked(False)
+            self.check_tile_annotations.setChecked(False)
+            self.check_tile_image.setChecked(False)
+            self.num_scales_combo.setCurrentText('[1]')
+
+
     def _create_output_selection_for_temp_model(self, temp_model):
         self.model_output_selection.clear()
         self.model_output_selection.addItems(temp_model.module_dict.keys())

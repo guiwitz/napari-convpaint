@@ -228,7 +228,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     assert my_widget.param.scalings == [1, 2, 4, 8]
     my_widget.update_classifier()
     my_widget.predict()
-    model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1234.pkl'
+    model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
     my_widget.save_model(save_file=model_path_2)
     assert os.path.exists(model_path_2)
 
