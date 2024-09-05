@@ -20,6 +20,7 @@ class Param:
     image_downsample: int = None
     normalize: int = None
     multi_channel_training: bool = None
+    use_cuda: bool = None
 
 
 

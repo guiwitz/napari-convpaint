@@ -9,6 +9,7 @@ from napari.utils import progress
 from joblib import dump
 from pathlib import Path
 import numpy as np
+import pickle
 
 
 from napari_guitils.gui_structures import VHGroup, TabSet
@@ -230,7 +231,11 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model', self.model_output_selection, [3,0,1,2])
 
         self.num_scales_combo = QComboBox()
-        self.num_scales_combo.addItems(['[1]', '[1,2]', '[1,2,4]', '[1,2,4,8]'])
+        self.num_scales_combo.addItem('[1]',[1])
+        self.num_scales_combo.addItem('[1,2]',[1,2])
+        self.num_scales_combo.addItem('[1,2,4]',[1,2,4])
+        self.num_scales_combo.addItem('[1,2,4,8]',[1,2,4,8])
+
         self.num_scales_combo.setCurrentText('[1,2]')
         self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
         self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
@@ -297,7 +302,7 @@ class ConvPaintWidget(QWidget):
     def add_connections(self):
         
         self.select_layer_widget.changed.connect(self.select_layer)
-        self.num_scales_combo.currentIndexChanged.connect(self.update_scalings)
+        self.num_scales_combo.currentIndexChanged.connect(self.update_scalings_from_gui)
 
         self.add_layers_btn.clicked.connect(self.add_annotation_layer)
         self.update_model_btn.clicked.connect(self.update_classifier)
@@ -470,9 +475,16 @@ class ConvPaintWidget(QWidget):
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.select_annotation_layer_widget.value = self.viewer.layers['annotations']
 
-    def update_scalings(self):
+    def update_scalings_from_gui(self):
+        self.param.scalings = self.num_scales_combo.currentData()
 
-        self.param.scalings = eval(self.num_scales_combo.currentText())
+    def update_scalings_from_param(self):
+        index = self.num_scales_combo.findData(self.param.scalings)
+        if index != -1:
+            self.num_scales_combo.setCurrentIndex(index)
+        else:
+            self.num_scales_combo.addItem(str(self.param.scalings), self.param.scalings)
+            self.num_scales_combo.setCurrentIndex(self.num_scales_combo.count()-1)
 
     def _create_output_selection(self):
         """Update list of selectable layers"""
@@ -500,26 +512,65 @@ class ConvPaintWidget(QWidget):
 
     def _on_load_model(self, event=None):
         """Load a neural network model. Create list of selectable layers."""
+        self.update_params_from_gui()
+        self.model = self.create_model(self.param)
+        self.update_gui_from_model()
 
-        model_class = ALL_MODELS[self.qcombo_model_type.currentText()]
-        self.model = model_class(
-            model_name=self.qcombo_model_type.currentText(),
-            use_cuda=self.check_use_cuda.isChecked())
+    def create_model(self, param):
+        """Create a model based on the given parameters."""
+        model_class = ALL_MODELS[param.model_name]
+        model = model_class(
+            model_name=param.model_name,
+            use_cuda=param.use_cuda
+        )
         
-        if isinstance(model_class, Hookmodel):
+        if isinstance(model, Hookmodel):
+            if param.model_layers:
+                model.register_hooks(selected_layers=param.model_layers)
+            elif len(model.named_modules) == 1:
+                model.register_hooks(selected_layers=[list(model.module_dict.keys())[0]])
+        
+        return model
+    
+    def update_gui_from_model(self):
+        """Update GUI based on the current model."""
+        if isinstance(self.model, Hookmodel):
             self._create_output_selection()
-            # if model has a single layer output, automatically initialize it
             if len(self.model.named_modules) == 1:
                 self.model_output_selection.setCurrentRow(0)
-                self._on_click_define_model_outputs()
                 self.set_nnmodel_outputs_btn.setEnabled(False)
                 self.model_output_selection.setEnabled(False)
             else:
                 self.set_nnmodel_outputs_btn.setEnabled(True)
                 self.model_output_selection.setEnabled(True)
+                for layer in self.param.model_layers:
+                    items = self.model_output_selection.findItems(layer, Qt.MatchExactly)
+                    for item in items:
+                        item.setSelected(True)
         else:
             self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
+
+    def update_params_from_gui(self):
+        """Update parameters from GUI."""
+        self.update_scalings_from_gui()
+        self.param.model_name = self.qcombo_model_type.currentText()
+        self.param.model_layers = self.get_selected_layers_names()
+        self.param.order = self.spin_interpolation_order.value()
+        self.param.use_min_features = self.check_use_min_features.isChecked()
+        self.param.image_downsample = self.spin_downsample.value()
+        self.param.normalize = self.button_group_normalize.checkedId()
+        self.param.use_cuda = self.check_use_cuda.isChecked()
+
+    def update_gui_from_params(self):
+        """Update GUI from parameters."""
+        self.qcombo_model_type.setCurrentText(self.param.model_name)
+        self.update_scalings_from_param()
+        self.spin_interpolation_order.setValue(self.param.order)
+        self.check_use_min_features.setChecked(self.param.use_min_features)
+        self.spin_downsample.setValue(self.param.image_downsample)
+        self.button_group_normalize.button(self.param.normalize).setChecked(True)
+        self.check_use_cuda.setChecked(self.param.use_cuda)
 
     def set_default_model(self):#, keep_rgb=False):
         """Set default model."""
@@ -825,25 +876,63 @@ class ConvPaintWidget(QWidget):
             )
 
     def save_model(self, event=None, save_file=None):
-        """Select file where to save the classifier model."""
+            """Select file where to save the classifier model along with the model parameters."""
+            if self.random_forest is None:
+                raise Exception('No model found. Please train a model first.')
+            
+            if save_file is None:
+                dialog = QFileDialog()
+                save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
+            save_file = Path(save_file)
+            
+            # Update parameters from GUI before saving
+            self.update_params_from_gui()
+            
+            # Save random forest, parameters, and model state
+            save_data = {
+                'random_forest': self.random_forest,
+                'params': self.param,
+                'model_state': self.model.state_dict() if hasattr(self.model, 'state_dict') else None
+            }
+            
+            with open(save_file, 'wb') as f:
+                pickle.dump(save_data, f)
+            
+            self.current_model_path.setText(save_file.name)
 
-        if self.random_forest is None:
-            raise Exception('No model found. Please train a model first.')
-        # save sklearn model
+    def load_classifier(self, event=None, save_file=None):
+        """Select classifier model file to load along with the model parameters."""
         if save_file is None:
             dialog = QFileDialog()
-            save_file, _ = dialog.getSaveFileName(self, "Save model", None, "JOBLIB (*.joblib)")
+            save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
-        dump(self.random_forest, save_file)
-        self.param.random_forest = save_file#.as_posix()
-        self.update_params()
-        self.param.save_parameters(save_file.parent.joinpath('convpaint_params.yml'))
+        
+        # Load random forest, parameters, and model state
+        with open(save_file, 'rb') as f:
+            data = pickle.load(f)
+        
+        self.random_forest = data['random_forest']
+        self.param = data['params']
+        
+        # Update GUI from loaded parameters
+        self.update_gui_from_params()
+        
+        # Create model based on loaded parameters
+        self.model = self.create_model(self.param)
+        
+        # Load model state if available
+        if data['model_state'] is not None and hasattr(self.model, 'load_state_dict'):
+            self.model.load_state_dict(data['model_state'])
+        
+        self.update_gui_from_model()
         self.current_model_path.setText(save_file.name)
+        self.reset_predict_buttons_after_training()
 
-    def update_params(self):
+
+    def update_params_from_gui(self):
         """Update parameters from GUI."""
 
-        self.update_scalings()
+        self.update_scalings_from_gui()
         self.param.model_name = self.qcombo_model_type.currentText()
         self.param.model_layers = self.get_selected_layers_names()
         self.param.order = self.spin_interpolation_order.value()
@@ -851,33 +940,15 @@ class ConvPaintWidget(QWidget):
         self.param.image_downsample = self.spin_downsample.value()
         self.param.normalize = self.button_group_normalize.checkedId()
 
-    
-    def load_classifier(self, event=None, save_file=None):
-        """Select classifier model file to load."""
-
-        if save_file is None:
-            dialog = QFileDialog()
-            save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "JOBLIB (*.joblib)")
-        save_file = Path(save_file)
-        self.random_forest, self.param = load_trained_classifier(save_file)
-        self.current_model_path.setText(save_file.name)
-
-        self.update_gui_from_params()
-        model_class = ALL_MODELS[self.param.model_name]
-        self.model = model_class(model_name=self.param.model_name,
-                                 param=self.param, use_cuda=self.check_use_cuda.isChecked())
-
-        self.reset_predict_buttons_after_training()
-
 
     def update_gui_from_params(self):
         """Update GUI from parameters and then update the model with that info."""
 
         self.qcombo_model_type.setCurrentText(self.param.model_name)
+        self.update_scalings_from_param()
+
         # load model to get layer list
         self._on_load_model()
-        #self.update_scalings()
-        self.num_scales_combo.setCurrentText(str(self.param.scalings))
         
         if isinstance(self.model, Hookmodel):
             for sel in self.param.model_layers:
