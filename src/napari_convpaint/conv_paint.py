@@ -326,6 +326,9 @@ class ConvPaintWidget(QWidget):
         self.radio_normalized_over_stack.toggled.connect(self.reset_stats)
         self.radio_normalize_by_image.toggled.connect(self.reset_stats)
 
+        self.qcombo_model_type.currentIndexChanged.connect(self.on_model_selected)
+
+
 
     def hide_annotation(self, event=None):
         """Hide annotation layer."""
@@ -515,6 +518,8 @@ class ConvPaintWidget(QWidget):
         self.update_params_from_gui()
         self.model = self.create_model(self.param)
         self.update_gui_from_model()
+        self.current_model_path.setText('Unsaved')
+
 
     def create_model(self, param):
         """Create a model based on the given parameters."""
@@ -534,7 +539,11 @@ class ConvPaintWidget(QWidget):
     
     def update_gui_from_model(self):
         """Update GUI based on the current model."""
-        if isinstance(self.model, Hookmodel):
+        if self.model is None:
+            self.set_nnmodel_outputs_btn.setEnabled(False)
+            self.model_output_selection.setEnabled(False)
+            self.model_output_selection.clear()
+        elif isinstance(self.model, Hookmodel):
             self._create_output_selection()
             if len(self.model.named_modules) == 1:
                 self.model_output_selection.setCurrentRow(0)
@@ -550,6 +559,8 @@ class ConvPaintWidget(QWidget):
         else:
             self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
+            self.model_output_selection.clear()
+            
 
     def update_params_from_gui(self):
         """Update parameters from GUI."""
@@ -959,3 +970,24 @@ class ConvPaintWidget(QWidget):
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
         self.button_group_normalize.button(self.param.normalize).setChecked(True)
+
+
+    def on_model_selected(self, index):
+        """Update GUI to show selectable layers of model chosen from drop-down."""
+        model_type = self.qcombo_model_type.currentText()
+        model_class = ALL_MODELS[model_type]
+        temp_model = model_class(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
+        
+        if isinstance(temp_model, Hookmodel):
+            self._create_output_selection_for_temp_model(temp_model)
+            self.set_nnmodel_outputs_btn.setEnabled(True)
+            self.model_output_selection.setEnabled(True)
+        else:
+            self.model_output_selection.clear()
+            self.set_nnmodel_outputs_btn.setEnabled(False)
+            self.model_output_selection.setEnabled(False)
+
+    def _create_output_selection_for_temp_model(self, temp_model):
+        self.model_output_selection.clear()
+        self.model_output_selection.addItems(temp_model.module_dict.keys())
+
