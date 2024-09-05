@@ -161,9 +161,9 @@ class ConvPaintWidget(QWidget):
         self.save_model_btn.setEnabled(False)
         self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
 
-        self.load_classifier_btn = QPushButton('Load trained model')
-        self.load_classifier_btn.setToolTip('Select *.joblib file to load as trained model')
-        self.load_save_group.glayout.addWidget(self.load_classifier_btn, 0,1,1,1)
+        self.load_model_btn = QPushButton('Load trained model')
+        self.load_model_btn.setToolTip('Select *.joblib file to load as trained model')
+        self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
         self.reset_model_btn = QPushButton('Reset model')
         self.reset_model_btn.setToolTip('Suppress current model and reset to default')
@@ -218,9 +218,9 @@ class ConvPaintWidget(QWidget):
         self.qcombo_model_type.setToolTip('Select model architecture')
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
 
-        self.load_model_btn = QPushButton('Load model')
-        self.load_model_btn.setToolTip('Load feature extraction model')
-        self.tabs.add_named_tab('Model', self.load_model_btn, [1,0,1,2])
+        self.create_model_btn = QPushButton('Create model')
+        self.create_model_btn.setToolTip('Create a new feature extraction model')
+        self.tabs.add_named_tab('Model', self.create_model_btn, [1,0,1,2])
 
         self.set_nnmodel_outputs_btn = QPushButton('Set model outputs')
         self.set_nnmodel_outputs_btn.setToolTip('Select layers to use as feature extractors')
@@ -310,12 +310,12 @@ class ConvPaintWidget(QWidget):
         self.prediction_btn.clicked.connect(self.predict)
         self.prediction_all_btn.clicked.connect(self.predict_all)
         self.save_model_btn.clicked.connect(self.save_model)
-        self.load_classifier_btn.clicked.connect(self.load_classifier)
+        self.load_model_btn.clicked.connect(self.load_model)
         self.reset_model_btn.clicked.connect(self.reset_model)
         self.check_use_project.stateChanged.connect(self._add_project)
         self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
 
-        self.load_model_btn.clicked.connect(self._on_load_model)
+        self.create_model_btn.clicked.connect(self._on_create_model)
         self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
         self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
@@ -513,8 +513,8 @@ class ConvPaintWidget(QWidget):
         return selected_layers
                                   
 
-    def _on_load_model(self, event=None):
-        """Load a neural network model. Create list of selectable layers."""
+    def _on_create_model(self, event=None):
+        """Create a neural network model that will be used for feature extraction."""
         self.update_params_from_gui()
         self.model = self.create_model(self.param)
         self.update_gui_from_model()
@@ -560,7 +560,7 @@ class ConvPaintWidget(QWidget):
             self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
             self.model_output_selection.clear()
-            
+
 
     def update_params_from_gui(self):
         """Update parameters from GUI."""
@@ -593,7 +593,7 @@ class ConvPaintWidget(QWidget):
         self.num_scales_combo.setCurrentText('[1,2]')
         self.spin_interpolation_order.setValue(1)
         self.check_use_min_features.setChecked(True)
-        self._on_load_model()
+        self._on_create_model()
 
     def get_data_channel_first(self):
         """Get data from selected channel. If RGB, move channel axis to first position."""
@@ -911,7 +911,7 @@ class ConvPaintWidget(QWidget):
             
             self.current_model_path.setText(save_file.name)
 
-    def load_classifier(self, event=None, save_file=None):
+    def load_model(self, event=None, save_file=None):
         """Select classifier model file to load along with the model parameters."""
         if save_file is None:
             dialog = QFileDialog()
@@ -959,7 +959,7 @@ class ConvPaintWidget(QWidget):
         self.update_scalings_from_param()
 
         # load model to get layer list
-        self._on_load_model()
+        self._on_create_model()
         
         if isinstance(self.model, Hookmodel):
             for sel in self.param.model_layers:
