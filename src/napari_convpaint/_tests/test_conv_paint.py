@@ -245,3 +245,39 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
+
+
+# test dino model with different image sizes
+def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
+    sizes = [(140, 140), (100, 100), (120, 120),(14,14)]
+    for size in sizes:
+        #left side: class 1, right side: class 2 (0 and 255)
+        im = np.zeros(size, dtype=np.uint8)
+        im[:, size[1]//2:] = 255
+        im_annot = np.zeros(size, dtype=np.uint8)
+        im_annot[:, size[1]//2:] = 2
+        im_annot[:, :size[1]//2] = 1
+
+        viewer = make_napari_viewer()
+        my_widget = ConvPaintWidget(viewer)
+        viewer.add_image(im)
+        my_widget.add_annotation_layer()
+        viewer.layers['annotations'].data = im_annot
+
+        # Load the Dino model
+        my_widget.check_use_custom_model.setChecked(True)
+        my_widget.qcombo_model_type.setCurrentText('dinov2_vits14_reg')
+        #set widget disable tiling annotations
+        my_widget.check_tile_annotations.setChecked(False)
+        # Set the scaling to 1
+        my_widget.num_scales_combo.setCurrentText('[1]')
+        my_widget.update_params_from_gui()
+        my_widget.create_model_btn.click()
+        my_widget.update_classifier()
+        my_widget.predict()
+
+        recovered = viewer.layers['segmentation'].data
+        
+        #check that the shape of the recovered is the same as the annotation
+        assert recovered.shape == im_annot.shape
+

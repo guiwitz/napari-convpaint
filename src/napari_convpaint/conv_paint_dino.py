@@ -16,7 +16,7 @@ class DinoFeatures(FeatureExtractor):
         except(RuntimeError):
             self.model = torch.hub.load('facebookresearch/dinov2', self.model_name, pretrained=True, verbose=False, force_reload=True)
         self.patchsize = 14
-        self.padding = self.patchsize
+        self.padding = int(self.patchsize/2)
         if self.use_cuda:
             self.device = get_device()
             self.model.to(self.device)
@@ -50,9 +50,10 @@ class DinoFeatures(FeatureExtractor):
 
 #       # make sure image is divisible by patch size
         h, w = image.shape[-2:]
-        new_h = (h // self.patchsize) * self.patchsize
-        new_w = (w // self.patchsize) * self.patchsize
-        image = image[:, :new_h, :new_w]    
+        new_h = h - (h % self.patchsize)
+        new_w = w - (w % self.patchsize)
+        if new_h != h or new_w != w:
+            image = image[:, :new_h, :new_w]
 
         # add batch dimension
         image = np.expand_dims(image, axis=0)
@@ -127,6 +128,7 @@ class DinoFeatures(FeatureExtractor):
         if image_downsample > 1:
             image = image[:, ::image_downsample, ::image_downsample]
 
+        #TODO remove this padding?
         if not return_patches:
             padding = self.get_padding()
             image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
@@ -139,7 +141,7 @@ class DinoFeatures(FeatureExtractor):
                                 image=features,
                                 output_shape=(nb_features, image.shape[-2], image.shape[-1]),
                                 preserve_range=True,
-                                order=order)
+                                order=order)            
             features = features[:, padding:-padding, padding:-padding]
         return features
     
@@ -182,7 +184,11 @@ class DinoFeatures(FeatureExtractor):
         w_pad_left = (w - new_w)//2
         h_pad_bottom = h - new_h - h_pad_top
         w_pad_right = w - new_w - w_pad_left
-        image = image[:, h_pad_top:-h_pad_bottom, w_pad_left:-w_pad_right]
+
+        if h_pad_top > 0 or w_pad_left > 0 or h_pad_bottom > 0 or w_pad_right > 0:
+            image = image[:, h_pad_top:-h_pad_bottom if h_pad_bottom != 0 else None, 
+                             w_pad_left:-w_pad_right if w_pad_right != 0 else None]
+#
 
         features = self._extract_features(image) #[H, W, nfeatures]
 
