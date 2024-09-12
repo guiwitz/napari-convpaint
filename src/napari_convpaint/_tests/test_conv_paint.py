@@ -154,6 +154,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.check_use_custom_model.setChecked(True)
     my_widget.param.scalings = [1]
     my_widget.param.order = 0  # Set interpolation order to 0
+    my_widget.check_tile_annotations.setChecked(False)
     my_widget.update_gui_from_params()
     my_widget.create_model_btn.click()  # Load the model
     assert my_widget.param.scalings == [1]

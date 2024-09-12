@@ -127,11 +127,6 @@ class DinoFeatures(FeatureExtractor):
 
         if image_downsample > 1:
             image = image[:, ::image_downsample, ::image_downsample]
-
-        #TODO remove this padding?
-        if not return_patches:
-            padding = self.get_padding()
-            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
         
         features = self.get_features(image, order=order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
         nb_features = features.shape[0]
@@ -142,7 +137,6 @@ class DinoFeatures(FeatureExtractor):
                                 output_shape=(nb_features, image.shape[-2], image.shape[-1]),
                                 preserve_range=True,
                                 order=order)            
-            features = features[:, padding:-padding, padding:-padding]
         return features
     
     def predict_image(self, image, classifier, scalings = [1], order=0, image_downsample=1, **kwargs):
@@ -219,6 +213,12 @@ class DinoFeatures(FeatureExtractor):
         2. Predict each patch with classifier
         3. Scale up the predictions'''
 
+        #add padding
+        padding = self.get_padding()
+        if image.ndim == 2:
+            image = np.expand_dims(image, axis=0)
+        image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+
         features = self.get_features_scaled(image, return_patches=True, **kwargs)
         w_patch = np.ceil(features.shape[-2] / image_downsample).astype(int)
         h_path = np.ceil(features.shape[-1] / image_downsample).astype(int)
@@ -238,5 +238,8 @@ class DinoFeatures(FeatureExtractor):
             image=predicted_image,
             output_shape=(image.shape[-2], image.shape[-1]),
             preserve_range=True, order=order).astype(np.uint8)
+        
+        #remove padding
+        predicted_image = predicted_image[padding:-padding, padding:-padding]
         
         return predicted_image
