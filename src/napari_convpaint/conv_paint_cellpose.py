@@ -10,9 +10,11 @@ AVAILABLE_MODELS = ['cellpose_backbone']
 
 
 class CellposeFeatures(FeatureExtractor):
-    from cellpose import models
 
     def __init__(self, model_name='cellpose_backbone',use_cuda=False):
+
+        from cellpose import models
+        
         self.model_name = model_name
         self.use_cuda = use_cuda
 
