@@ -576,13 +576,14 @@ class ConvPaintWidget(QWidget):
 
     def update_gui_from_params(self):
         """Update GUI from parameters."""
-        self.qcombo_model_type.setCurrentText(self.param.model_name)
         self.update_scalings_from_param()
+        self.qcombo_model_type.setCurrentText(self.param.model_name)
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)
         self.button_group_normalize.button(self.param.normalize).setChecked(True)
         self.check_use_cuda.setChecked(self.param.use_cuda)
+
 
     def set_default_model(self):#, keep_rgb=False):
         """Set default model."""
@@ -942,6 +943,9 @@ class ConvPaintWidget(QWidget):
             dialog = QFileDialog()
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
+
+        #tick the custom model checkbox
+        self.check_use_custom_model.setChecked(True)
         
         # Load random forest, parameters, and model state
         with open(save_file, 'rb') as f:
@@ -950,9 +954,6 @@ class ConvPaintWidget(QWidget):
         self.random_forest = data['random_forest']
         self.param = data['params']
         
-        # Update GUI from loaded parameters
-        self.update_gui_from_params()
-        
         # Create model based on loaded parameters
         self.model = self.create_model(self.param)
         
@@ -960,7 +961,10 @@ class ConvPaintWidget(QWidget):
         if data['model_state'] is not None and hasattr(self.model, 'load_state_dict'):
             self.model.load_state_dict(data['model_state'])
         
+        self.update_gui_from_params()
         self.update_gui_from_model()
+
+
         self.current_model_path.setText(save_file.name)
         self.reset_predict_buttons_after_training()
 
@@ -983,14 +987,6 @@ class ConvPaintWidget(QWidget):
         self.qcombo_model_type.setCurrentText(self.param.model_name)
         self.update_scalings_from_param()
 
-        # load model to get layer list
-        self._on_create_model()
-        
-        if isinstance(self.model, Hookmodel):
-            for sel in self.param.model_layers:
-                self.model_output_selection.item(list(self.model.module_dict.keys()).index(sel)).setSelected(True)
-            self._on_click_define_model_outputs()
-        
         self.spin_interpolation_order.setValue(self.param.order)
         self.check_use_min_features.setChecked(self.param.use_min_features)
         self.spin_downsample.setValue(self.param.image_downsample)

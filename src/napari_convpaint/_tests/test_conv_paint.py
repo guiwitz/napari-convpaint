@@ -154,7 +154,12 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.check_use_custom_model.setChecked(True)
     my_widget.param.scalings = [1]
     my_widget.param.order = 0  # Set interpolation order to 0
-    my_widget.check_tile_annotations.setChecked(False)
+    my_widget.param.model_name = 'dinov2_vits14_reg'
+    my_widget.param.use_cuda = False
+    my_widget.param.use_tile_annotations = False
+    my_widget.param.use_min_features = False
+    my_widget.param.image_downsample = 1
+    my_widget.param.normalize = 1 #no normalization (button id)
     my_widget.update_gui_from_params()
     my_widget.create_model_btn.click()  # Load the model
     assert my_widget.param.scalings == [1]
@@ -282,3 +287,53 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         #check that the shape of the recovered is the same as the annotation
         assert recovered.shape == im_annot.shape
 
+
+def test_custom_vgg16_layers(make_napari_viewer, capsys):
+    # Setup synthetic data
+    im, ground_truth = generate_synthetic_square(im_dims=(100, 100), square_dims=(30, 30))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(100, 100), circle1_xy=(19, 19), circle2_xy=(56, 56))
+
+    viewer = make_napari_viewer()
+    my_widget = ConvPaintWidget(viewer)
+    viewer.add_image(im)
+    my_widget.add_annotation_layer()
+    viewer.layers['annotations'].data = im_annot
+
+    # Create and save the custom VGG16 model with selected layers
+    my_widget.check_use_custom_model.setChecked(True)
+    my_widget.qcombo_model_type.setCurrentText('vgg16')
+    #select items from widget.model_output_selection = QListWidget()
+
+
+    # Assuming 'self.model_output_selection' is your QListWidget instance
+    all_tests = [[8]]
+    for indices_to_select in all_tests:
+        # Iterate over the list of indices and select the corresponding items
+        for index in indices_to_select:
+            item = my_widget.model_output_selection.item(index)
+            if item:  # Check if the item exists at that index
+                item.setSelected(True)
+
+        my_widget.set_nnmodel_outputs_btn.click()
+        my_widget.update_params_from_gui()
+        my_widget.create_model_btn.click()
+        my_widget.update_classifier()
+        assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
+
+        #save the model
+        model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
+        my_widget.save_model(save_file=model_path)
+
+    #load the models again and check if the predictions are correct
+    for indices_to_select in all_tests:
+        model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
+        my_widget.load_model(save_file=model_path)
+        assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
+
+        my_widget.predict()
+        recovered = viewer.layers['segmentation'].data[ground_truth == 1]
+        precision, recall = compute_precision_recall(ground_truth, recovered)
+        assert precision > 0.9, f"Precision: {precision}, too low"
+        assert recall > 0.9, f"Recall: {recall}, too low"
+    
+    assert my_widget.qcombo_model_type.currentText() == 'vgg16'

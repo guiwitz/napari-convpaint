@@ -63,10 +63,11 @@ class Hookmodel(FeatureExtractor):
 
         self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
-
+    
         self.outputs = []
         self.features_per_layer = []
         self.selected_layers = []
+        self.selectable_layer_keys = []
 
         self.get_layer_dict()
         if model_name == 'single_layer_vgg16':
@@ -107,6 +108,9 @@ class Hookmodel(FeatureExtractor):
         self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
         self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
         self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
+        
+        self.selectable_layer_keys = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
+
 
     def load_single_layer_vgg16(self, keep_rgb=False):
         """Load VGG16 model from torchvision, keep first layer only
