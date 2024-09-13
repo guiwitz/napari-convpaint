@@ -10,6 +10,7 @@ from joblib import dump
 from pathlib import Path
 import numpy as np
 import pickle
+import warnings
 
 
 from napari_guitils.gui_structures import VHGroup, TabSet
@@ -634,7 +635,10 @@ class ConvPaintWidget(QWidget):
 
         image_stack = self.get_selectedlayer_data()
         
-        self.viewer.window._status_bar._toggle_activity_dock(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
+
         with progress(total=0) as pbr:
             self.current_model_path.setText('In training')
             pbr.set_description(f"Training")
@@ -652,7 +656,10 @@ class ConvPaintWidget(QWidget):
             self.reset_predict_buttons_after_training()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
-        self.viewer.window._status_bar._toggle_activity_dock(False)
+            
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def reset_predict_buttons_after_training(self):
         
@@ -682,8 +689,11 @@ class ConvPaintWidget(QWidget):
         num_files = len(self.project_widget.params.file_paths)
         if num_files == 0:
             raise Exception('No files found')
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
         
-        self.viewer.window._status_bar._toggle_activity_dock(True)
         self.viewer.layers.events.removed.disconnect(self.reset_model)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
@@ -716,7 +726,11 @@ class ConvPaintWidget(QWidget):
             self.reset_predict_buttons_after_training()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
-        self.viewer.window._status_bar._toggle_activity_dock(False)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
+
         self.viewer.layers.events.removed.connect(self.reset_model)
         
 
@@ -738,7 +752,10 @@ class ConvPaintWidget(QWidget):
         if self.image_mean is None:
             self.get_image_stats()
         
-        self.viewer.window._status_bar._toggle_activity_dock(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
+
         with progress(total=0) as pbr:
             
             pbr.set_description(f"Prediction")
@@ -810,7 +827,11 @@ class ConvPaintWidget(QWidget):
             else:
                 self.viewer.layers['segmentation'].data[step] = predicted_image
             self.viewer.layers['segmentation'].refresh()
-        self.viewer.window._status_bar._toggle_activity_dock(False)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
+    
 
     def predict_all(self):
         """Predict the segmentation of all frames based 
@@ -830,7 +851,9 @@ class ConvPaintWidget(QWidget):
         if self.image_mean is None:
             self.get_image_stats()
 
-        self.viewer.window._status_bar._toggle_activity_dock(True)
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
 
         image_stack = self.viewer.layers[self.selected_channel].data
         if self.radio_rgb.isChecked():
@@ -867,7 +890,9 @@ class ConvPaintWidget(QWidget):
                 image_downsample=self.spin_downsample.value()
             )
             self.viewer.layers['segmentation'].data[step] = predicted_image
-        self.viewer.window._status_bar._toggle_activity_dock(False)
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def check_prediction_layer_exists(self):
 
