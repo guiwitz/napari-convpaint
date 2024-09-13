@@ -79,7 +79,7 @@ class ConvPaintWidget(QWidget):
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
 
-        self.tab_names = ['Annotation', 'Files', 'Model']
+        self.tab_names = ['Home', 'Files', 'Model']
         self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
         self.main_layout.addWidget(self.tabs)
@@ -92,12 +92,12 @@ class ConvPaintWidget(QWidget):
         self.predict_group = VHGroup('Segment', orientation='G')
         self.load_save_group = VHGroup('Load/Save', orientation='G')
         self.options_group = VHGroup('Options', orientation='G')
-        self.tabs.add_named_tab('Annotation', self.layer_selection_group.gbox)
-        self.tabs.add_named_tab('Annotation', self.train_group.gbox)
-        self.tabs.add_named_tab('Annotation', self.predict_group.gbox)
-        self.tabs.add_named_tab('Annotation', self.data_dims_group.gbox)
-        self.tabs.add_named_tab('Annotation', self.load_save_group.gbox)
-        self.tabs.add_named_tab('Annotation', self.options_group.gbox)
+        self.tabs.add_named_tab('Home', self.layer_selection_group.gbox)
+        self.tabs.add_named_tab('Home', self.train_group.gbox)
+        self.tabs.add_named_tab('Home', self.predict_group.gbox)
+        self.tabs.add_named_tab('Home', self.data_dims_group.gbox)
+        self.tabs.add_named_tab('Home', self.load_save_group.gbox)
+        self.tabs.add_named_tab('Home', self.options_group.gbox)
 
         # data layer
         self.select_layer_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
@@ -121,11 +121,11 @@ class ConvPaintWidget(QWidget):
 
         self.button_group_channels = QButtonGroup()
         self.radio_single_channel = QRadioButton('Single channel image/stack')
-        self.radio_single_channel.setToolTip('Use this option for 2d images or 3d images where additional dimension is not channels')
+        self.radio_single_channel.setToolTip('2D images or 3D images where additional dimension is NOT channels')
         self.radio_multi_channel = QRadioButton('Multichannel image')
-        self.radio_multi_channel.setToolTip('Use this option for 3d images where additional dimension is channels')
+        self.radio_multi_channel.setToolTip('Images with an additional channel dimension')
         self.radio_rgb = QRadioButton('RGB image')
-        self.radio_rgb.setToolTip('Use this option images displayed as RGB')
+        self.radio_rgb.setToolTip('Use this option with images displayed as RGB')
         self.radio_single_channel.setChecked(True)
         [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]]
         self.button_group_channels.addButton(self.radio_single_channel, id=1)
@@ -136,6 +136,7 @@ class ConvPaintWidget(QWidget):
         self.data_dims_group.glayout.addWidget(self.radio_rgb, 2,0,1,1)
 
         self.update_model_btn = QPushButton('Train')
+        self.update_model_btn.setToolTip('Train model on annotations')
         self.train_group.glayout.addWidget(self.update_model_btn, 0,0,1,1)
         self.check_use_project = QCheckBox('Use multiple files')
         self.check_use_project.setToolTip('Activate Files Tab to use multiple files to train the model')
@@ -150,24 +151,24 @@ class ConvPaintWidget(QWidget):
 
         self.prediction_btn = QPushButton('Segment image')
         self.prediction_btn.setEnabled(False)
-        self.prediction_btn.setToolTip('Segment 2D image or current slice of 3D image')
+        self.prediction_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
         self.predict_group.glayout.addWidget(self.prediction_btn, 0,0,1,1)
         self.prediction_all_btn = QPushButton('Segment stack')
-        self.prediction_all_btn.setToolTip('Segment all slices of 3D image')
+        self.prediction_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
         self.prediction_all_btn.setEnabled(False)
         self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
 
         self.save_model_btn = QPushButton('Save trained model')
-        self.save_model_btn.setToolTip('Save model as *.joblib file')
+        self.save_model_btn.setToolTip('Save model as *.pickle file')
         self.save_model_btn.setEnabled(False)
         self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
 
         self.load_model_btn = QPushButton('Load trained model')
-        self.load_model_btn.setToolTip('Select *.joblib file to load as trained model')
+        self.load_model_btn.setToolTip('Select *.pickle file to load as trained model')
         self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
         self.reset_model_btn = QPushButton('Reset model')
-        self.reset_model_btn.setToolTip('Suppress current model and reset to default')
+        self.reset_model_btn.setToolTip('Discard current model and annotations, create new default model.')
         self.load_save_group.glayout.addWidget(self.reset_model_btn, 1,0,1,1)
 
         self.load_save_group.glayout.addWidget(QLabel('Current model:'), 2,0,1,1)
@@ -187,15 +188,18 @@ class ConvPaintWidget(QWidget):
         self.options_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
         self.options_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
 
-        self.check_tile_image = QCheckBox('Tile image')
-        self.check_tile_image.setChecked(False)
-        self.check_tile_image.setToolTip('Tile image to reduce memory usage')
-        self.options_group.glayout.addWidget(self.check_tile_image, 2,0,1,1)
 
-        self.check_tile_annotations = QCheckBox('Tile annotations')
+
+        self.check_tile_annotations = QCheckBox('Tile annotations for training')
         self.check_tile_annotations.setChecked(False)
         self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\nDisable for models that extract long range features (e.g. DINO)!')
-        self.options_group.glayout.addWidget(self.check_tile_annotations, 3,0,1,1)
+        self.options_group.glayout.addWidget(self.check_tile_annotations, 2,0,1,1)
+
+
+        self.check_tile_image = QCheckBox('Tile image for segmentation')
+        self.check_tile_image.setChecked(False)
+        self.check_tile_image.setToolTip('Tile image to reduce memory usage.\nTake care when using models that extract long range features (e.g. DINO).')
+        self.options_group.glayout.addWidget(self.check_tile_image, 3,0,1,1)
 
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
