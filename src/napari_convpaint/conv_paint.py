@@ -297,7 +297,7 @@ class ConvPaintWidget(QWidget):
             self.set_default_model()
         else:
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
-
+            self.qcombo_model_type.setCurrentText('single_layer_vgg16')
 
     def add_connections(self):
         
@@ -341,10 +341,10 @@ class ConvPaintWidget(QWidget):
     def hide_prediction(self, event=None):
         """Hide prediction layer."""
 
-        if self.viewer.layers['prediction'].visible == False:
-            self.viewer.layers['prediction'].visible = True
+        if self.viewer.layers['segmentation'].visible == False:
+            self.viewer.layers['segmentation'].visible = True
         else:
-            self.viewer.layers['prediction'].visible = False
+            self.viewer.layers['segmentation'].visible = False
 
     def select_layer(self, newtext=None):
         
@@ -493,7 +493,7 @@ class ConvPaintWidget(QWidget):
         """Update list of selectable layers"""
 
         self.model_output_selection.clear()
-        self.model_output_selection.addItems(self.model.module_dict.keys())
+        self.model_output_selection.addItems(self.model.selectable_layer_keys.keys())
 
     def _on_click_define_model_outputs(self, event=None):
         """Using hooks setup model to give outputs at selected layers."""
@@ -998,5 +998,5 @@ class ConvPaintWidget(QWidget):
 
     def _create_output_selection_for_temp_model(self, temp_model):
         self.model_output_selection.clear()
-        self.model_output_selection.addItems(temp_model.module_dict.keys())
+        self.model_output_selection.addItems(temp_model.selectable_layer_keys.keys())
 
