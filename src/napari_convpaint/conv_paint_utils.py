@@ -435,13 +435,26 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
         else:
             boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
         for i in range(len(boxes['label'])):
+            # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
+            pad_size = model.get_padding()
+            x_min = boxes['bbox-0'][i]-pad_size
+            x_max = boxes['bbox-2'][i]+pad_size
+            y_min = boxes['bbox-1'][i]-pad_size
+            y_max = boxes['bbox-3'][i]+pad_size
+
+            # temporary check that bounds are not out of image
+            x_min = max(0, x_min)
+            x_max = min(current_image.shape[-2], x_max)
+            y_min = max(0, y_min)
+            y_max = min(current_image.shape[-1], y_max)
+
             im_crop = current_image[...,
-                boxes['bbox-0'][i]-padding:boxes['bbox-2'][i]+padding,
-                boxes['bbox-1'][i]-padding:boxes['bbox-3'][i]+padding
+                x_min:x_max,
+                y_min:y_max
             ]
             annot_crop = current_annot[
-                boxes['bbox-0'][i]-padding:boxes['bbox-2'][i]+padding,
-                boxes['bbox-1'][i]-padding:boxes['bbox-3'][i]+padding
+                x_min:x_max,
+                y_min:y_max
             ]
             extracted_features = model.get_features_scaled(
                 image=im_crop,
