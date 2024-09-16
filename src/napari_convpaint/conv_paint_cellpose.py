@@ -4,8 +4,9 @@ from .conv_paint_utils import get_device
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
 import pandas as pd
+from cellpose import models
+import warnings
 
- 
 AVAILABLE_MODELS = ['cellpose_backbone']
 
 
@@ -13,7 +14,6 @@ class CellposeFeatures(FeatureExtractor):
 
     def __init__(self, model_name='cellpose_backbone',use_cuda=False):
 
-        from cellpose import models
         
         self.model_name = model_name
         self.use_cuda = use_cuda
@@ -33,7 +33,21 @@ class CellposeFeatures(FeatureExtractor):
         Returns:
         - features: The extracted features of the image. [nb_features, width, height]
         """
-        tensor  = torch.from_numpy(img).unsqueeze(0).float()
+
+        if img.ndim == 2:
+            img_expanded = np.stack([img, img], axis=0)
+        elif img.ndim == 3:
+            if img.shape[0] == 1:
+                img_expanded = np.concatenate([img, img], axis=0)
+            if img.shape[0] == 2:
+                img_expanded = img
+
+            elif img.shape[0] > 2:
+                warnings.warn('Cellpose backbone expects < 3 channels. Using only the first two channels.') 
+                img_expanded = img[:2]
+
+        img_expanded = np.expand_dims(img_expanded, axis=0)
+        tensor = torch.from_numpy(img_expanded).float()   
 
         if self.model.mkldnn:
             tensor = tensor.to_mkldnn()
@@ -76,9 +90,11 @@ class CellposeFeatures(FeatureExtractor):
         out_t.append(t)
 
         #append the original image
-        out_t.append(img)
+        if img.ndim == 2:
+            out_t.append(np.expand_dims(img, axis=0))
+        elif img.ndim == 3:
+            out_t.append(img)
         out_t = np.concatenate(out_t,axis=0)
- 
         return out_t
         
     def get_padding(self):
