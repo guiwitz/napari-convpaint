@@ -985,7 +985,7 @@ def train_classifier(features, targets):
     """Train a random forest classifier given a set of features and targets."""
 
     # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+    random_forest = RandomForestClassifier(n_estimators=100)#, n_jobs=-1)
     random_forest.fit(features, targets)
     
     #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
