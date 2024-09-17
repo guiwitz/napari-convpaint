@@ -1,30 +1,33 @@
 from collections import OrderedDict
-from typing import Any
 import warnings
-from pathlib import Path
 
 import torch
 import numpy as np
 import skimage.transform
 import skimage.morphology as morph
 import pandas as pd
-from joblib import dump, load
 from joblib import Parallel, delayed
-import yaml
-import zarr
 import einops as ein
+#import xgboost as xgb
 
-import torchvision.models as models
+
 from torch import nn
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
-from torchvision import transforms
 from torch.nn.functional import interpolate as torch_interpolate
 
-from .conv_parameters import Param
 
-
+def get_device(use_cuda=None):
+    if torch.cuda.is_available() and (use_cuda==True):
+        device = torch.device('cuda:0')  # use first available GPU
+    elif torch.backends.mps.is_available() and (use_cuda==True): #check if mps is available
+        device = torch.device('mps')
+    else:
+        if use_cuda:
+            warnings.warn('CUDA or MPS is not available. Using CPU')
+        device = torch.device('cpu')
+    return device
 
 def normalize_image(image, image_mean, image_std):
     """
@@ -45,12 +48,8 @@ def normalize_image(image, image_mean, image_std):
         
     Returns
     -------
-    arr : np.ndarray
+    arr_norm : np.ndarray
         Normalized array.
-    image_mean : float or nd.array
-        Mean of the input array along non-channel dimensions
-    image_std : float or nd.array
-        Standard deviation of the input array along non-channel dimensions
 
     Raises
     ------
@@ -71,7 +70,7 @@ def normalize_image(image, image_mean, image_std):
 
     return arr_norm
 
-def compute_image_stats(image, first_dim_is_channel=False):
+def compute_image_stats(image, ignore_n_first_dims=None):
     """
     Compute mean and standard deviation of a numpy array with 2-4 dimensions.
 
@@ -82,8 +81,10 @@ def compute_image_stats(image, first_dim_is_channel=False):
     ----------
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
-    first_dim_is_channel : bool
-        Option to specify whether first dimension of array with ndim>2 represents channels (True) or time/z (False).
+    ignore_n_first_dims : int
+        Number of first dimensions to ignore when computing the mean and standard deviation.
+        For example if the input array has 3 dimensions CHW and ignore_n_first_dims=1, the mean
+        and standard deviation will be computed for each channel C.
         
     Returns
     -------
@@ -101,12 +102,12 @@ def compute_image_stats(image, first_dim_is_channel=False):
     if image.ndim < 2 or image.ndim > 4:
         raise ValueError("Array must have 2-4 dimensions")
     
-    if (image.ndim == 2) | (not first_dim_is_channel):
+    if ignore_n_first_dims is None:
         image_mean = image.mean()
         image_std = image.std()
     else:
-        image_mean = image.mean(axis=tuple(range(1,image.ndim)), keepdims=True)
-        image_std = image.std(axis=tuple(range(1,image.ndim)), keepdims=True)
+        image_mean = image.mean(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
+        image_std = image.std(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
 
     return image_mean, image_std
 
@@ -141,8 +142,8 @@ def filter_image(image, model, scalings):
     for s in scalings:
         im_tot = image[::s, ::s].astype(np.float32)
         # im_tot = np.ones((3,im_tot.shape[0],im_tot.shape[1]), dtype=np.float32) * im_tot
-        im_torch = torch.from_numpy(im_tot[np.newaxis, np.newaxis, ::])
-        out = model.forward(im_torch)
+        im_torch = torch.tensor(im_tot[np.newaxis, np.newaxis, ::])
+        out = model(im_torch)
         out_np = out.detach().numpy()
         if s > 1:
             out_np = skimage.transform.resize(
@@ -151,7 +152,7 @@ def filter_image(image, model, scalings):
     return all_scales
 
 
-def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='cpu',
+def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0,
                               image_downsample=1):
     """Recover the outputs of chosen layers of a pytorch model. Layers and model are
     specified in the hookmodel object.
@@ -167,8 +168,6 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
     order : int, optional
         Interpolation order for low scale resizing,
         by default 0
-    device : str, optional
-        Device to use for computation, by default 'cpu'
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -180,8 +179,6 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
         where F is the number of filters of the layer.
         
     """
-
-    is_model_cuda = device == 'cuda'
 
     input_channels = hookmodel.named_modules[0][1].in_channels
     image = np.asarray(image, dtype=np.float32)
@@ -200,97 +197,19 @@ def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0, device='c
     align_corners = False if order > 0 else None
 
     all_scales = []
-    for s in scalings:
-        im_tot = image[:, ::s, ::s]
-        im_torch = torch.from_numpy(im_tot[np.newaxis, ::])
-        # im_torch = hookmodel.transform(im_torch)
-        hookmodel.outputs = []
-        try:
-            if is_model_cuda:
-                im_torch = im_torch.cuda()
-
-            _ = hookmodel(im_torch)
-        except:
-            pass
-
-        for im in hookmodel.outputs:
-            if image.shape[1:3] != im.shape[2:4]:
-                im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
-                '''out_np = skimage.transform.resize(
-                    image=out_np,
-                    output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
-                    preserve_range=True, order=order)'''
-
-            if is_model_cuda:
-                im = im.to('cpu')
-
-            out_np = im.detach().numpy()
-            all_scales.append(out_np)
-
-    return all_scales
-
-
-def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='cpu',
-                              image_downsample=1):
-    """Recover the outputs of chosen layers of a pytorch model. Layers and model are
-    specified in the hookmodel object. If image has multiple channels, each channel
-    is processed separately.
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        2d Image to filter
-    hookmodel : Hookmodel
-        Model to extract features from
-    scalings : list of ints, optional
-        Downsampling factors, by default None
-    order : int, optional
-        Interpolation order for low scale resizing,
-        by default 0
-    device : str, optional
-        Device to use for computation, by default 'cpu'
-    image_downsample : int, optional
-        Downsample image by this factor before extracting features, by default 1
-
-    Returns
-    -------
-    all_scales : list of np.ndarray
-        List of filtered images. The number of images is C x Sum_i(F_i x S) where C is the number of channels,
-        F_i is the number of filters of the ith layer and S the number of scaling factors.
-        
-    """
-
-    is_model_cuda = device == 'cuda'
-
-    input_channels = hookmodel.named_modules[0][1].in_channels
-    image = np.asarray(image, dtype=np.float32)
-
-    if image.ndim == 2:
-        image = image[::image_downsample, ::image_downsample]
-        image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
-        image_series = [image]
-    elif image.ndim == 3:
-        image = image[:, ::image_downsample, ::image_downsample]
-        image_series = [np.ones((input_channels, im.shape[0], im.shape[1]), dtype=np.float32) * im for im in image]
-
-    int_mode = 'bilinear' if order > 0 else 'nearest'
-    align_corners = False if order > 0 else None
-
-    all_scales = []
-    for image in image_series:
+    with torch.no_grad():
         for s in scalings:
             im_tot = image[:, ::s, ::s]
-            im_torch = torch.from_numpy(im_tot[np.newaxis, ::])
-            # im_torch = hookmodel.transform(im_torch)
+            im_torch = torch.tensor(im_tot[np.newaxis, ::])
+            # im_torch = hookmodel.transform(im_torch)  # different normalization required
             hookmodel.outputs = []
             try:
-                if is_model_cuda:
-                    im_torch = im_torch.cuda()
-
                 _ = hookmodel(im_torch)
-            except:
-                pass
-
+            except AssertionError as ea:
+               pass
+            except Exception as ex:
+                raise ex
+    
             for im in hookmodel.outputs:
                 if image.shape[1:3] != im.shape[2:4]:
                     im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
@@ -298,19 +217,14 @@ def filter_image_multichannels(image, hookmodel, scalings=[1], order=0, device='
                         image=out_np,
                         output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
                         preserve_range=True, order=order)'''
-
-                if is_model_cuda:
-                    im = im.to('cpu')
-
-                out_np = im.detach().numpy()
+    
+                out_np = im.cpu().detach().numpy()
                 all_scales.append(out_np)
 
     return all_scales
 
-
-def predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True, device='cpu', image_downsample=1,
-                  ):
+def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
+                  use_min_features=True, image_downsample=1, use_dask=False):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -329,10 +243,10 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
         interpolation order for low scale resizing
     use_min_features: bool
         if True, use the minimum number of features per layer
-    device: str, optional
-        device to use for computation, by default 'cpu'
     image_downsample: int, optional
         downsample image by this factor before extracting features, by default 1
+    use_dask: bool
+        if True, use dask for parallel processing
 
     Returns
     -------
@@ -341,159 +255,131 @@ def predict_image(image, model, classifier, scalings=[1], order=0,
 
     """
     
-    filter_fun = filter_image_multichannels
+    maxblock = 1000
+    nblocks_rows = image.shape[-2] // maxblock
+    nblocks_cols = image.shape[-1] // maxblock
+    margin = 50
 
-    if use_min_features:
-        max_features = np.min(model.features_per_layer)
-        all_scales = filter_fun(
-            image, model, scalings=scalings, order=order,
-            device=device, image_downsample=image_downsample)
-        all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
-        tot_filters = max_features * len(all_scales)
-
-    else:
-        # max_features = np.max(model.features_per_layer)
-        all_scales = filter_fun(
-            image, model, scalings=scalings, order=order,
-            device=device, image_downsample=image_downsample)
-        tot_filters = np.sum(a.shape[1] for a in all_scales)
+    predicted_image_complete = np.zeros(image.shape[-2:], dtype=(np.uint8))
     
-    tot_filters = int(tot_filters)
-    rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
-    cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
-    all_pixels = pd.DataFrame(
-        np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, rows * cols)).T)
+    if use_dask:
+        from dask.distributed import Client
+        import dask
+        dask.config.set({'distributed.worker.daemon': False})
+        client = Client()
+        processes = []
 
-    predictions = classifier.predict(all_pixels)
+    min_row_ind_collection = []
+    min_col_ind_collection = []
+    max_row_ind_collection = []
+    max_col_ind_collection = []
+    new_max_col_ind_collection = []
+    new_max_row_ind_collection = []
+    new_min_col_ind_collection = []
+    new_min_row_ind_collection = []
 
-    predicted_image = np.reshape(predictions, [rows, cols])
-    if image_downsample > 1:
-        predicted_image = skimage.transform.resize(
-            image=predicted_image,
-            output_shape=(image.shape[-2], image.shape[-1]),
-            preserve_range=True, order=1).astype(np.uint8)
+    for row in range(nblocks_rows+1):
+        for col in range(nblocks_cols+1):
+            #print(f'row {row}/{nblocks_rows}, col {col}/{nblocks_cols}')
+            max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
+            max_col = np.min([image.shape[-1], (col+1)*maxblock+margin])
+            min_row = np.max([0, row*maxblock-margin])
+            min_col = np.max([0, col*maxblock-margin])
 
-    return predicted_image
+            min_row_ind = 0
+            new_min_row_ind = 0
+            if min_row > 0:
+                min_row_ind = min_row + margin
+                new_min_row_ind = margin
+            min_col_ind = 0
+            new_min_col_ind = 0
+            if min_col > 0:
+                min_col_ind = min_col + margin
+                new_min_col_ind = margin
 
+            max_col = (col+1)*maxblock+margin
+            max_col_ind = np.min([min_col_ind+maxblock,image.shape[-1]])
+            new_max_col_ind = new_min_col_ind + (max_col_ind-min_col_ind)
+            if max_col > image.shape[-1]:
+                max_col = image.shape[-1]
 
-def load_single_layer_vgg16(keep_rgb=False):
-    """Load VGG16 model from torchvision, keep first layer only
+            max_row = (row+1)*maxblock+margin
+            max_row_ind = np.min([min_row_ind+maxblock,image.shape[-2]])
+            new_max_row_ind = new_min_row_ind + (max_row_ind-min_row_ind)
+            if max_row > image.shape[-2]:
+                max_row = image.shape[-2]
+
+            image_block = image[..., min_row:max_row, min_col:max_col]
+
+            if use_dask:
+                processes.append(client.submit(
+                    model.predict_image,
+                    image=image_block,
+                    classifier=classifier,
+                    scalings=scalings,
+                    order=order,
+                    use_min_features=use_min_features,
+                    image_downsample=image_downsample))
+                
+                
+                min_row_ind_collection.append(min_row_ind)
+                min_col_ind_collection.append(min_col_ind)
+                max_row_ind_collection.append(max_row_ind)
+                max_col_ind_collection.append(max_col_ind)
+                new_max_col_ind_collection.append(new_max_col_ind)
+                new_max_row_ind_collection.append(new_max_row_ind)
+                new_min_col_ind_collection.append(new_min_col_ind)
+                new_min_row_ind_collection.append(new_min_row_ind)
+
+            else:
+                predicted_image = model.predict_image(
+                    image=image_block,
+                    classifier=classifier,
+                    scalings=scalings,
+                    order=order,
+                    use_min_features=use_min_features,
+                    image_downsample=image_downsample
+                )
+                crop_pred = predicted_image[
+                    new_min_row_ind: new_max_row_ind,
+                    new_min_col_ind: new_max_col_ind]
+
+                predicted_image_complete[min_row_ind:max_row_ind, min_col_ind:max_col_ind] = crop_pred.astype(np.uint8)
+
+    if use_dask:
+        for k in range(len(processes)):
+            future = processes[k]
+            out = future.result()
+            future.cancel()
+            del future
+            predicted_image_complete[
+                min_row_ind_collection[k]:max_row_ind_collection[k],
+                min_col_ind_collection[k]:max_col_ind_collection[k]] = out.astype(np.uint8)
+        client.close()
     
-    Parameters
-    ----------
+    return predicted_image_complete
 
-    Returns
-    -------
-    model: torch model
-        model for pixel feature extraction
-    keep_rgb: bool
-        if True, keep model with three input channels, otherwise convert to single channel
-    
-    """
-
-    vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-    pretrained_dict = vgg16.state_dict()
-    
-    if keep_rgb:
-        model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(3, 64, 3, 1, 1))]))
-    else:
-        model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(1, 64, 3, 1, 1))]))
-
-    reduced_dict = model.state_dict()
-
-    if keep_rgb:
-        reduced_dict['conv1.weight'] = pretrained_dict['features.0.weight']
-        reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
-    else:
-        reduced_dict['conv1.weight'][:, 0, :, :] = pretrained_dict['features.0.weight'][:, :, :, :].sum(axis=1)
-        reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
-
-    model.load_state_dict(reduced_dict)
-
-    return model
-
-def get_multiscale_features(model, image, annotations, scalings, order=0,
-                            use_min_features=True, device='cpu',
-                            image_downsample=1):
-    """Given an image and a set of annotations, extract multiscale features
-    
-    Parameters
-    ----------
-    model : Hookmodel
-        Model to extract features from
-    image : np.ndarray
-        Image to extract features from (currently 2D only or 2D multichannel (C,H,W))
-    annotations : np.ndarray
-        Annotations (1,2) to extract features from (currently 2D only)
-    scalings : list of ints
-        Downsampling factors
-    order : int, optional
-        Interpolation order for low scale resizing, by default 0
-    use_min_features : bool, optional
-        Use minimal number of features, by default True
-    device : str, optional
-        Device to use for computation, by default 'cpu'
-    image_downsample : int, optional
-        Downsample image by this factor before extracting features, by default 1
-
-    Returns
-    -------
-    extracted_features : np.ndarray
-        Extracted features. Dimensions npixels x nfeatures * nbscales
-    """
-
-    filter_fun = filter_image_multichannels
-
-    if use_min_features:
-        max_features = np.min(model.features_per_layer)
-    else:
-        max_features = np.max(model.features_per_layer)
-    # test with minimal number of features i.e. taking only n first features
-    rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
-    cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
-    full_annotation = np.ones((max_features, rows, cols), dtype=np.bool_)
-    full_annotation = full_annotation * annotations[::image_downsample, ::image_downsample] > 0
-
-    all_scales = filter_fun(
-        image, model, scalings, order=order, device=device,
-        image_downsample=image_downsample)
-    if use_min_features:
-        all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
-    all_values_scales = []
-
-    for ind, a in enumerate(all_scales):
-        n_features = a.shape[1]
-        extract = a[0, full_annotation[0:n_features]]
-
-        all_values_scales.append(np.reshape(extract, (n_features, int(extract.shape[0] / n_features))).T)
-    extracted_features = np.concatenate(all_values_scales, axis=1)
-
-    return extracted_features
-
-
-def get_features_current_layers(model, image, annotations, scalings=[1],
-                                order=0, use_min_features=True, device='cpu',
-                                image_downsample=1, multi_channel_training=False):
+def get_features_current_layers(image, annotations, model=None, scalings=[1],
+                                order=0, use_min_features=True,
+                                image_downsample=1,tile_annotations=False):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
     Parameters
     ----------
-    model : Hookmodel
-        Model to extract features from
     image : np.ndarray
         2D or 3D Image to extract features from. If 3D but annotations are 2D,
         image is treated as multichannel and not image series
     annotations : np.ndarray
         2D, 3D Annotations (1,2) to extract features from
+    model : feature extraction model
+        Model to extract features from the image
     scalings : list of ints
         Downsampling factors
     order : int, optional
         Interpolation order for low scale resizing, by default 0
     use_min_features : bool, optional
         Use minimal number of features, by default True
-    device : str, optional
-        Device to use for computation, by default 'cpu'
     image_downsample : int, optional
         Downsample image by this factor before extracting features, by default 1
 
@@ -504,6 +390,9 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
     targets : pandas Series
         Target values
     """
+
+    if model is None:
+        raise ValueError('Model must be provided')
 
     # get indices of first dimension of non-empty annotations. Gives t/z indices
     if annotations.ndim == 3:
@@ -519,37 +408,88 @@ def get_features_current_layers(model, image, annotations, scalings=[1],
     all_values = []
     all_targets = []
 
-    # iterating over non_empty iteraties of t/z for 3D data
+    # find maximal padding necessary
+    padding = model.get_padding() * np.max(scalings)
 
+    # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
 
         if annotations.ndim == 2:
-            current_image = image
-            current_annot = annotations
+            if image.ndim == 3:
+                current_image = np.pad(image, ((0,0), (padding,padding), (padding,padding)), mode='reflect')
+            else:
+                current_image = np.pad(image, padding, mode='reflect')
+            current_annot = np.pad(annotations, padding, mode='constant')
         else:
-            current_image = image[t]
-            current_annot = annotations[t]
+            if image.ndim == 3:
+                current_image = np.pad(image[t], padding, mode='reflect')
+                current_annot = np.pad(annotations[t], padding, mode='constant')
+            elif image.ndim == 4:
+                current_image = np.pad(image[:, t], ((0,0),(padding, padding),(padding, padding)), mode='reflect')
+                current_annot = np.pad(annotations[t], padding, mode='constant')
 
-        extracted_features = get_multiscale_features(
-            model, current_image, current_annot, scalings,
-            order=order, use_min_features=use_min_features,
-            device=device,
-            image_downsample=image_downsample)
-        all_values.append(extracted_features)
-        
-        all_targets.append(current_annot[::image_downsample, ::image_downsample]
-                           [current_annot[::image_downsample, ::image_downsample] > 0])
+        annot_regions = skimage.morphology.label(current_annot > 0)
+
+        if tile_annotations:
+            boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+        else:
+            boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
+        for i in range(len(boxes['label'])):
+            # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
+            pad_size = model.get_padding()
+            x_min = boxes['bbox-0'][i]-pad_size
+            x_max = boxes['bbox-2'][i]+pad_size
+            y_min = boxes['bbox-1'][i]-pad_size
+            y_max = boxes['bbox-3'][i]+pad_size
+
+            # temporary check that bounds are not out of image
+            x_min = max(0, x_min)
+            x_max = min(current_image.shape[-2], x_max)
+            y_min = max(0, y_min)
+            y_max = min(current_image.shape[-1], y_max)
+
+            im_crop = current_image[...,
+                x_min:x_max,
+                y_min:y_max
+            ]
+            annot_crop = current_annot[
+                x_min:x_max,
+                y_min:y_max
+            ]
+            extracted_features = model.get_features_scaled(
+                image=im_crop,
+                scalings=scalings,
+                order=order,
+                use_min_features=use_min_features,
+                image_downsample=image_downsample)
+            
+            if image_downsample > 1:
+                annot_crop = annot_crop[::image_downsample, ::image_downsample]
+
+            #from the [features, w, h] make a list of [features] with len nb_annotations
+            mask = annot_crop > 0
+            nb_features = extracted_features.shape[0]
+
+            extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
+
+            extracted_features = extracted_features[mask]
+            all_values.append(extracted_features)
+
+            targets = annot_crop[annot_crop > 0]
+            targets = targets.flatten()
+            all_targets.append(targets)
         
 
     all_values = np.concatenate(all_values, axis=0)
     features = pd.DataFrame(all_values)
-    targets = pd.Series(np.concatenate(all_targets, axis=0))
+
+    all_targets = np.concatenate(all_targets, axis=0)
+    targets = pd.Series(all_targets)
 
     return features, targets
 
 
 rot_model = None
-
 
 def get_rot_model(device='cpu'):
     global rot_model
@@ -620,7 +560,7 @@ def append_grad_rot(features, add_grad, add_rot, feature_info, device):
         if True, add rotor features: convolves grad features with corresponding "edge detector" and sums.
         adds one feature per original feature.
     feature_info: dict
-        feature_info[idx] = [idx, name=f'{layer_name}_{scale}_{idx:04d}', scale, layer_name,
+        feature_info[idx] = [idx, name=f'{layer_name}_{sign}_{scale}_{idx:04d}', mult, scale, layer_name,
          ch_idx, type='gradx'|'grady'|'rot'|'orig', useful:bool]
 
     Returns
@@ -629,6 +569,9 @@ def append_grad_rot(features, add_grad, add_rot, feature_info, device):
     """
     n_features = features.shape[0]
     res_features = features
+
+    mult_factor_sign = {1:'+', -1:'-'}
+    
     if add_grad:
         grad_x = np.gradient(features, axis=1)
         grad_y = np.gradient(features, axis=2)
@@ -636,13 +579,14 @@ def append_grad_rot(features, add_grad, add_rot, feature_info, device):
 
         for idx in range(n_features):
             fi_idx = feature_info[idx]
-            scale, layer_name, ch_idx = fi_idx[2:5]
+            mult, scale, layer_name, ch_idx = fi_idx[2:6]
+            sign=mult_factor_sign[mult]
 
             gx_idx = idx + n_features
             gy_idx = idx + 2 * n_features
-            feature_info[gx_idx] = [gx_idx, f'{layer_name}_{scale}_{gx_idx:04d}', scale, layer_name,
+            feature_info[gx_idx] = [gx_idx, f'{layer_name}_{sign}_{scale}_{gx_idx:04d}', mult, scale, layer_name,
                                     ch_idx, 'gradx', True]
-            feature_info[gy_idx] = [gy_idx, f'{layer_name}_{scale}_{gy_idx:04d}', scale, layer_name,
+            feature_info[gy_idx] = [gy_idx, f'{layer_name}_{sign}_{scale}_{gy_idx:04d}', mult, scale, layer_name,
                                     ch_idx, 'grady', True]
 
         if add_rot:
@@ -651,10 +595,11 @@ def append_grad_rot(features, add_grad, add_rot, feature_info, device):
 
             for idx in range(n_features):
                 fi_idx = feature_info[idx]
-                scale, layer_name, ch_idx = fi_idx[2:5]
+                mult, scale, layer_name, ch_idx = fi_idx[2:6]
+                sign=mult_factor_sign[mult]
 
                 rot_idx = idx + 3 * n_features
-                feature_info[rot_idx] = [rot_idx, f'{layer_name}_{scale}_{rot_idx:04d}', scale, layer_name,
+                feature_info[rot_idx] = [rot_idx, f'{layer_name}_{sign}_{scale}_{rot_idx:04d}', mult, scale, layer_name,
                                          ch_idx, 'rot', True]
 
         res_features = np.concatenate(all_features, axis=0)
@@ -685,7 +630,7 @@ def fill_useless(features_all_samples, feature_info):
         # fill values for all samples from dataframe column
         all_values = np.concatenate([np.asarray(f.iloc[:, idx]) for f in features_all_samples], axis=0)
         # if feature has zero variance, feature is useless
-        feature_info[idx][6] = np.var(all_values) > 0
+        feature_info[idx][7] = np.var(all_values) > 0
 
 
 def get_balanced_mask(ref_mask, tgt_mask):
@@ -851,9 +796,10 @@ def extract_annotated_pixels(features, annotation, full_annotation=True):
 
 def get_features_single_img_rich(model, image, annotation, scalings=[1],
                                  full_annotation=True,
-                                 add_grad=True,
-                                 add_rot=True,
-                                 order=0, device='cpu'):
+                                 add_grad=False,
+                                 add_rot=False,
+                                 add_neg=True,
+                                 order=0):
     """Given a 2D image and annotation,
         extract multiscale features from multiple layers of a model,
         add gradient and rotation features,
@@ -875,16 +821,17 @@ def get_features_single_img_rich(model, image, annotation, scalings=[1],
             if True - assumes annotations are 0,1,..., where 0 is bg. otherwise assumes 0 is not annotated,
              and 0 is background, 1 is first class, etc. Default True
         add_grad : bool
-            if True, add gradient features: gradient in x, gradient in y. Triples feature number. Default True.
+            if True, add gradient features: gradient in x, gradient in y. Triples feature number. Default False.
         add_rot : bool
             if True, add rotor features: convolve grad features with corresponding "edge detector" and sum.
+            Default False.
+        add_neg : bool
+            if True, add all features also for `-image`
             Default True.
         order : int, optional
             Interpolation order for low scale resizing, by default 0
         use_min_features : bool, optional
             Use minimal number of features, by default True
-        device : str, optional
-            Device to use for computation, by default 'cpu'
 
         Returns
         -------
@@ -893,7 +840,7 @@ def get_features_single_img_rich(model, image, annotation, scalings=[1],
         targets : pandas Series
             Target values
         feature_info : dict
-                    feature_info[idx] = [idx, name=f'{layer_name}_{scale}_{idx:04d}', scale, layer_name, ch_idx,
+                    feature_info[idx] = [idx, name=f'{layer_name}_{sign}_{scale}_{idx:04d}', mult, scale, layer_name, ch_idx,
                              type='gradx'|'grady'|'rot'|'orig', useful:bool]
         """
 
@@ -905,21 +852,33 @@ def get_features_single_img_rich(model, image, annotation, scalings=[1],
     if full_annotation:
         annotation = annotation + 1
 
-    extracted_features = filter_image_multioutputs(image, model, scalings, order=order, device=device)
-    extracted_features = np.concatenate([np.expand_dims(image, axis=(0, 1))] + extracted_features, axis=1)
+    mult_factors = [1, -1] if add_neg else [1]
+    mult_factor_sign = {1:'+', -1:'-'}
+    feature_info = {}
+    extracted_features = []
+    
+    for mf in mult_factors:
+        sign = mult_factor_sign[mf]
+        image_f = (-image) if mf==-1 else image
+        
+        extracted_features.append(np.expand_dims(image_f, axis=(0, 1)))
+        features = filter_image_multioutputs(image_f, model, scalings, order=order)
+        extracted_features.extend(features)
+        
+        idx = len(feature_info)
+        feature_info[idx] = [idx, f'raw_{sign}_1_1', mf, 1, 'raw', 0, 'raw', True]
+    
+        for scale in scalings:
+            for l_idx, (layer_name, n_features) in enumerate(zip(model.selected_layers, model.features_per_layer)):
+                for ch_idx in range(n_features):
+                    idx = len(feature_info)
+                    feature_info[idx] = [idx, f'{layer_name}_{sign}_{scale}_{idx:04d}', mf, scale, layer_name, ch_idx, 'orig', True]
+
+    extracted_features = np.concatenate([] + extracted_features, axis=1)
     assert len(extracted_features) == 1, 'only one image at a time'
     extracted_features = extracted_features[0]
-
-    feature_info = {}
-    feature_info[0] = [0, f'raw_1_1', 1, 'raw', 0, 'raw', True]
-
-    for scale in scalings:
-        for l_idx, (layer_name, n_features) in enumerate(zip(model.selected_layers, model.features_per_layer)):
-            for ch_idx in range(n_features):
-                idx = len(feature_info)
-                feature_info[idx] = [idx, f'{layer_name}_{scale}_{idx:04d}', scale, layer_name, ch_idx, 'orig', True]
-
-    extracted_features = append_grad_rot(extracted_features, add_grad, add_rot, feature_info, device=device)
+    
+    extracted_features = append_grad_rot(extracted_features, add_grad, add_rot, feature_info, device=model.device)
 
     # select pixels in annotations
 
@@ -932,9 +891,10 @@ def get_features_single_img_rich(model, image, annotation, scalings=[1],
 
 def get_features_all_samples_rich(model, images, annotations, scalings=[1],
                                   full_annotation=True,
-                                  add_grad=True,
-                                  add_rot=True,
-                                  order=0, device='cpu'):
+                                  add_grad=False,
+                                  add_rot=False,
+                                  add_neg=True,
+                                  order=0):
     """
     Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model,
@@ -957,17 +917,18 @@ def get_features_all_samples_rich(model, images, annotations, scalings=[1],
         if True, use all pixels in annotations, otherwise balance background and foreground
         if True - assumes annotations are 0,1,..., where 0 is bg. otherwise assumes 0 is not annotated,
          and 0 is background, 1 is first class, etc. Default True
-    add_grad : bool
-        if True, add gradient features: gradient in x, gradient in y. Triples feature number. Default True.
-    add_rot : bool
-        if True, add rotor features: convolves grad features with corresponding "edge detector" and sums.
-        Default True.
+        add_grad : bool
+            if True, add gradient features: gradient in x, gradient in y. Triples feature number. Default False.
+        add_rot : bool
+            if True, add rotor features: convolve grad features with corresponding "edge detector" and sum.
+            Default False.
+        add_neg : bool
+            if True, add all features also for `-image`
+            Default True.
     order : int, optional
         Interpolation order for low scale resizing, by default 0
     use_min_features : bool, optional
         Use minimal number of features, by default True
-    device : str, optional
-        Device to use for computation, by default 'cpu'
 
     Returns
     -------
@@ -1009,7 +970,8 @@ def get_features_all_samples_rich(model, images, annotations, scalings=[1],
                                                                        full_annotation=full_annotation,
                                                                        add_grad=add_grad,
                                                                        add_rot=add_rot,
-                                                                       order=order, device=device
+                                                                       add_neg=add_neg,
+                                                                       order=order
                                                                        )
         features_all_samples.append(features)
         targets_all_samples.append(targets)
@@ -1022,250 +984,11 @@ def get_features_all_samples_rich(model, images, annotations, scalings=[1],
 def train_classifier(features, targets):
     """Train a random forest classifier given a set of features and targets."""
 
-    # train model
-    # split train/test
-    X, X_test, y, y_test = train_test_split(features, targets,
-                                            test_size=0.2,
-                                            random_state=42)
-
     # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=100)
-    random_forest.fit(X, y)
+    random_forest = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+    random_forest.fit(features, targets)
+    
+    #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
+    #random_forest.fit(features, targets-1)
 
     return random_forest
-
-
-def load_trained_classifier(model_path):
-    model_path = Path(model_path)
-    random_forest = load(model_path)
-
-    param = Param()
-    with open(model_path.parent.joinpath('convpaint_params.yml')) as file:
-        documents = yaml.full_load(file)
-    for k in documents.keys():
-        setattr(param, k, documents[k])
-
-    return random_forest, param
-
-
-# encapsulate of pytorch model that includes hooks and outputs for certain layers
-class Hookmodel():
-    """Class to extract features from a pytorch model using hooks on chosen layers.
-
-    Parameters
-    ----------
-    model_name : str
-        Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16',
-         'single_layer_vgg16_rgb' are supported.
-    model : torch model, optional
-        Model to extract features from, by default None
-    use_cuda : bool, optional
-        Use cuda, by default False
-    param : Param, optional
-        Parameters for model, by default None
-        
-    Attributes
-    ----------
-    model : torch model
-        Model to extract features from
-    outputs : list of torch tensors
-        List of outputs from hooks
-    features_per_layer : list of int
-        Number of features per hooked layer
-    module_list : list of lists
-        List of hooked layers, their names, and their indices in the model (if applicable)
-    """
-
-    def __init__(self, model_name='vgg16', model=None, use_cuda=False, param=None):
-
-        if model is not None:
-            assert model_name is None, 'model_name must be None if model is not None'
-            self.model = model
-        else:
-            if param is not None:
-                model_name = param.model_name
-
-            if model_name == 'vgg16':
-                self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-                # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
-            elif model_name == 'efficient_netb0':
-                self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
-            elif model_name == 'single_layer_vgg16':
-                self.model = load_single_layer_vgg16(keep_rgb=False)
-            elif model_name == 'single_layer_vgg16_rgb':
-                self.model = load_single_layer_vgg16(keep_rgb=True)
-            elif model_name == 'dino_vits16':
-                self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
-
-        if use_cuda:
-            self.model = self.model.cuda()
-
-        self.outputs = []
-        self.features_per_layer = []
-        self.selected_layers = []
-
-        self.get_layer_dict()
-
-        if model_name == 'single_layer_vgg16':
-            self.register_hooks(list(self.module_dict.keys()))
-
-        if param is not None:
-            self.register_hooks(param.model_layers)
-
-    def __call__(self, tensor_image):
-
-        return self.model(tensor_image)
-
-    def hook_normal(self, module, input, output):
-        self.outputs.append(output)
-
-    def hook_last(self, module, input, output):
-        self.outputs.append(output)
-        assert False
-
-    def register_hooks(self, selected_layers):  # , selected_layer_pos):
-
-        self.features_per_layer = []
-        self.selected_layers = selected_layers.copy()
-        for ind in range(len(selected_layers)):
-
-            self.features_per_layer.append(
-                self.module_dict[selected_layers[ind]].out_channels)
-
-            if ind == len(selected_layers) - 1:
-                self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_last)
-            else:
-                self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
-
-    def get_layer_dict(self):
-        """Create a flat list of all modules as well as a dictionary of modules with 
-        keys describing the layers."""
-
-        named_modules = list(self.model.named_modules())
-        self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
-        self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
-        self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
-
-
-class Classifier():
-    """"
-    Class to segment images. Contains both the NN model needed to extract features
-    and the classifier to predict the class of each pixel. By default loads the
-    single_layer_vgg16 model and the classifier is None.
-     
-    Parameters
-    ----------
-    model_path : str, optional
-        Path to RF model saved as joblib. Expects a parameters file in the same
-        location
-    
-    Attributes
-    ----------
-    random_forest : sklearn RF classifier
-        Classifier to predict the class of each pixel
-    param : Param
-        Parameters for model
-    model : Hookmodel
-        Model to extract features from the image
-
-    """
-
-    def __init__(self, model_path=None):
-
-        self.random_forest = None
-        self.param = None
-        self.model = None
-
-        if model_path is not None:
-            self.load_model(model_path)
-
-        else:
-            self.default_model()
-
-    def load_model(self, model_path):
-        """Load a pretrained model by loading the joblib model
-        and recreating the NN from the param file."""
-        
-        self.random_forest, self.param = load_trained_classifier(model_path)
-        self.model = Hookmodel(param=self.param)
-
-    def default_model(self):
-        """Set default model to single_layer_vgg16."""
-            
-        self.model = Hookmodel(model_name='single_layer_vgg16')
-        self.random_forest = None
-        self.param = Param(
-            model_name='single_layer_vgg16',
-            model_layers=list(self.model.module_dict.keys()),
-            scalings=[1,2],
-            order=1,
-            use_min_features=False,
-            normalize=True,
-        )
-
-    def save_classifier(self, save_path):
-        """Save the classifier to a joblib file and the parameters to a yaml file.
-        
-        Parameters
-        ----------
-        save_path : str
-            Path to save files to
-        """
-
-        dump(self.random_forest, save_path)
-        self.param.random_forest = save_path
-        self.param.save_parameters(Path(save_path).parent.joinpath('convpaint_params.yml'))
-
-
-    def segment_image_stack(self, image, save_path=None):
-        """Segment an image stack using a pretrained model. If save_path is not
-        None, save the zarr file to this path. Otherwise, return numpy array
-        
-        Parameters
-        ----------
-        image : np.ndarray
-            2D or 3D image stack to segment, with dimensions n,y,x or y,x
-        save_path : str
-            Path to save zarr file to
-
-        Returns
-        -------
-        np.ndarray
-            Segmented image stack. Either 2D (single image) or 3D with n,y,x
-            where n is the number of images in the stack.
-        """
-
-        if not ((image.ndim == 2) | (image.ndim == 3)):
-            raise Exception(f'Image must be 2D or 3D, not {image.ndim}')
-        single_image=False
-        if image.ndim == 2:
-            single_image = True
-            image = np.expand_dims(image, axis=0)
-        chunks = (1, image.shape[1], image.shape[2])
-
-        if save_path is not None:
-            im_out = zarr.open(save_path, mode='w', shape=image.shape,
-                               chunks=chunks, dtype=np.uint8)
-        else:
-            im_out = np.zeros(image.shape, dtype=np.uint8)
-
-        if self.param.normalize:
-            image_mean, image_std = compute_image_stats(image)
-            image = normalize_image(image, image_mean, image_std)
-
-        for i in range(image.shape[0]):
-            im_out[i] = predict_image(
-                image=image[i],
-                model=self.model,
-                classifier=self.random_forest,
-                scalings=self.param.scalings,
-                order=self.param.order,
-                use_min_features=self.param.use_min_features,
-                device='cpu',
-                image_downsample=self.param.image_downsample)
-
-        if save_path is None:
-            if single_image:
-                return im_out[0]
-            else:
-                return im_out

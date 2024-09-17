@@ -3,7 +3,7 @@ import napari.types
 from skimage.draw import disk
 import numpy as np
 
-def create_annotation_cell3d() -> napari.types.List[napari.types.LayerDataTuple]:
+def create_annotation_cell3d() -> list[napari.types.LayerDataTuple]:
 
     
     shape = (256,256)
