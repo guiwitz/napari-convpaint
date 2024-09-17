@@ -19,9 +19,9 @@ from torch.nn.functional import interpolate as torch_interpolate
 
 
 def get_device(use_cuda=None):
-    if torch.cuda.is_available() and (use_cuda is None or use_cuda==True):
+    if torch.cuda.is_available() and (use_cuda==True):
         device = torch.device('cuda:0')  # use first available GPU
-    elif torch.backends.mps.is_available() and (use_cuda is None or use_cuda==True): #check if mps is available
+    elif torch.backends.mps.is_available() and (use_cuda==True): #check if mps is available
         device = torch.device('mps')
     else:
         if use_cuda:
