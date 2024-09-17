@@ -11,6 +11,7 @@ class DinoFeatures(FeatureExtractor):
     def __init__(self, model_name='dinov2_vits14_reg', use_cuda=False):
         self.model_name = model_name
         self.use_cuda = use_cuda
+        # prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
         torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
         try:
             self.model = torch.hub.load('facebookresearch/dinov2', self.model_name, pretrained=True, verbose=False)
