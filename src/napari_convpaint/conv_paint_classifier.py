@@ -132,7 +132,6 @@ class Classifier():
         for i in range(image.shape[0]):
             im_out[i] = self.model.predict_image(
                 image=image[i],
-                model=self.model,
                 classifier=self.random_forest,
                 scalings=self.param.scalings,
                 order=self.param.order,

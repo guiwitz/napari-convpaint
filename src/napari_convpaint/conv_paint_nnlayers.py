@@ -8,10 +8,12 @@ from torch import nn
 from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
 from .conv_paint_utils import get_device
+from .conv_paint_feature_extractor import FeatureExtractor
+
 
 AVAILABLE_MODELS = ['vgg16', 'efficient_netb0', 'single_layer_vgg16']
 
-class Hookmodel():
+class Hookmodel(FeatureExtractor):
     """Class to extract features from a pytorch model using hooks on chosen layers.
 
     Parameters
@@ -61,10 +63,11 @@ class Hookmodel():
 
         self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
-
+    
         self.outputs = []
         self.features_per_layer = []
         self.selected_layers = []
+        self.selectable_layer_keys = []
 
         self.get_layer_dict()
         if model_name == 'single_layer_vgg16':
@@ -105,6 +108,9 @@ class Hookmodel():
         self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
         self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
         self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
+        
+        self.selectable_layer_keys = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
+
 
     def load_single_layer_vgg16(self, keep_rgb=False):
         """Load VGG16 model from torchvision, keep first layer only
@@ -142,7 +148,7 @@ class Hookmodel():
 
         return model
 
-    def get_features(self, image, annotations, scalings=[1], order=0,
+    def get_features_scaled(self, image, scalings=[1], order=0,
                      use_min_features=True, image_downsample=1):
         """Given an image and a set of annotations, extract multiscale features
         
@@ -166,7 +172,7 @@ class Hookmodel():
         Returns
         -------
         extracted_features : np.ndarray
-            Extracted features. Dimensions npixels x nfeatures * nbscales
+            Extracted features. Dimensions (nfeatures * nbscales) x W x H 
         """
 
         if use_min_features:
@@ -176,8 +182,6 @@ class Hookmodel():
         # test with minimal number of features i.e. taking only n first features
         rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
         cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
-        full_annotation = np.ones((max_features, rows, cols), dtype=np.bool_)
-        full_annotation = full_annotation * annotations[::image_downsample, ::image_downsample] > 0
 
         all_scales = self.filter_image_multichannels(
             image, scalings, order=order,
@@ -188,11 +192,9 @@ class Hookmodel():
 
         for ind, a in enumerate(all_scales):
             n_features = a.shape[1]
-            extract = a[0, full_annotation[0:n_features]]
-
-            all_values_scales.append(np.reshape(extract, (n_features, int(extract.shape[0] / n_features))).T)
-        extracted_features = np.concatenate(all_values_scales, axis=1)
-
+            extract = a[0]
+            all_values_scales.append(extract)
+        extracted_features = np.concatenate(all_values_scales, axis=0)
         return extracted_features
     
     def predict_image(self, image, classifier, scalings=[1], order=0,

@@ -8,6 +8,8 @@ import skimage.morphology as morph
 import pandas as pd
 from joblib import Parallel, delayed
 import einops as ein
+#import xgboost as xgb
+
 
 from torch import nn
 from sklearn.model_selection import train_test_split
@@ -17,9 +19,13 @@ from torch.nn.functional import interpolate as torch_interpolate
 
 
 def get_device(use_cuda=None):
-    if torch.cuda.is_available() and (use_cuda is None or use_cuda==True):
+    if torch.cuda.is_available() and (use_cuda==True):
         device = torch.device('cuda:0')  # use first available GPU
+    elif torch.backends.mps.is_available() and (use_cuda==True): #check if mps is available
+        device = torch.device('mps')
     else:
+        if use_cuda:
+            warnings.warn('CUDA or MPS is not available. Using CPU')
         device = torch.device('cpu')
     return device
 
@@ -307,8 +313,14 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
 
             if use_dask:
                 processes.append(client.submit(
-                    model.predict_image, image_block, model, classifier,
-                    scalings, order, use_min_features, image_downsample))
+                    model.predict_image,
+                    image=image_block,
+                    classifier=classifier,
+                    scalings=scalings,
+                    order=order,
+                    use_min_features=use_min_features,
+                    image_downsample=image_downsample))
+                
                 
                 min_row_ind_collection.append(min_row_ind)
                 min_col_ind_collection.append(min_col_ind)
@@ -320,8 +332,14 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                 new_min_row_ind_collection.append(new_min_row_ind)
 
             else:
-                predicted_image = model.predict_image(image_block, model, classifier,
-                    scalings, order, use_min_features, image_downsample)
+                predicted_image = model.predict_image(
+                    image=image_block,
+                    classifier=classifier,
+                    scalings=scalings,
+                    order=order,
+                    use_min_features=use_min_features,
+                    image_downsample=image_downsample
+                )
                 crop_pred = predicted_image[
                     new_min_row_ind: new_max_row_ind,
                     new_min_col_ind: new_max_col_ind]
@@ -343,7 +361,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
 
 def get_features_current_layers(image, annotations, model=None, scalings=[1],
                                 order=0, use_min_features=True,
-                                image_downsample=1):
+                                image_downsample=1,tile_annotations=False):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     
@@ -411,8 +429,11 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
                 current_annot = np.pad(annotations[t], padding, mode='constant')
 
         annot_regions = skimage.morphology.label(current_annot > 0)
-        boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
 
+        if tile_annotations:
+            boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+        else:
+            boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
         for i in range(len(boxes['label'])):
             # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
             pad_size = model.get_padding()
@@ -435,21 +456,35 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
                 x_min:x_max,
                 y_min:y_max
             ]
-            extracted_features = model.get_features(
+            extracted_features = model.get_features_scaled(
                 image=im_crop,
-                annotations=annot_crop,
                 scalings=scalings,
-                order=order, use_min_features=use_min_features,
+                order=order,
+                use_min_features=use_min_features,
                 image_downsample=image_downsample)
+            
+            if image_downsample > 1:
+                annot_crop = annot_crop[::image_downsample, ::image_downsample]
+
+            #from the [features, w, h] make a list of [features] with len nb_annotations
+            mask = annot_crop > 0
+            nb_features = extracted_features.shape[0]
+
+            extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
+
+            extracted_features = extracted_features[mask]
             all_values.append(extracted_features)
 
-            all_targets.append(annot_crop[::image_downsample, ::image_downsample]
-                                [annot_crop[::image_downsample, ::image_downsample] > 0])
+            targets = annot_crop[annot_crop > 0]
+            targets = targets.flatten()
+            all_targets.append(targets)
         
 
     all_values = np.concatenate(all_values, axis=0)
     features = pd.DataFrame(all_values)
-    targets = pd.Series(np.concatenate(all_targets, axis=0))
+
+    all_targets = np.concatenate(all_targets, axis=0)
+    targets = pd.Series(all_targets)
 
     return features, targets
 
@@ -949,21 +984,11 @@ def get_features_all_samples_rich(model, images, annotations, scalings=[1],
 def train_classifier(features, targets):
     """Train a random forest classifier given a set of features and targets."""
 
-    # split train/test - not necessary, since we are training a random forest
-    # split_dataset = train_test_split(features, targets,
-    #                                  test_size=0.2,
-    #                                  random_state=42)
-    # features_train, features_test, labels_train, labels_test = split_dataset
-    # instead use all features for training
-    features_train, labels_train = features, targets
-
     # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=100)
-    #random_forest = RandomForestClassifier(n_estimators=100, n_jobs=8, max_depth=5)
-    #import xgboost as xgb
+    random_forest = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+    random_forest.fit(features, targets)
+    
     #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
-    #random_forest.fit(features_train, labels_train-1)
-
-    random_forest.fit(features_train, labels_train)
+    #random_forest.fit(features, targets-1)
 
     return random_forest
