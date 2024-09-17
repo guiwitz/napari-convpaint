@@ -11,7 +11,7 @@
 ![overview conv-paint](/images/overview_github.png)
 This napari plugin can be used to segment objects or structures in images based on a few brush strokes providing examples of the classes. Based on the same idea as other tools like ilastik, its main strength is that it can use features from pretrained neural networks like VGG16 or DINOV2, enabling the segmentation of more complex images.
 
-**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint](./paper/conv-paint.pdf).**
+**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint](https://doi.org/10.1101/2024.09.12.610926).**
 
 
 ![overview conv-paint](/images/network_github.png)
@@ -71,3 +71,17 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 ## Authors
 
 The idea behind this napari plugin was first developed by [Lucien Hinderling](https://hinderling.github.io) in the group of [Olivier Pertz](https://www.pertzlab.net/), at the Institute of Cell Biology, University of Bern. The code has first been shared as open source resource in form of a [Jupyter Notebook](https://github.com/hinderling/napari_pixel_classifier). With the desire to make this resource accessible to a broader public in the scientific community, the Pertz lab obtained a CZI napari plugin development grant with the title ["Democratizing Image Analysis with an Easy-to-Train Classifier"](https://chanzuckerberg.com/science/programs-resources/imaging/napari/democratizing-image-analysis-with-an-easy-to-train-classifier/) which supported the adaptation of the initial concept as a napari plugin called napari-convpaint. The plugin has been developed by [Guillaume Witz](https://guiwitz.github.io/blog/about/), Mykhailo Vladymyrov and Ana Stojiljkovic at the [Data Science Lab](https://www.dsl.unibe.ch/), University of Bern, in tight collaboration with the Pertz lab (Lucien Hinderling, [Roman Schwob](https://github.com/quasar1357), [Benjamin Gräedel](https://x.com/benigraedel), [Maciej Dobrzyński](https://macdobry.net)).
+
+## Cite Convpaint
+
+If you find Convpaint useful in your research, please consider citing:
+```
+@article {Hinderling2024.09.12.610926,
+	author = {Hinderling, Lucien and Witz, Guillaume and Schwob, Roman and Stojiljkovic, Ana and Dobrzynski, Maciej and Vladymyrov, Mykhailo and Frei, Joel and Graedel, Benjamin and Frismantiene, Agne and Pertz, Olivier},
+	title = {Convpaint - Universal framework for interactive pixel classification using pretrained neural networks},
+	year = {2024},
+	doi = {10.1101/2024.09.12.610926},
+	URL = {https://www.biorxiv.org/content/early/2024/09/14/2024.09.12.610926},
+	journal = {bioRxiv}
+}
+```
