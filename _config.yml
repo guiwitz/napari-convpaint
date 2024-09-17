@@ -1,6 +1,6 @@
 title: napari-convpaint
 author: Ana Stojiljkovic, Lucien Hinderling and Guillaume Witz 
-#logo: docs/images/napari-roidynamics_logo.png
+logo: images/logo.png
 
 execute:
   execute_notebooks: 'off'
