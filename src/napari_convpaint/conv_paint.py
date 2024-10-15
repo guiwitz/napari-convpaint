@@ -446,7 +446,6 @@ class ConvPaintWidget(QWidget):
         no layer is added if it didn't exist before, unless force_add=True (e.g. when the user click
         on the add layer button)"""
 
-        self.event = event
         if self.select_layer_widget.value is None:
             raise Exception('Please select an image layer first')
         
