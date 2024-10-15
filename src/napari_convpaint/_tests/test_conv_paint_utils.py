@@ -1,4 +1,4 @@
-from napari_convpaint import conv_paint_utils
+from napari_convpaint import conv_paint
 from napari_convpaint import conv_paint_nnlayers
 from napari_convpaint.convpaint_sample import create_annotation_cell3d
 from torch.nn.modules.container import Sequential
@@ -32,14 +32,14 @@ def test_filter_image():
     image = image[60:188, 0:128]
     labels = labels[60:188, 0:128]
 
-    features, targets = conv_paint_utils.get_features_current_layers(
+    features, targets = conv_paint.get_features_current_layers(
         model=model, image=image, annotations=labels, use_min_features=False,tile_annotations=True)
     assert len(features.shape) == 2, f'Expecting dataframe with 2 dims but got {len(features.shape)}'
     assert features.shape[0] == 218, f'Expecting 218 annotated pixels but got {features.shape[0]}'
     assert features.shape[1] == 320, f'Expecting 320 features but got {features.shape[1]}'
 
     #disable annotation tiling should lead to the same results
-    features, targets = conv_paint_utils.get_features_current_layers(
+    features, targets = conv_paint.get_features_current_layers(
     model=model, image=image, annotations=labels, use_min_features=False,tile_annotations=False)
     assert len(features.shape) == 2, f'Expecting dataframe with 2 dims but got {len(features.shape)}'
     assert features.shape[0] == 218, f'Expecting 218 annotated pixels but got {features.shape[0]}'

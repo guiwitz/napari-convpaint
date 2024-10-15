@@ -1,4 +1,4 @@
-from napari_convpaint.conv_paint import ConvPaintWidget
+from napari_convpaint.conv_paint_widget import ConvPaintWidget
 from napari_convpaint.utils import generate_synthetic_square, generate_synthetic_circle_annotation
 import numpy as np
 import os

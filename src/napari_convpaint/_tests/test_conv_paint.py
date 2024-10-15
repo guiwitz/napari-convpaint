@@ -1,4 +1,4 @@
-from napari_convpaint.conv_paint import ConvPaintWidget
+from napari_convpaint.conv_paint_widget import ConvPaintWidget
 from napari_convpaint.utils import generate_synthetic_square, generate_synthetic_circle_annotation
 import numpy as np
 import os
@@ -113,7 +113,7 @@ def test_save_model(make_napari_viewer, capsys):
     my_widget.predict()
 
     os.makedirs('_tests/model_dir', exist_ok=True)
-    my_widget.save_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
+    my_widget.on_save_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     assert os.path.exists('_tests/model_dir/test_model.pkl')  # Changed to .pkl
 
 
@@ -124,7 +124,7 @@ def test_load_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
+    my_widget.on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     my_widget.predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -168,7 +168,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.update_classifier()  # Update the classifier with the new parameters
     my_widget.predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
-    my_widget.save_model(save_file='_tests/model_dir/test_model_dino.pkl')
+    my_widget.on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
     assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
     assert os.path.exists('_tests/model_dir/test_model_dino.pkl')
 
@@ -184,7 +184,7 @@ def test_load_model_dino(make_napari_viewer, capsys):
     viewer.add_image(im)
 
     # Load the Dino model
-    my_widget.load_model(save_file='_tests/model_dir/test_model_dino.pkl')
+    my_widget.on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
     # Ensure the model type is set correctly after loading
     assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
     my_widget.predict()
@@ -220,7 +220,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.update_classifier()
     my_widget.predict()
     model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
-    my_widget.save_model(save_file=model_path_1)
+    my_widget.on_save_model(save_file=model_path_1)
     assert os.path.exists(model_path_1)
 
     # Create and save the second model with scales [1, 2, 3, 4]. Change in the UI:
@@ -235,18 +235,18 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.update_classifier()
     my_widget.predict()
     model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
-    my_widget.save_model(save_file=model_path_2)
+    my_widget.on_save_model(save_file=model_path_2)
     assert os.path.exists(model_path_2)
 
     # Load the second model and predict
-    my_widget.load_model(save_file=model_path_2)
+    my_widget.on_load_model(save_file=model_path_2)
     assert my_widget.param.scalings == [1, 2, 4, 8]
     my_widget.predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
 
     # Load the first model and predict
-    my_widget.load_model(save_file=model_path_1)
+    my_widget.on_load_model(save_file=model_path_1)
     assert my_widget.param.scalings == [1]
     my_widget.predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
@@ -322,12 +322,12 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
 
         #save the model
         model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
-        my_widget.save_model(save_file=model_path)
+        my_widget.on_save_model(save_file=model_path)
 
     #load the models again and check if the predictions are correct
     for indices_to_select in all_tests:
         model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
-        my_widget.load_model(save_file=model_path)
+        my_widget.on_load_model(save_file=model_path)
         assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
 
         my_widget.predict()
