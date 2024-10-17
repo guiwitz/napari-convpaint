@@ -22,6 +22,7 @@ class Param:
     multi_channel_training: bool = None
     use_cuda: bool = None
     tile_annotations: bool = False
+    padding : int = 0
 
 
 

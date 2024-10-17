@@ -88,6 +88,7 @@ class Hookmodel(FeatureExtractor):
         param = super().get_default_params()
         param.scalings = [1,2,4]
         param.tile_annotations = True
+        param.padding = self.get_max_kernel_size() // 2
         return param
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
@@ -224,7 +225,7 @@ class Hookmodel(FeatureExtractor):
 
         """
         
-        padding = self.get_padding() * np.max(param.scalings)
+        padding = param.padding * np.max(param.scalings)
         if image.ndim == 2:
             image = np.pad(image, ((padding, padding), (padding, padding)), mode='reflect')
         elif image.ndim == 3:
@@ -326,9 +327,7 @@ class Hookmodel(FeatureExtractor):
                         all_scales.append(out_np)
         return all_scales
     
-    def get_padding(self):
-        return self.get_max_kernel_size() // 2
-    
+
     def get_max_kernel_size(self):
         """
         Given a hookmodel, find the maximum kernel size needed for the deepest layer.

@@ -34,6 +34,7 @@ class DinoFeatures(FeatureExtractor):
         param.image_downsample = 1
         param.normalize = 1
         param.use_cuda = self.use_cuda
+        param.padding = self.padding
         return param
 
     def _preprocess_image(self, image):
@@ -114,8 +115,6 @@ class DinoFeatures(FeatureExtractor):
             features = np.concatenate(features, axis=-1)
         return features
 
-    def get_padding(self):
-        return self.padding
     
     def get_features_scaled(self, image, param, return_patches = False, **kwargs):
         """
@@ -225,7 +224,7 @@ class DinoFeatures(FeatureExtractor):
         3. Scale up the predictions'''
 
         #add padding
-        padding = self.get_padding()
+        padding = param.padding
         if image.ndim == 2:
             image = np.expand_dims(image, axis=0)
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')

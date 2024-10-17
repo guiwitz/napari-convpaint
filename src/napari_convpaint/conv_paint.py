@@ -133,7 +133,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
     all_targets = []
 
     # find maximal padding necessary
-    padding = model.get_padding() * np.max(param.scalings)
+    padding = param.padding * np.max(param.scalings)
 
     # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
@@ -160,7 +160,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
             boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
         for i in range(len(boxes['label'])):
             # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-            pad_size = model.get_padding()
+            pad_size = param.padding
             x_min = boxes['bbox-0'][i]-pad_size
             x_max = boxes['bbox-2'][i]+pad_size
             y_min = boxes['bbox-1'][i]-pad_size

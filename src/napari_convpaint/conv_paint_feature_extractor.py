@@ -6,7 +6,6 @@ from .conv_parameters import Param
 class FeatureExtractor:
     def __init__(self, model_name,**kwargs):
         self.model_name = model_name
-        padding = 0
 
     def get_features(self, image):
         """
@@ -33,17 +32,10 @@ class FeatureExtractor:
         param.multi_channel_training: bool = False
         param.use_cuda: bool = False
         param.tile_annotations: bool = False
+        param.padding : int = 0
 
         return param
 
-    def get_padding(self):
-        """
-        Gets the padding required for the feature extraction.
-
-        Returns:
-        - padding: The padding required for the feature extraction.
-        """
-        raise NotImplementedError("Subclasses must implement get_padding method.")
 
     def get_features_scaled(self, image, param, **kwargs):
         """
@@ -73,7 +65,7 @@ class FeatureExtractor:
         if param.image_downsample > 1:
             image = image[:, ::param.image_downsample, ::param.image_downsample]
 
-        padding = self.get_padding()
+        padding = param.padding
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
         features_all_scales = []
