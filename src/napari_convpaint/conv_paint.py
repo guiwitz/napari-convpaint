@@ -87,9 +87,7 @@ def train_classifier(features, targets):
     return random_forest
 
 
-def get_features_current_layers(image, annotations, model=None, scalings=[1],
-                                order=0, use_min_features=True,
-                                image_downsample=1,tile_annotations=False):
+def get_features_current_layers(image, annotations, model, param:Param):
     """Given a potentially multidimensional image and a set of annotations,
     extract multiscale features from multiple layers of a model.
     Parameters
@@ -135,7 +133,7 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
     all_targets = []
 
     # find maximal padding necessary
-    padding = model.get_padding() * np.max(scalings)
+    padding = model.get_padding() * np.max(param.scalings)
 
     # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
@@ -156,7 +154,7 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
 
         annot_regions = skimage.morphology.label(current_annot > 0)
 
-        if tile_annotations:
+        if param.tile_annotations:
             boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
         else:
             boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
@@ -182,15 +180,10 @@ def get_features_current_layers(image, annotations, model=None, scalings=[1],
                 x_min:x_max,
                 y_min:y_max
             ]
-            extracted_features = model.get_features_scaled(
-                image=im_crop,
-                scalings=scalings,
-                order=order,
-                use_min_features=use_min_features,
-                image_downsample=image_downsample)
+            extracted_features = model.get_features_scaled(image=im_crop,param=param)
 
-            if image_downsample > 1:
-                annot_crop = annot_crop[::image_downsample, ::image_downsample]
+            if param.image_downsample > 1:
+                annot_crop = annot_crop[::param.image_downsample, :: param.image_downsample]
 
             #from the [features, w, h] make a list of [features] with len nb_annotations
             mask = annot_crop > 0

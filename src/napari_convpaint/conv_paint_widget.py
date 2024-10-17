@@ -49,6 +49,7 @@ class ConvPaintWidget(QWidget):
         
         self.param = Param()
         self.model = None
+        self.temp_model = None
         self.random_forest = None
         self.project_widget = None
         self.features_per_layer = None
@@ -56,6 +57,7 @@ class ConvPaintWidget(QWidget):
         self.image_mean = None
         self.image_std = None
         self.third_party = third_party
+
 
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -208,10 +210,6 @@ class ConvPaintWidget(QWidget):
         self.create_model_btn.setToolTip('Create a new feature extraction model')
         self.tabs.add_named_tab('Model', self.create_model_btn, [1,0,1,2])
 
-        self.set_nnmodel_outputs_btn = QPushButton('Set model outputs')
-        self.set_nnmodel_outputs_btn.setToolTip('Select layers to use as feature extractors')
-        self.tabs.add_named_tab('Model', self.set_nnmodel_outputs_btn, [2,0,1,2])
-
         self.model_output_selection = QListWidget()
         self.model_output_selection.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tabs.add_named_tab('Model', self.model_output_selection, [3,0,1,2])
@@ -280,7 +278,6 @@ class ConvPaintWidget(QWidget):
 
         if not self.check_use_custom_model.isChecked():
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
-            self.set_default_model()
         else:
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
             self.qcombo_model_type.setCurrentText('single_layer_vgg16')
@@ -302,7 +299,6 @@ class ConvPaintWidget(QWidget):
         self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
 
         self.create_model_btn.clicked.connect(self._on_create_model)
-        self.set_nnmodel_outputs_btn.clicked.connect(self._on_click_define_model_outputs)
 
         self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
         self.radio_single_channel.toggled.connect(self.reset_radio_norm_settings)
@@ -313,6 +309,7 @@ class ConvPaintWidget(QWidget):
         self.radio_normalize_by_image.toggled.connect(self.reset_stats)
 
         self.qcombo_model_type.currentIndexChanged.connect(self.on_model_selected)
+        self.model_output_selection.itemSelectionChanged.connect(self._output_selection_changed)
 
 
 
@@ -479,15 +476,17 @@ class ConvPaintWidget(QWidget):
         self.model_output_selection.clear()
         self.model_output_selection.addItems(self.model.selectable_layer_keys.keys())
 
-    def _on_click_define_model_outputs(self, event=None):
-        """Using hooks setup model to give outputs at selected layers."""
-        
-        model_type = self.qcombo_model_type.currentText()
-        model_class = get_all_models()[model_type]
-        self.model = model_class(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
+    def _output_selection_changed(self):
+        #check if temp model is a hookmodel
+        if isinstance(self.temp_model, Hookmodel):
+            selected_layers = self.get_selected_layers_names()
+            if len(selected_layers) == 0:
+                self.create_model_btn.setEnabled(False)
+            else:
+                self.create_model_btn.setEnabled(True)
+        else:
+            self.create_model_btn.setEnabled(True)
 
-        selected_layers = self.get_selected_layers_names()
-        self.model.register_hooks(selected_layers=selected_layers)
 
     def get_selected_layers_names(self):
         """Get names of selected layers."""
@@ -508,27 +507,22 @@ class ConvPaintWidget(QWidget):
     def update_gui_from_model(self):
         """Update GUI based on the current model."""
         if self.model is None:
-            self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
             self.model_output_selection.clear()
         elif isinstance(self.model, Hookmodel):
             self._create_output_selection()
             if len(self.model.named_modules) == 1:
                 self.model_output_selection.setCurrentRow(0)
-                self.set_nnmodel_outputs_btn.setEnabled(False)
                 self.model_output_selection.setEnabled(False)
             else:
-                self.set_nnmodel_outputs_btn.setEnabled(True)
                 self.model_output_selection.setEnabled(True)
                 for layer in self.param.model_layers:
                     items = self.model_output_selection.findItems(layer, Qt.MatchExactly)
                     for item in items:
                         item.setSelected(True)
         else:
-            self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
             self.model_output_selection.clear()
-
 
     def update_params_from_gui(self):
         """Update parameters from GUI."""
@@ -550,7 +544,6 @@ class ConvPaintWidget(QWidget):
         self.spin_downsample.setValue(self.param.image_downsample)
         self.button_group_normalize.button(self.param.normalize).setChecked(True)
         self.check_use_cuda.setChecked(self.param.use_cuda)
-
 
     def set_default_model(self):#, keep_rgb=False):
         """Set default model."""
@@ -614,11 +607,7 @@ class ConvPaintWidget(QWidget):
                 image=image_stack,
                 annotations=self.select_annotation_layer_widget.value.data,
                 model=self.model,
-                scalings=self.param.scalings,
-                order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(),
-                image_downsample=self.spin_downsample.value(),
-                tile_annotations=self.check_tile_annotations.isChecked(),
+                param=self.param,
             )
             self.random_forest = train_classifier(features, targets)
             self.reset_predict_buttons_after_training()
@@ -776,18 +765,11 @@ class ConvPaintWidget(QWidget):
             if self.check_tile_image.isChecked():
                 predicted_image = parallel_predict_image(
                     image=image, model=self.model, classifier=self.random_forest,
-                    scalings=self.param.scalings,
-                    order=self.spin_interpolation_order.value(),
-                    use_min_features=self.check_use_min_features.isChecked(),
-                    image_downsample=self.spin_downsample.value(),
-                    use_dask=False)
+                    param = self.param, use_dask=False)
             else:
-                predicted_image = self.model.predict_image(
-                    image=image, classifier=self.random_forest, scalings=self.param.scalings,
-                    order=self.spin_interpolation_order.value(),
-                    use_min_features=self.check_use_min_features.isChecked(),
-                    image_downsample=self.spin_downsample.value(),
-                )
+                predicted_image = self.model.predict_image(image=image,
+                                                           classifier=self.random_forest,
+                                                           param=self.param,)
             if self.viewer.dims.ndim == 2:
                 self.viewer.layers['segmentation'].data = predicted_image
             elif (self.viewer.dims.ndim == 3) and (self.radio_multi_channel.isChecked()):
@@ -843,20 +825,15 @@ class ConvPaintWidget(QWidget):
                 raise Exception(f'Image stack has wrong dimensionality {image_stack.ndim}')
             
             if self.check_tile_image.isChecked():
-                predicted_image = parallel_predict_image(
-                image, self.model, self.random_forest, self.param.scalings,
-                order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(),
-                image_downsample=self.spin_downsample.value(),
-                use_dask=False
-            )
+                predicted_image = parallel_predict_image(image=image, 
+                                                         model=self.model,
+                                                         classifier=self.random_forest,
+                                                         param = self.param,
+                                                         use_dask=False)
             else:
-                predicted_image = self.model.predict_image(
-                image=image, classifier=self.random_forest, scalings=self.param.scalings,
-                order=self.spin_interpolation_order.value(),
-                use_min_features=self.check_use_min_features.isChecked(),
-                image_downsample=self.spin_downsample.value()
-            )
+                predicted_image = self.model.predict_image(image=image,
+                                                           classifier=self.random_forest,
+                                                           param=self.param)
             self.viewer.layers['segmentation'].data[step] = predicted_image
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -949,24 +926,24 @@ class ConvPaintWidget(QWidget):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         model_type = self.qcombo_model_type.currentText()
         model_class = get_all_models()[model_type]
-        temp_model = model_class(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
+        self.temp_model = model_class(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
         
-        if isinstance(temp_model, Hookmodel):
-            self._create_output_selection_for_temp_model(temp_model)
-            self.set_nnmodel_outputs_btn.setEnabled(True)
+        if isinstance(self.temp_model, Hookmodel):
+            self._create_output_selection_for_temp_model(self.temp_model)
             self.model_output_selection.setEnabled(True)
+
+            #check if outputs are selected
+            if self.model_output_selection.count() > 0:
+                self.create_model_btn.setEnabled(False)
         else:
             self.model_output_selection.clear()
-            self.set_nnmodel_outputs_btn.setEnabled(False)
             self.model_output_selection.setEnabled(False)
+            self.create_model_btn.setEnabled(True)
 
-        #if model is DINOv2, set some recommended settings
-        if model_type == 'dinov2_vits14_reg':
-            self.spin_interpolation_order.setValue(0)
-            self.check_use_min_features.setChecked(False)
-            self.check_tile_annotations.setChecked(False)
-            self.check_tile_image.setChecked(False)
-            self.num_scales_combo.setCurrentText('[1]')
+
+        # get the default params for the model
+        self.param = self.temp_model.get_default_params()
+        self.update_gui_from_params()
 
 
     def _create_output_selection_for_temp_model(self, temp_model):

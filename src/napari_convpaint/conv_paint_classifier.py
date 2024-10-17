@@ -70,14 +70,7 @@ class Classifier():
             
         self.model = Hookmodel(model_name='single_layer_vgg16')
         self.random_forest = None
-        self.param = Param(
-            model_name='single_layer_vgg16',
-            model_layers=list(self.model.module_dict.keys()),
-            scalings=[1,2],
-            order=1,
-            use_min_features=False,
-            normalize=True,
-        )
+        self.param = self.model.get_default_params()
 
     def save_classifier(self, save_path):
         """Save the classifier to a joblib file and the parameters to a yaml file.

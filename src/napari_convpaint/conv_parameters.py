@@ -21,6 +21,7 @@ class Param:
     normalize: int = None
     multi_channel_training: bool = None
     use_cuda: bool = None
+    tile_annotations: bool = False
 
 
 

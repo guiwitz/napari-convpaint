@@ -314,7 +314,6 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
             if item:  # Check if the item exists at that index
                 item.setSelected(True)
 
-        my_widget.set_nnmodel_outputs_btn.click()
         my_widget.update_params_from_gui()
         my_widget.create_model_btn.click()
         my_widget.update_classifier()

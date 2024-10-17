@@ -109,8 +109,7 @@ def compute_image_stats(image, ignore_n_first_dims=None):
 
 
 
-def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True, image_downsample=1, use_dask=False):
+def parallel_predict_image(image, model, classifier, param, use_dask=False):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -202,10 +201,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                     model.predict_image,
                     image=image_block,
                     classifier=classifier,
-                    scalings=scalings,
-                    order=order,
-                    use_min_features=use_min_features,
-                    image_downsample=image_downsample))
+                    param=param))
                 
                 
                 min_row_ind_collection.append(min_row_ind)
@@ -221,10 +217,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                 predicted_image = model.predict_image(
                     image=image_block,
                     classifier=classifier,
-                    scalings=scalings,
-                    order=order,
-                    use_min_features=use_min_features,
-                    image_downsample=image_downsample
+                    param=param
                 )
                 crop_pred = predicted_image[
                     new_min_row_ind: new_max_row_ind,

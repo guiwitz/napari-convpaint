@@ -9,6 +9,7 @@ from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
 from .conv_paint_utils import get_device
 from .conv_paint_feature_extractor import FeatureExtractor
+from .conv_parameters import Param
 
 
 AVAILABLE_MODELS = ['vgg16', 'efficient_netb0', 'single_layer_vgg16']
@@ -46,9 +47,6 @@ class Hookmodel(FeatureExtractor):
             assert model_name is None, 'model_name must be None if model is not None'
             self.model = model
         else:
-            if param is not None:
-                model_name = param.model_name
-
             if model_name == 'vgg16':
                 self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
                 # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
@@ -60,10 +58,9 @@ class Hookmodel(FeatureExtractor):
                 self.model = self.load_single_layer_vgg16(keep_rgb=True)
             elif model_name == 'dino_vits16':
                 self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
-
+        self.model_name = model_name
         self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
-    
         self.outputs = []
         self.features_per_layer = []
         self.selected_layers = []
@@ -86,6 +83,12 @@ class Hookmodel(FeatureExtractor):
     def hook_last(self, module, input, output):
         self.outputs.append(output)
         assert False
+
+    def get_default_params(self):
+        param = super().get_default_params()
+        param.scalings = [1,2,4]
+        param.tile_annotations = True
+        return param
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
 
@@ -148,8 +151,7 @@ class Hookmodel(FeatureExtractor):
 
         return model
 
-    def get_features_scaled(self, image, scalings=[1], order=0,
-                     use_min_features=True, image_downsample=1):
+    def get_features_scaled(self, image, param:Param):
         """Given an image and a set of annotations, extract multiscale features
         
         Parameters
@@ -175,18 +177,16 @@ class Hookmodel(FeatureExtractor):
             Extracted features. Dimensions (nfeatures * nbscales) x W x H 
         """
 
-        if use_min_features:
+        if param.use_min_features:
             max_features = np.min(self.features_per_layer)
         else:
             max_features = np.max(self.features_per_layer)
         # test with minimal number of features i.e. taking only n first features
-        rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
+        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
+        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
 
-        all_scales = self.filter_image_multichannels(
-            image, scalings, order=order,
-            image_downsample=image_downsample)
-        if use_min_features:
+        all_scales = self.filter_image_multichannels(image, param)
+        if param.use_min_features:
             all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         all_values_scales = []
 
@@ -197,9 +197,7 @@ class Hookmodel(FeatureExtractor):
         extracted_features = np.concatenate(all_values_scales, axis=0)
         return extracted_features
     
-    def predict_image(self, image, classifier, scalings=[1], order=0,
-                  use_min_features=True, image_downsample=1,
-                  ):
+    def predict_image(self, image, classifier, param:Param):
         """
         Given a filter model and a classifier, predict the class of 
         each pixel in an image.
@@ -226,37 +224,33 @@ class Hookmodel(FeatureExtractor):
 
         """
         
-        padding = self.get_padding() * np.max(scalings)
+        padding = self.get_padding() * np.max(param.scalings)
         if image.ndim == 2:
             image = np.pad(image, ((padding, padding), (padding, padding)), mode='reflect')
         elif image.ndim == 3:
             image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
-        if use_min_features:
+        if param.use_min_features:
             max_features = np.min(self.features_per_layer)
-            all_scales = self.filter_image_multichannels(
-                image, scalings=scalings, order=order,
-                image_downsample=image_downsample)
+            all_scales = self.filter_image_multichannels(image, param)
             all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
             tot_filters = max_features * len(all_scales)
 
         else:
             # max_features = np.max(model.features_per_layer)
-            all_scales = self.filter_image_multichannels(
-                image, scalings=scalings, order=order,
-                image_downsample=image_downsample)
+            all_scales = self.filter_image_multichannels(image, param)
             tot_filters = np.sum(a.shape[1] for a in all_scales)
         
         tot_filters = int(tot_filters)
-        rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
+        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
+        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
         all_pixels = pd.DataFrame(
             np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, rows * cols)).T)
 
         predictions = classifier.predict(all_pixels)
 
         predicted_image = np.reshape(predictions, [rows, cols])
-        if image_downsample > 1:
+        if param.image_downsample > 1:
             predicted_image = skimage.transform.resize(
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
@@ -268,8 +262,7 @@ class Hookmodel(FeatureExtractor):
         return predicted_image
 
 
-    def filter_image_multichannels(self, image, scalings=[1], order=0,
-                                image_downsample=1):
+    def filter_image_multichannels(self, image, param):
         """Recover the outputs of chosen layers of a pytorch model. Layers and model are
         specified in the hookmodel object. If image has multiple channels, each channel
         is processed separately.
@@ -297,20 +290,20 @@ class Hookmodel(FeatureExtractor):
         image = np.asarray(image, dtype=np.float32)
         
         if image.ndim == 2:
-            image = image[::image_downsample, ::image_downsample]
+            image = image[::param.image_downsample, ::param.image_downsample]
             image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
             image_series = [image]
         elif image.ndim == 3:
-            image = image[:, ::image_downsample, ::image_downsample]
+            image = image[:, ::param.image_downsample, ::param.image_downsample]
             image_series = [np.ones((input_channels, im.shape[0], im.shape[1]), dtype=np.float32) * im for im in image]
 
-        int_mode = 'bilinear' if order > 0 else 'nearest'
-        align_corners = False if order > 0 else None
+        int_mode = 'bilinear' if param.order > 0 else 'nearest'
+        align_corners = False if param.order > 0 else None
 
         all_scales = []
         with torch.no_grad():
             for image in image_series:
-                for s in scalings:
+                for s in param.scalings:
                     im_tot = image[:, ::s, ::s]
                     im_torch = torch.tensor(im_tot[np.newaxis, ::])
                     self.outputs = []
