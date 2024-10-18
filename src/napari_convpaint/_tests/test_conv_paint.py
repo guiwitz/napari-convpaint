@@ -214,7 +214,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.check_use_custom_model.setChecked(True)
     my_widget.qcombo_model_type.setCurrentText('single_layer_vgg16')
     my_widget.num_scales_combo.setCurrentText('[1]')
-    my_widget.update_params_from_gui()
+    my_widget.create_model_btn.setEnabled(True)
     my_widget.create_model_btn.click()
     assert my_widget.param.scalings == [1]
     my_widget.update_classifier()
@@ -225,11 +225,9 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
 
     # Create and save the second model with scales [1, 2, 3, 4]. Change in the UI:
     my_widget.num_scales_combo.setCurrentText('[1,2,4,8]')
-    my_widget.update_params_from_gui()
     my_widget.create_model_btn.click()
     assert my_widget.param.scalings == [1, 2, 4, 8]
 
-    my_widget.update_params_from_gui()
     my_widget.create_model_btn.click()
     assert my_widget.param.scalings == [1, 2, 4, 8]
     my_widget.update_classifier()
@@ -301,22 +299,24 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
 
     # Create and save the custom VGG16 model with selected layers
     my_widget.check_use_custom_model.setChecked(True)
+
     my_widget.qcombo_model_type.setCurrentText('vgg16')
     #select items from widget.model_output_selection = QListWidget()
 
-
     # Assuming 'self.model_output_selection' is your QListWidget instance
-    all_tests = [[8]]
+    all_tests = [[0],[1,2],[0,7]]
     for indices_to_select in all_tests:
         # Iterate over the list of indices and select the corresponding items
+        my_widget.model_output_selection.clearSelection()
         for index in indices_to_select:
             item = my_widget.model_output_selection.item(index)
             if item:  # Check if the item exists at that index
                 item.setSelected(True)
 
-        my_widget.update_params_from_gui()
+        my_widget.create_model_btn.setEnabled(True)
         my_widget.create_model_btn.click()
         my_widget.update_classifier()
+
         assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
 
         #save the model

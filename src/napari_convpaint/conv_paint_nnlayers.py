@@ -63,15 +63,20 @@ class Hookmodel(FeatureExtractor):
         self.model = self.model.to(self.device)
         self.outputs = []
         self.features_per_layer = []
-        self.selected_layers = []
         self.selectable_layer_keys = []
+        self.selected_layers = []
+
+        if param is not None and param.model_layers is not None:
+            self.selected_layers = param.model_layers
 
         self.get_layer_dict()
         if model_name == 'single_layer_vgg16':
             self.register_hooks(list(self.module_dict.keys()))
+            self.selected_layers = [list(self.module_dict.keys())[0]]
 
         if (param is not None) and (model_name != 'single_layer_vgg16'):
             self.register_hooks(param.model_layers)
+            self.selected_layers = param.model_layers
 
     def __call__(self, tensor_image):
         tensor_image_dev = tensor_image.to(self.device)
@@ -224,12 +229,6 @@ class Hookmodel(FeatureExtractor):
             predicted image with classes
 
         """
-        
-        padding = param.padding * np.max(param.scalings)
-        if image.ndim == 2:
-            image = np.pad(image, ((padding, padding), (padding, padding)), mode='reflect')
-        elif image.ndim == 3:
-            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
         if param.use_min_features:
             max_features = np.min(self.features_per_layer)
@@ -241,6 +240,8 @@ class Hookmodel(FeatureExtractor):
             # max_features = np.max(model.features_per_layer)
             all_scales = self.filter_image_multichannels(image, param)
             tot_filters = sum(a.shape[1] for a in all_scales)
+            #tot_filters = np.sum(a.shape[1] for a in all_scales)
+
         
         tot_filters = int(tot_filters)
         rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
@@ -256,9 +257,6 @@ class Hookmodel(FeatureExtractor):
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
                 preserve_range=True, order=1).astype(np.uint8)
-            
-        predicted_image = predicted_image[padding:-padding, padding:-padding]
-        
 
         return predicted_image
 
@@ -289,6 +287,8 @@ class Hookmodel(FeatureExtractor):
         """
         input_channels = self.named_modules[0][1].in_channels
         image = np.asarray(image, dtype=np.float32)
+
+        padding = self.get_max_kernel_size() // 2
         
         if image.ndim == 2:
             image = image[::param.image_downsample, ::param.image_downsample]
@@ -304,6 +304,10 @@ class Hookmodel(FeatureExtractor):
         all_scales = []
         with torch.no_grad():
             for image in image_series:
+                
+                if padding > 0:
+                    image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+
                 for s in param.scalings:
                     im_tot = image[:, ::s, ::s]
                     im_torch = torch.tensor(im_tot[np.newaxis, ::])
@@ -324,6 +328,8 @@ class Hookmodel(FeatureExtractor):
                                 preserve_range=True, order=order)'''
 
                         out_np = im.cpu().detach().numpy()
+                        if padding > 0:
+                            out_np = out_np[:, :, padding:-padding, padding:-padding]
                         all_scales.append(out_np)
         return all_scales
     
