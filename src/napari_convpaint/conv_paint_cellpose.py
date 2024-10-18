@@ -97,12 +97,3 @@ class CellposeFeatures(FeatureExtractor):
         out_t = np.concatenate(out_t,axis=0)
         return out_t
         
-    def get_padding(self):
-        """
-        Gets the padding required for the feature extraction.
-
-        Returns:
-        - padding: The padding required for the feature extraction.
-        """
-        #TODO
-        return 0
