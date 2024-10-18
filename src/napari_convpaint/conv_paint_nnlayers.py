@@ -343,6 +343,11 @@ class Hookmodel(FeatureExtractor):
         # Initialize variables
         max_kernel_size = 1
         current_total_pool = 1
+
+        if len(self.selected_layers) == 0:
+            # no layers selected yet
+            return 0
+        
         # Find out which is the deepest layer
         latest_layer = self.module_dict[self.selected_layers[-1]]
         # Iterate over all layers to find the maximum kernel size
