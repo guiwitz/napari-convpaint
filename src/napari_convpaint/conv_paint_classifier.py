@@ -126,10 +126,7 @@ class Classifier():
             im_out[i] = self.model.predict_image(
                 image=image[i],
                 classifier=self.random_forest,
-                scalings=self.param.scalings,
-                order=self.param.order,
-                use_min_features=self.param.use_min_features,
-                image_downsample=self.param.image_downsample)
+                param=self.param)
 
         if save_path is None:
             if single_image:
