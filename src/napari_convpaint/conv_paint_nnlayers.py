@@ -240,7 +240,7 @@ class Hookmodel(FeatureExtractor):
         else:
             # max_features = np.max(model.features_per_layer)
             all_scales = self.filter_image_multichannels(image, param)
-            tot_filters = np.sum(a.shape[1] for a in all_scales)
+            tot_filters = sum(a.shape[1] for a in all_scales)
         
         tot_filters = int(tot_filters)
         rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
