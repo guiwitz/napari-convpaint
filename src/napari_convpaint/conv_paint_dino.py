@@ -249,7 +249,7 @@ class DinoFeatures(FeatureExtractor):
             output_shape=(image.shape[-2], image.shape[-1]),
             preserve_range=True, order=param.order).astype(np.uint8)
         
-        #remove padding
-        predicted_image = predicted_image[padding:-padding, padding:-padding]
+        if padding > 0:
+            predicted_image = predicted_image[padding:-padding, padding:-padding]
         
         return predicted_image
