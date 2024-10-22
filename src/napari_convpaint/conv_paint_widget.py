@@ -665,11 +665,7 @@ class ConvPaintWidget(QWidget):
                     model=self.model,
                     image=image_stack,
                     annotations=self.select_annotation_layer_widget.value.data,
-                    scalings=self.param.scalings,
-                    order=self.spin_interpolation_order.value(),
-                    use_min_features=self.check_use_min_features.isChecked(),
-                    image_downsample=self.spin_downsample.value(),
-                    tile_annotations=self.check_tile_annotations.isChecked(),
+                    param=self.param,
                 )
                 if features is None:
                     continue
