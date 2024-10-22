@@ -42,6 +42,8 @@ class ConvPaintWidget(QWidget):
         if True, widget is used as third party and will not add layers to the viewer
         by default.
     """
+
+### Define the basic structure of the widget
     
     def __init__(self, napari_viewer, parent=None, project=False, third_party=False):
         super().__init__(parent=parent)
@@ -89,13 +91,13 @@ class ConvPaintWidget(QWidget):
         # data layer (widget for selecting the layer to segment)
         self.select_layer_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
         self.select_layer_widget.reset_choices()
-        # Reset choices when layers are added or removed
+        # Reset choices when napari layers are added or removed
         self.viewer.layers.events.inserted.connect(self.select_layer_widget.reset_choices)
         self.viewer.layers.events.removed.connect(self.select_layer_widget.reset_choices)
         # annotation layer
         self.select_annotation_layer_widget = create_widget(annotation=napari.layers.Labels, label='Pick annotation')
         self.select_annotation_layer_widget.reset_choices()
-        # Reset choices when layers are added or removed
+        # Reset choices when napari layers are added or removed
         self.viewer.layers.events.inserted.connect(self.select_annotation_layer_widget.reset_choices)
         self.viewer.layers.events.removed.connect(self.select_annotation_layer_widget.reset_choices)
         # Add widgets to layout
@@ -109,29 +111,29 @@ class ConvPaintWidget(QWidget):
         self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
 
         # Add buttons for "Train" group
-        self.update_model_btn = QPushButton('Train')
-        self.update_model_btn.setToolTip('Train model on annotations')
-        self.train_group.glayout.addWidget(self.update_model_btn, 0,0,1,1)
+        self.train_classif_btn = QPushButton('Train')
+        self.train_classif_btn.setToolTip('Train model on annotations')
+        self.train_group.glayout.addWidget(self.train_classif_btn, 0,0,1,1)
         self.check_use_project = QCheckBox('Use multiple files')
         self.check_use_project.setToolTip('Activate Files Tab to use multiple files to train the model')
         self.check_use_project.setChecked(False)
         self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
         # Multiple Image button
-        self.update_model_on_project_btn = QPushButton('Train on multiple images')
-        self.update_model_on_project_btn.setToolTip('Train on all images in project select in Files Tab')
-        self.train_group.glayout.addWidget(self.update_model_on_project_btn, 1,1,1,1)
+        self.train_classif_on_project_btn = QPushButton('Train on multiple images')
+        self.train_classif_on_project_btn.setToolTip('Train on all images in project select in Files Tab')
+        self.train_group.glayout.addWidget(self.train_classif_on_project_btn, 1,1,1,1)
         if project is False:
-            self.update_model_on_project_btn.setEnabled(False)
+            self.train_classif_on_project_btn.setEnabled(False)
 
         # Add buttons for "Segment" group
-        self.prediction_btn = QPushButton('Segment image')
-        self.prediction_btn.setEnabled(False)
-        self.prediction_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
-        self.predict_group.glayout.addWidget(self.prediction_btn, 0,0,1,1)
-        self.prediction_all_btn = QPushButton('Segment stack')
-        self.prediction_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
-        self.prediction_all_btn.setEnabled(False)
-        self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
+        self.predict_btn = QPushButton('Segment image')
+        self.predict_btn.setEnabled(False)
+        self.predict_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
+        self.predict_group.glayout.addWidget(self.predict_btn, 0,0,1,1)
+        self.predict_all_btn = QPushButton('Segment stack')
+        self.predict_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
+        self.predict_all_btn.setEnabled(False)
+        self.predict_group.glayout.addWidget(self.predict_all_btn, 0,1,1,1)
         
         # Add radio buttons for "Data dimensions"
         self.button_group_channels = QButtonGroup()
@@ -255,77 +257,57 @@ class ConvPaintWidget(QWidget):
         if project is True:
             self._add_project()
 
-        # Add connections
+        # Add connections and initialize by selecting layer
         self.add_connections()
         self.select_layer()
 
         # Add key bindings
-        self.viewer.bind_key('a', self.hide_annotation, overwrite=True)
-        self.viewer.bind_key('r', self.hide_prediction, overwrite=True)
-
-    def _add_project(self, event=None):
-        """Add widget for multi-image project management"""
-
-        if self.check_use_project.isChecked():
-            if self.project_widget is None:
-                from napari_annotation_project.project_widget import ProjectWidget
-                self.project_widget = ProjectWidget(napari_viewer=self.viewer)
-
-                #self.tabs.add_named_tab('Files', self.project_widget)
-                self.tabs.add_named_tab('Files', self.project_widget.file_list)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_remove_file)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_add_file)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_save_annotation)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_load_project)
-            
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), True)
-            self.update_model_on_project_btn.setEnabled(True)
-        else:
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
-            self.update_model_on_project_btn.setEnabled(False)
-
-    def _set_custom_model(self, event=None):
-        """Add widget for custom model management"""
-
-        if not self.check_use_custom_model.isChecked():
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
-            # self.qcombo_model_type.setCurrentText('single_layer_vgg16')
-            self.set_default_model()
-        else:
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
+        self.viewer.bind_key('a', self.toggle_annotation, overwrite=True)
+        self.viewer.bind_key('r', self.toggle_prediction, overwrite=True)
 
     def add_connections(self):
         
+        # Layer selection
         self.select_layer_widget.changed.connect(self.select_layer)
-        self.num_scales_combo.currentIndexChanged.connect(self.update_scalings_from_gui)
+        # NOTE: Changing annotation layer does not trigger anything
+        self.add_layers_btn.clicked.connect(self.add_empty_layers)
 
-        self.add_layers_btn.clicked.connect(self.add_annotation_layer)
-        self.update_model_btn.clicked.connect(self.update_classifier)
-        self.update_model_on_project_btn.clicked.connect(self.update_classifier_on_project)
-        self.prediction_btn.clicked.connect(self.predict)
-        self.prediction_all_btn.clicked.connect(self.predict_all)
+        # Train
+        self.train_classif_btn.clicked.connect(self.train_classif)
+        self.check_use_project.stateChanged.connect(self._add_project)
+        self.train_classif_on_project_btn.clicked.connect(self.train_classif_on_project)
+
+        # Predict
+        self.predict_btn.clicked.connect(self.predict)
+        self.predict_all_btn.clicked.connect(self.predict_all)
+
+        # Data dimensions
+        self.radio_single_channel.toggled.connect(self.reset_radio_norm_settings)
+        self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
+        self.radio_rgb.toggled.connect(self.reset_radio_norm_settings)
+
+        # Load/Save
         self.save_model_btn.clicked.connect(self.on_save_model)
         self.load_model_btn.clicked.connect(self.on_load_model)
         self.reset_model_btn.clicked.connect(self.reset_model)
-        self.check_use_project.stateChanged.connect(self._add_project)
+
+        # Options
         self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
-
-        self.create_model_btn.clicked.connect(self._on_create_model)
-
-        self.radio_multi_channel.toggled.connect(self.reset_radio_norm_settings)
-        self.radio_single_channel.toggled.connect(self.reset_radio_norm_settings)
-        self.radio_rgb.toggled.connect(self.reset_radio_norm_settings)
-
+        # R: Tiling and downsampling does not seem to trigger anything
         self.radio_no_normalize.toggled.connect(self.reset_stats)
         self.radio_normalized_over_stack.toggled.connect(self.reset_stats)
         self.radio_normalize_by_image.toggled.connect(self.reset_stats)
 
+        # Model
         self.qcombo_model_type.currentIndexChanged.connect(self.on_model_selected)
+        self.create_model_btn.clicked.connect(self._on_create_model)
         self.model_output_selection.itemSelectionChanged.connect(self._output_selection_changed)
+        self.num_scales_combo.currentIndexChanged.connect(self.update_scalings_from_gui)
+        # R: "Use min features" and "Use cuda" do not seem to trigger anything
 
+    # Visibility toggles for key bindings
 
-    # R: Shouldn't these be better called "toggle_annotation" and "toggle_prediction"?
-    def hide_annotation(self, event=None):
+    def toggle_annotation(self, event=None):
         """Hide annotation layer."""
 
         if self.viewer.layers['annotations'].visible == False:
@@ -333,7 +315,7 @@ class ConvPaintWidget(QWidget):
         else:
             self.viewer.layers['annotations'].visible = False
 
-    def hide_prediction(self, event=None):
+    def toggle_prediction(self, event=None):
         """Hide prediction layer."""
 
         if self.viewer.layers['segmentation'].visible == False:
@@ -341,8 +323,12 @@ class ConvPaintWidget(QWidget):
         else:
             self.viewer.layers['segmentation'].visible = False
 
+### Define the detailed behaviour of the widget
+
+    # Layer selection
+
     def select_layer(self, newtext=None):
-        
+        """Assign the layer to segment and update data radio buttons accordingly"""
         self.selected_channel = self.select_layer_widget.native.currentText()
         if self.select_layer_widget.value is None:
             self.add_layers_btn.setEnabled(False)
@@ -373,69 +359,14 @@ class ConvPaintWidget(QWidget):
             self.reset_radio_norm_settings()
             self.reset_predict_buttons()
 
-    def reset_stats(self):
-        self.image_mean, self.image_std = None, None
-
-    def reset_radio_norm_settings(self, event=None):
-        
-        self.image_mean, self.image_std = None, None
-        self.add_annotation_layer(force_add=False)
-
-        if self.select_layer_widget.value.ndim == 2:
-            self.radio_normalize_by_image.setEnabled(True)
-            self.radio_normalize_by_image.setChecked(True)
-            self.radio_normalized_over_stack.setEnabled(False)
-        elif (self.select_layer_widget.value.ndim == 3) and (self.radio_multi_channel.isChecked()):
-            self.radio_normalize_by_image.setEnabled(True)
-            self.radio_normalize_by_image.setChecked(True)
-            self.radio_normalized_over_stack.setEnabled(False)
-        else:
-            self.radio_normalize_by_image.setEnabled(True)
-            self.radio_normalized_over_stack.setEnabled(True)
-            self.radio_normalized_over_stack.setChecked(True)
-
-            
-    def get_image_stats(self):
-        # put channels in format (C)(T,Z)YX
-        data = self.get_data_channel_first()
-
-        if self.radio_normalized_over_stack.isChecked():
-            if self.radio_multi_channel.isChecked() | self.radio_rgb.isChecked():
-                self.image_mean, self.image_std = compute_image_stats(
-                    image=data,
-                    ignore_n_first_dims=1)
-            else:
-                self.image_mean, self.image_std = compute_image_stats(
-                    image=data,
-                    ignore_n_first_dims=None)
-        elif self.radio_normalize_by_image.isChecked():
-            # also takes into account CXY case (2D multi-channel image) as first dim is dropped
-            self.image_mean, self.image_std = compute_image_stats(
-                image=data,
-                ignore_n_first_dims=data.ndim-2)
-
-    def reset_model(self, event=None):
-        self.model = None
-        self.random_forest = None
-        self.prediction_btn.setEnabled(False)
-        self.prediction_all_btn.setEnabled(False)
-        self.save_model_btn.setEnabled(False)
-        self.current_model_path.setText('None')
-
-
-        if self.select_layer_widget.value is None:
-            # [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]] # R: Why create a list?
-            for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]: x.setEnabled(False)
-        else:
-            self.select_layer()
-        
-    def add_annotation_layer(self, event=None, force_add=True):
+    # R: Check this in detail
+    def add_empty_layers(self, event=None, force_add=True):
         """Add annotation and prediction layers to viewer. If the layer already exists,
         remove it and add a new one. If the widget is used as third party (self.third_party=True),
         no layer is added if it didn't exist before, unless force_add=True (e.g. when the user click
         on the add layer button)"""
 
-        self.event = event
+        self.event = event # R: Why is this needed?
         if self.select_layer_widget.value is None:
             raise Exception('Please select an image layer first')
         
@@ -472,129 +403,9 @@ class ConvPaintWidget(QWidget):
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.select_annotation_layer_widget.value = self.viewer.layers['annotations']
 
-    def update_scalings_from_gui(self):
-        self.param.scalings = self.num_scales_combo.currentData()
+    # Train
 
-    def update_scalings_from_param(self):
-        index = self.num_scales_combo.findData(self.param.scalings)
-        if index != -1:
-            self.num_scales_combo.setCurrentIndex(index)
-        else:
-            self.num_scales_combo.addItem(str(self.param.scalings), self.param.scalings)
-            self.num_scales_combo.setCurrentIndex(self.num_scales_combo.count()-1)
-
-    def _create_output_selection(self):
-        """Update list of selectable layers"""
-
-        self.model_output_selection.clear()
-        self.model_output_selection.addItems(self.model.selectable_layer_keys.keys())
-
-    def _output_selection_changed(self):
-        #check if temp model is a hookmodel
-        if isinstance(self.temp_model, Hookmodel):
-            selected_layers = self.get_selected_layers_names()
-            if len(selected_layers) == 0:
-                self.create_model_btn.setEnabled(False)
-            else:
-                self.create_model_btn.setEnabled(True)
-        else:
-            self.create_model_btn.setEnabled(True)
-
-
-    def get_selected_layers_names(self):
-        """Get names of selected layers."""
-
-        selected_rows = self.model_output_selection.selectedItems()
-        selected_layers = [x.text() for x in selected_rows]
-        return selected_layers
-                                  
-
-    def _on_create_model(self, event=None):
-        """Create a neural network model that will be used for feature extraction."""
-        self.update_params_from_gui()
-        self.model = create_model(self.param)
-        self.update_gui_from_model()
-        self.current_model_path.setText('Unsaved')
-
-
-    def update_gui_from_model(self):
-        """Update GUI based on the current model."""
-        if self.model is None:
-            self.model_output_selection.setEnabled(False)
-            self.model_output_selection.clear()
-        elif isinstance(self.model, Hookmodel):
-            self._create_output_selection()
-            if len(self.model.named_modules) == 1:
-                self.model_output_selection.setCurrentRow(0)
-                self.model_output_selection.setEnabled(False)
-            else:
-                self.model_output_selection.setEnabled(True)
-                for layer in self.param.model_layers:
-                    items = self.model_output_selection.findItems(layer, Qt.MatchExactly)
-                    for item in items:
-                        item.setSelected(True)
-        else:
-            self.model_output_selection.setEnabled(False)
-            self.model_output_selection.clear()
-
-    def update_params_from_gui(self):
-        """Update parameters from GUI."""
-        self.update_scalings_from_gui()
-        self.param.model_name = self.qcombo_model_type.currentText()
-        self.param.model_layers = self.get_selected_layers_names()
-        self.param.order = self.spin_interpolation_order.value()
-        self.param.use_min_features = self.check_use_min_features.isChecked()
-        self.param.image_downsample = self.spin_downsample.value()
-        self.param.normalize = self.button_group_normalize.checkedId()
-        self.param.use_cuda = self.check_use_cuda.isChecked()
-
-    def update_gui_from_params(self):
-        """Update GUI from parameters."""
-        self.update_scalings_from_param()
-        self.qcombo_model_type.setCurrentText(self.param.model_name)
-        self.spin_interpolation_order.setValue(self.param.order)
-        self.check_use_min_features.setChecked(self.param.use_min_features)
-        self.spin_downsample.setValue(self.param.image_downsample)
-        self.button_group_normalize.button(self.param.normalize).setChecked(True)
-        self.check_use_cuda.setChecked(self.param.use_cuda)
-
-    def set_default_model(self):#, keep_rgb=False):
-        """Set default model."""
-        '''if keep_rgb:
-            self.qcombo_model_type.setCurrentText('single_layer_vgg16_rgb')
-        else:
-            self.qcombo_model_type.setCurrentText('single_layer_vgg16')'''
-        self.qcombo_model_type.setCurrentText('single_layer_vgg16')
-        self.num_scales_combo.setCurrentText('[1,2]')
-        self.spin_interpolation_order.setValue(1)
-        self.check_use_min_features.setChecked(True)
-        self._on_create_model()
-
-    def get_data_channel_first(self):
-        """Get data from selected channel. If RGB, move channel axis to first position."""
-            
-        image_stack = self.viewer.layers[self.selected_channel].data
-        if self.viewer.layers[self.selected_channel].rgb:
-            image_stack = np.moveaxis(image_stack, -1, 0)
-        return image_stack
-
-    def get_selectedlayer_data(self):
-        """Get data from selected channel. Output has channel (if present) in 
-        first position and is normalized."""
-
-        image_stack = self.get_data_channel_first()
-        if self.image_mean is None:
-            self.get_image_stats()
-
-        if not self.radio_no_normalize.isChecked():
-            image_stack = normalize_image(
-                image=image_stack,
-                image_mean=self.image_mean,
-                image_std=self.image_std)
-            
-        return image_stack
-
-    def update_classifier(self):
+    def train_classif(self):
         """Given a set of new annotations, update the random forest model."""
 
         unique_labels = np.unique(self.select_annotation_layer_widget.value.data)
@@ -631,22 +442,29 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
-    def reset_predict_buttons(self):
-        
-        if (self.model is not None) and (self.select_layer_widget.value is not None):
-            self.prediction_btn.setEnabled(True)
-            if self.select_layer_widget.value == 2:
-                self.prediction_all_btn.setEnabled(False)
-            elif self.select_layer_widget.value.ndim == 3:
-                if self.radio_multi_channel.isChecked():
-                    self.prediction_all_btn.setEnabled(False)
-                else:
-                    self.prediction_all_btn.setEnabled(True)
-            else:
-                self.prediction_all_btn.setEnabled(True)
+    def _add_project(self, event=None):
+        """Add widget for multi-image project management"""
 
+        if self.check_use_project.isChecked():
+            if self.project_widget is None:
+                from napari_annotation_project.project_widget import ProjectWidget
+                self.project_widget = ProjectWidget(napari_viewer=self.viewer)
 
-    def update_classifier_on_project(self):
+                #self.tabs.add_named_tab('Files', self.project_widget)
+                self.tabs.add_named_tab('Files', self.project_widget.file_list)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_add_file)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_remove_file)
+
+                self.tabs.add_named_tab('Files', self.project_widget.btn_save_annotation)
+                self.tabs.add_named_tab('Files', self.project_widget.btn_load_project)
+            
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), True)
+            self.train_classif_on_project_btn.setEnabled(True)
+        else:
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
+            self.train_classif_on_project_btn.setEnabled(False)
+
+    def train_classif_on_project(self):
         """Train classifier on all annotations in project.
         !!!! Need to double-check if normalization is done correctly for projects !!!!"""
 
@@ -698,7 +516,8 @@ class ConvPaintWidget(QWidget):
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
         self.viewer.layers.events.removed.connect(self.reset_model)
-        
+
+    # Predict
 
     def predict(self):
         """Predict the segmentation of the currently viewed frame based 
@@ -711,7 +530,7 @@ class ConvPaintWidget(QWidget):
                 raise Exception('You have to define and load a model first')
         
         if self.random_forest is None:
-            self.update_classifier()
+            self.train_classif()
 
         self.check_prediction_layer_exists()
 
@@ -790,7 +609,7 @@ class ConvPaintWidget(QWidget):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
-    
+
 
     def predict_all(self):
         """Predict the segmentation of all frames based 
@@ -848,22 +667,27 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
-    def check_prediction_layer_exists(self):
+    # Data dimensions
 
-        layer_names = [x.name for x in self.viewer.layers]
-        if 'segmentation' not in layer_names:
+    def reset_radio_norm_settings(self, event=None):
+        
+        self.image_mean, self.image_std = None, None
+        self.add_empty_layers(force_add=False)
 
-            if self.viewer.layers[self.selected_channel].rgb:
-                layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
-            elif self.radio_multi_channel.isChecked():
-                layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
-            else:
-                layer_shape = self.viewer.layers[self.selected_channel].data.shape
+        if self.select_layer_widget.value.ndim == 2:
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalize_by_image.setChecked(True)
+            self.radio_normalized_over_stack.setEnabled(False)
+        elif (self.select_layer_widget.value.ndim == 3) and (self.radio_multi_channel.isChecked()):
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalize_by_image.setChecked(True)
+            self.radio_normalized_over_stack.setEnabled(False)
+        else:
+            self.radio_normalize_by_image.setEnabled(True)
+            self.radio_normalized_over_stack.setEnabled(True)
+            self.radio_normalized_over_stack.setChecked(True)
 
-            self.viewer.add_labels(
-                data=np.zeros((layer_shape), dtype=np.uint8),
-                name='segmentation'
-            )
+    # Load/Save
 
     def on_save_model(self, event=None, save_file=None):
             """Select file where to save the classifier model along with the model parameters."""
@@ -906,30 +730,29 @@ class ConvPaintWidget(QWidget):
         self.current_model_path.setText(save_file.name)
         self.reset_predict_buttons()
 
+    def reset_model(self, event=None):
+        self.model = None
+        self.random_forest = None
+        self.predict_btn.setEnabled(False)
+        self.predict_all_btn.setEnabled(False)
+        self.save_model_btn.setEnabled(False)
+        self.current_model_path.setText('None')
 
-    def update_params_from_gui(self):
-        """Update parameters from GUI."""
+        if self.select_layer_widget.value is None:
+            # [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]] # R: Why create a list?
+            for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]: x.setEnabled(False)
+        else:
+            self.select_layer()
 
-        self.update_scalings_from_gui()
-        self.param.model_name = self.qcombo_model_type.currentText()
-        self.param.model_layers = self.get_selected_layers_names()
-        self.param.order = self.spin_interpolation_order.value()
-        self.param.use_min_features = self.check_use_min_features.isChecked()
-        self.param.image_downsample = self.spin_downsample.value()
-        self.param.normalize = self.button_group_normalize.checkedId()
+    # Options
 
+    # R: THIS IS NOT DEFINED ! If not necessary, also remove it from add_connections ?
+    # def _set_custom_model(self, event=None):
 
-    def update_gui_from_params(self):
-        """Update GUI from parameters and then update the model with that info."""
+    def reset_stats(self):
+        self.image_mean, self.image_std = None, None
 
-        self.qcombo_model_type.setCurrentText(self.param.model_name)
-        self.update_scalings_from_param()
-
-        self.spin_interpolation_order.setValue(self.param.order)
-        self.check_use_min_features.setChecked(self.param.use_min_features)
-        self.spin_downsample.setValue(self.param.image_downsample)
-        self.button_group_normalize.button(self.param.normalize).setChecked(True)
-
+    # Model
 
     def on_model_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
@@ -954,8 +777,179 @@ class ConvPaintWidget(QWidget):
         self.param = self.temp_model.get_default_params()
         self.update_gui_from_params()
 
+    def _on_create_model(self, event=None):
+        """Create a neural network model that will be used for feature extraction."""
+        self.update_params_from_gui()
+        self.model = create_model(self.param)
+        self.update_gui_from_model()
+        self.current_model_path.setText('Unsaved')
+
+    def _output_selection_changed(self):
+        #check if temp model is a hookmodel
+        if isinstance(self.temp_model, Hookmodel):
+            selected_layers = self.get_selected_layers_names()
+            if len(selected_layers) == 0:
+                self.create_model_btn.setEnabled(False)
+            else:
+                self.create_model_btn.setEnabled(True)
+        else:
+            self.create_model_btn.setEnabled(True)
+
+    def update_scalings_from_gui(self):
+        self.param.scalings = self.num_scales_combo.currentData()
+
+### Helper functions
+
+    def get_image_stats(self):
+        # put channels in format (C)(T,Z)YX
+        data = self.get_data_channel_first()
+
+        if self.radio_normalized_over_stack.isChecked():
+            if self.radio_multi_channel.isChecked() | self.radio_rgb.isChecked():
+                self.image_mean, self.image_std = compute_image_stats(
+                    image=data,
+                    ignore_n_first_dims=1)
+            else:
+                self.image_mean, self.image_std = compute_image_stats(
+                    image=data,
+                    ignore_n_first_dims=None)
+        elif self.radio_normalize_by_image.isChecked():
+            # also takes into account CXY case (2D multi-channel image) as first dim is dropped
+            self.image_mean, self.image_std = compute_image_stats(
+                image=data,
+                ignore_n_first_dims=data.ndim-2)
+
+    def _create_output_selection(self):
+        """Update list of selectable layers"""
+
+        self.model_output_selection.clear()
+        self.model_output_selection.addItems(self.model.selectable_layer_keys.keys())
+
+    def get_selected_layers_names(self):
+        """Get names of selected layers."""
+
+        selected_rows = self.model_output_selection.selectedItems()
+        selected_layers = [x.text() for x in selected_rows]
+        return selected_layers
+                                  
+    def update_gui_from_model(self):
+        """Update GUI based on the current model."""
+        if self.model is None:
+            self.model_output_selection.setEnabled(False)
+            self.model_output_selection.clear()
+        elif isinstance(self.model, Hookmodel):
+            self._create_output_selection()
+            if len(self.model.named_modules) == 1:
+                self.model_output_selection.setCurrentRow(0)
+                self.model_output_selection.setEnabled(False)
+            else:
+                self.model_output_selection.setEnabled(True)
+                for layer in self.param.model_layers:
+                    items = self.model_output_selection.findItems(layer, Qt.MatchExactly)
+                    for item in items:
+                        item.setSelected(True)
+        else:
+            self.model_output_selection.setEnabled(False)
+            self.model_output_selection.clear()
+
+    def update_params_from_gui(self):
+        """Update parameters from GUI."""
+        self.param.image_downsample = self.spin_downsample.value()
+        self.param.normalize = self.button_group_normalize.checkedId()
+        self.param.use_cuda = self.check_use_cuda.isChecked()
+
+        self.param.model_name = self.qcombo_model_type.currentText()
+        self.param.model_layers = self.get_selected_layers_names()
+        self.update_scalings_from_gui()
+        self.param.order = self.spin_interpolation_order.value()
+        self.param.use_min_features = self.check_use_min_features.isChecked()
+
+    def update_gui_from_params(self):
+        """Update GUI from parameters."""
+        self.spin_downsample.setValue(self.param.image_downsample)
+        self.button_group_normalize.button(self.param.normalize).setChecked(True)
+        self.check_use_cuda.setChecked(self.param.use_cuda)
+
+        self.qcombo_model_type.setCurrentText(self.param.model_name)
+        self.update_scalings_from_param()
+        self.spin_interpolation_order.setValue(self.param.order)
+        self.check_use_min_features.setChecked(self.param.use_min_features)
+
+    def update_scalings_from_param(self):
+        index = self.num_scales_combo.findData(self.param.scalings)
+        if index != -1:
+            self.num_scales_combo.setCurrentIndex(index)
+        else:
+            self.num_scales_combo.addItem(str(self.param.scalings), self.param.scalings)
+            self.num_scales_combo.setCurrentIndex(self.num_scales_combo.count()-1)
+
+    def set_default_model(self):#, keep_rgb=False):
+        """Set default model."""
+        '''if keep_rgb:
+            self.qcombo_model_type.setCurrentText('single_layer_vgg16_rgb')
+        else:
+            self.qcombo_model_type.setCurrentText('single_layer_vgg16')'''
+        self.qcombo_model_type.setCurrentText('single_layer_vgg16')
+        self.num_scales_combo.setCurrentText('[1,2]')
+        self.spin_interpolation_order.setValue(1)
+        self.check_use_min_features.setChecked(True)
+        self._on_create_model()
+
+
+    def get_selectedlayer_data(self):
+        """Get data from selected channel. Output has channel (if present) in 
+        first position and is normalized."""
+
+        image_stack = self.get_data_channel_first()
+        if self.image_mean is None:
+            self.get_image_stats()
+
+        if not self.radio_no_normalize.isChecked():
+            image_stack = normalize_image(
+                image=image_stack,
+                image_mean=self.image_mean,
+                image_std=self.image_std)
+            
+        return image_stack
+
+    def get_data_channel_first(self):
+        """Get data from selected channel. If RGB, move channel axis to first position."""
+            
+        image_stack = self.viewer.layers[self.selected_channel].data
+        if self.viewer.layers[self.selected_channel].rgb:
+            image_stack = np.moveaxis(image_stack, -1, 0)
+        return image_stack
+    def reset_predict_buttons(self):
+        
+        if (self.model is not None) and (self.select_layer_widget.value is not None):
+            self.predict_btn.setEnabled(True)
+            if self.select_layer_widget.value == 2:
+                self.predict_all_btn.setEnabled(False)
+            elif self.select_layer_widget.value.ndim == 3:
+                if self.radio_multi_channel.isChecked():
+                    self.predict_all_btn.setEnabled(False)
+                else:
+                    self.predict_all_btn.setEnabled(True)
+            else:
+                self.predict_all_btn.setEnabled(True)
+
+    def check_prediction_layer_exists(self):
+
+        layer_names = [x.name for x in self.viewer.layers]
+        if 'segmentation' not in layer_names:
+
+            if self.viewer.layers[self.selected_channel].rgb:
+                layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
+            elif self.radio_multi_channel.isChecked():
+                layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2::]
+            else:
+                layer_shape = self.viewer.layers[self.selected_channel].data.shape
+
+            self.viewer.add_labels(
+                data=np.zeros((layer_shape), dtype=np.uint8),
+                name='segmentation'
+            )
 
     def _create_output_selection_for_temp_model(self, temp_model):
         self.model_output_selection.clear()
         self.model_output_selection.addItems(temp_model.selectable_layer_keys.keys())
-
