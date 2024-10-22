@@ -62,19 +62,22 @@ class ConvPaintWidget(QWidget):
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
 
+        # Create and add tabs
         self.tab_names = ['Home', 'Files', 'Model']
         self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
-        self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
+        self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False) # R: Why only index? If custom is "respnsive", so should be the index
         self.main_layout.addWidget(self.tabs)
 
         self.tabs.widget(0).layout().setAlignment(Qt.AlignTop)
 
+        # Create groups
         self.layer_selection_group = VHGroup('Layer selection', orientation='G')
-        self.data_dims_group = VHGroup('Data dimensions', orientation='G')
         self.train_group = VHGroup('Train', orientation='G')
         self.predict_group = VHGroup('Segment', orientation='G')
+        self.data_dims_group = VHGroup('Data dimensions', orientation='G')
         self.load_save_group = VHGroup('Load/Save', orientation='G')
         self.options_group = VHGroup('Options', orientation='G')
+        # Add groups to layout
         self.tabs.add_named_tab('Home', self.layer_selection_group.gbox)
         self.tabs.add_named_tab('Home', self.train_group.gbox)
         self.tabs.add_named_tab('Home', self.predict_group.gbox)
@@ -82,42 +85,30 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Home', self.load_save_group.gbox)
         self.tabs.add_named_tab('Home', self.options_group.gbox)
 
-        # data layer
+        # Add elements to "Layer selection" group
+        # data layer (widget for selecting the layer to segment)
         self.select_layer_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
         self.select_layer_widget.reset_choices()
+        # Reset choices when layers are added or removed
         self.viewer.layers.events.inserted.connect(self.select_layer_widget.reset_choices)
         self.viewer.layers.events.removed.connect(self.select_layer_widget.reset_choices)
         # annotation layer
         self.select_annotation_layer_widget = create_widget(annotation=napari.layers.Labels, label='Pick annotation')
         self.select_annotation_layer_widget.reset_choices()
+        # Reset choices when layers are added or removed
         self.viewer.layers.events.inserted.connect(self.select_annotation_layer_widget.reset_choices)
         self.viewer.layers.events.removed.connect(self.select_annotation_layer_widget.reset_choices)
-
+        # Add widgets to layout
         self.layer_selection_group.glayout.addWidget(QLabel('Layer to segment'), 0,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.select_layer_widget.native, 0,1,1,1)
         self.layer_selection_group.glayout.addWidget(QLabel('Layer for annotation'), 1,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.select_annotation_layer_widget.native, 1,1,1,1)
-
+        # Add button for adding annotation/segmentation layers
         self.add_layers_btn = QPushButton('Add annotations/segmentation layers')
         self.add_layers_btn.setEnabled(False)
         self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
 
-        self.button_group_channels = QButtonGroup()
-        self.radio_single_channel = QRadioButton('Single channel image/stack')
-        self.radio_single_channel.setToolTip('2D images or 3D images where additional dimension is NOT channels')
-        self.radio_multi_channel = QRadioButton('Multichannel image')
-        self.radio_multi_channel.setToolTip('Images with an additional channel dimension')
-        self.radio_rgb = QRadioButton('RGB image')
-        self.radio_rgb.setToolTip('Use this option with images displayed as RGB')
-        self.radio_single_channel.setChecked(True)
-        [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]]
-        self.button_group_channels.addButton(self.radio_single_channel, id=1)
-        self.button_group_channels.addButton(self.radio_multi_channel, id=2)
-        self.button_group_channels.addButton(self.radio_rgb, id=3)
-        self.data_dims_group.glayout.addWidget(self.radio_single_channel, 0,0,1,1)
-        self.data_dims_group.glayout.addWidget(self.radio_multi_channel, 1,0,1,1)
-        self.data_dims_group.glayout.addWidget(self.radio_rgb, 2,0,1,1)
-
+        # Add buttons for "Train" group
         self.update_model_btn = QPushButton('Train')
         self.update_model_btn.setToolTip('Train model on annotations')
         self.train_group.glayout.addWidget(self.update_model_btn, 0,0,1,1)
@@ -125,13 +116,14 @@ class ConvPaintWidget(QWidget):
         self.check_use_project.setToolTip('Activate Files Tab to use multiple files to train the model')
         self.check_use_project.setChecked(False)
         self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
-
+        # Multiple Image button
         self.update_model_on_project_btn = QPushButton('Train on multiple images')
         self.update_model_on_project_btn.setToolTip('Train on all images in project select in Files Tab')
         self.train_group.glayout.addWidget(self.update_model_on_project_btn, 1,1,1,1)
         if project is False:
             self.update_model_on_project_btn.setEnabled(False)
 
+        # Add buttons for "Segment" group
         self.prediction_btn = QPushButton('Segment image')
         self.prediction_btn.setEnabled(False)
         self.prediction_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
@@ -140,29 +132,49 @@ class ConvPaintWidget(QWidget):
         self.prediction_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
         self.prediction_all_btn.setEnabled(False)
         self.predict_group.glayout.addWidget(self.prediction_all_btn, 0,1,1,1)
+        
+        # Add radio buttons for "Data dimensions"
+        self.button_group_channels = QButtonGroup()
+        self.radio_single_channel = QRadioButton('Single channel image/stack')
+        self.radio_single_channel.setToolTip('2D images or 3D images where additional dimension is NOT channels')
+        self.radio_multi_channel = QRadioButton('Multichannel image')
+        self.radio_multi_channel.setToolTip('Images with an additional channel dimension')
+        self.radio_rgb = QRadioButton('RGB image')
+        self.radio_rgb.setToolTip('Use this option with images displayed as RGB')
+        self.radio_single_channel.setChecked(True)
+        # [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]] # R: Why create a list?
+        for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]: x.setEnabled(False)
+        self.button_group_channels.addButton(self.radio_single_channel, id=1)
+        self.button_group_channels.addButton(self.radio_multi_channel, id=2)
+        self.button_group_channels.addButton(self.radio_rgb, id=3)
+        self.data_dims_group.glayout.addWidget(self.radio_single_channel, 0,0,1,1)
+        self.data_dims_group.glayout.addWidget(self.radio_multi_channel, 1,0,1,1)
+        self.data_dims_group.glayout.addWidget(self.radio_rgb, 2,0,1,1)
 
+        # Add buttons for "Load/Save" group
         self.save_model_btn = QPushButton('Save trained model')
         self.save_model_btn.setToolTip('Save model as *.pickle file')
         self.save_model_btn.setEnabled(False)
         self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
-
         self.load_model_btn = QPushButton('Load trained model')
         self.load_model_btn.setToolTip('Select *.pickle file to load as trained model')
         self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
-
+        # Reset model button
         self.reset_model_btn = QPushButton('Reset model')
         self.reset_model_btn.setToolTip('Discard current model and annotations, create new default model.')
         self.load_save_group.glayout.addWidget(self.reset_model_btn, 1,0,1,1)
-
+        # Current model label
         self.load_save_group.glayout.addWidget(QLabel('Current model:'), 2,0,1,1)
         self.current_model_path = QLabel('None')
         self.load_save_group.glayout.addWidget(self.current_model_path, 2,1,1,1)
 
+        # Add elements to "Options" group
+        # "Use custom model" checkbox
         self.check_use_custom_model = QCheckBox('Use custom model')
         self.check_use_custom_model.setToolTip('Activate Model Tab to customize model')
         self.check_use_custom_model.setChecked(False)
         self.options_group.glayout.addWidget(self.check_use_custom_model, 0,0,1,1)
-
+        # "Downsample" spinbox
         self.spin_downsample = QSpinBox()
         self.spin_downsample.setMinimum(1)
         self.spin_downsample.setMaximum(10)
@@ -170,20 +182,17 @@ class ConvPaintWidget(QWidget):
         self.spin_downsample.setToolTip('Reduce image size for faster computing.')
         self.options_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
         self.options_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
-
-
-
+        # "Tile annotations" checkbox
         self.check_tile_annotations = QCheckBox('Tile annotations for training')
         self.check_tile_annotations.setChecked(False)
         self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\nDisable for models that extract long range features (e.g. DINO)!')
         self.options_group.glayout.addWidget(self.check_tile_annotations, 2,0,1,1)
-
-
+        # "Tile image" checkbox
         self.check_tile_image = QCheckBox('Tile image for segmentation')
         self.check_tile_image.setChecked(False)
         self.check_tile_image.setToolTip('Tile image to reduce memory usage.\nTake care when using models that extract long range features (e.g. DINO).')
         self.options_group.glayout.addWidget(self.check_tile_image, 3,0,1,1)
-
+        # "Normalize" radio buttons
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
         self.radio_no_normalize.setToolTip('No normalization is applied')
@@ -200,35 +209,35 @@ class ConvPaintWidget(QWidget):
         self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 5,0,1,1)
         self.options_group.glayout.addWidget(self.radio_normalize_by_image, 6,0,1,1)
 
-
+        # Add elements to "Model" tab
         self.qcombo_model_type = QComboBox()
-        self.qcombo_model_type.addItems(get_all_models().keys())
+        self.qcombo_model_type.addItems(sorted(get_all_models().keys()))
         self.qcombo_model_type.setToolTip('Select model architecture')
         self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
-
-        self.create_model_btn = QPushButton('Create model')
-        self.create_model_btn.setToolTip('Create a new feature extraction model')
+        # Button for creating model
+        self.create_model_btn = QPushButton('Set model')
+        self.create_model_btn.setToolTip('Set the feature extraction model')
         self.tabs.add_named_tab('Model', self.create_model_btn, [1,0,1,2])
-
+        # List of selectable layers
         self.model_output_selection = QListWidget()
         self.model_output_selection.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tabs.add_named_tab('Model', self.model_output_selection, [3,0,1,2])
-
+        # Create scales selection
         self.num_scales_combo = QComboBox()
         self.num_scales_combo.addItem('[1]',[1])
         self.num_scales_combo.addItem('[1,2]',[1,2])
         self.num_scales_combo.addItem('[1,2,4]',[1,2,4])
         self.num_scales_combo.addItem('[1,2,4,8]',[1,2,4,8])
-
+        # Add label and scales selection to layout
         self.num_scales_combo.setCurrentText('[1,2]')
-        self.tabs.add_named_tab('Model', QLabel('Number of scales'), [4,0,1,1])
+        self.tabs.add_named_tab('Model', QLabel('Downscaling factors'), [4,0,1,1])
         self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
-
+        # "Use min features" checkbox
         self.check_use_min_features = QCheckBox('Use min features')
         self.check_use_min_features.setChecked(False)
         self.check_use_min_features.setToolTip('Use same number of features from each layer. Otherwise use all features from each layer.')
         self.tabs.add_named_tab('Model', self.check_use_min_features, [5,0,1,2])
-
+        # "Interpolation" order spinbox
         self.spin_interpolation_order = QSpinBox()
         self.spin_interpolation_order.setMinimum(0)
         self.spin_interpolation_order.setMaximum(5)
@@ -237,7 +246,7 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model', QLabel('Interpolation order'), [6,0,1,1])
         self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
-
+        # "Use cuda" checkbox
         self.check_use_cuda = QCheckBox('Use cuda')
         self.check_use_cuda.setChecked(False)
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
@@ -246,9 +255,11 @@ class ConvPaintWidget(QWidget):
         if project is True:
             self._add_project()
 
+        # Add connections
         self.add_connections()
         self.select_layer()
 
+        # Add key bindings
         self.viewer.bind_key('a', self.hide_annotation, overwrite=True)
         self.viewer.bind_key('r', self.hide_prediction, overwrite=True)
 
@@ -278,9 +289,10 @@ class ConvPaintWidget(QWidget):
 
         if not self.check_use_custom_model.isChecked():
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
+            # self.qcombo_model_type.setCurrentText('single_layer_vgg16')
+            self.set_default_model()
         else:
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
-            self.qcombo_model_type.setCurrentText('single_layer_vgg16')
 
     def add_connections(self):
         
@@ -312,7 +324,7 @@ class ConvPaintWidget(QWidget):
         self.model_output_selection.itemSelectionChanged.connect(self._output_selection_changed)
 
 
-
+    # R: Shouldn't these be better called "toggle_annotation" and "toggle_prediction"?
     def hide_annotation(self, event=None):
         """Hide annotation layer."""
 
@@ -359,7 +371,7 @@ class ConvPaintWidget(QWidget):
                 self.radio_multi_channel.setChecked(True)
 
             self.reset_radio_norm_settings()
-            self.reset_predict_buttons_after_training()
+            self.reset_predict_buttons()
 
     def reset_stats(self):
         self.image_mean, self.image_std = None, None
@@ -412,7 +424,8 @@ class ConvPaintWidget(QWidget):
 
 
         if self.select_layer_widget.value is None:
-            [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]]
+            # [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]] # R: Why create a list?
+            for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]: x.setEnabled(False)
         else:
             self.select_layer()
         
@@ -610,7 +623,7 @@ class ConvPaintWidget(QWidget):
                 param=self.param,
             )
             self.random_forest = train_classifier(features, targets)
-            self.reset_predict_buttons_after_training()
+            self.reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
             
@@ -618,7 +631,7 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
-    def reset_predict_buttons_after_training(self):
+    def reset_predict_buttons(self):
         
         if (self.model is not None) and (self.select_layer_widget.value is not None):
             self.prediction_btn.setEnabled(True)
@@ -680,7 +693,7 @@ class ConvPaintWidget(QWidget):
             all_targets = np.concatenate(all_targets, axis=0)
 
             self.random_forest = train_classifier(all_features, all_targets)
-            self.reset_predict_buttons_after_training()
+            self.reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
 
@@ -895,7 +908,7 @@ class ConvPaintWidget(QWidget):
 
 
         self.current_model_path.setText(save_file.name)
-        self.reset_predict_buttons_after_training()
+        self.reset_predict_buttons()
 
 
     def update_params_from_gui(self):
