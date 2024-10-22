@@ -6,23 +6,18 @@ from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
-from joblib import dump
+from napari_guitils.gui_structures import VHGroup, TabSet
 from pathlib import Path
 import numpy as np
-import pickle
 import warnings
 
-
-from napari_guitils.gui_structures import VHGroup, TabSet
+from .conv_paint import (get_features_current_layers,
+                         get_all_models, train_classifier,
+                         load_model, create_model, save_model)
 from .conv_paint_utils import (parallel_predict_image, 
                                normalize_image, compute_image_stats)
 from .conv_parameters import Param
-from .conv_paint import (get_features_current_layers)
-from .conv_paint_classifier import load_trained_classifier
-from .conv_paint import get_all_models, train_classifier
 from .conv_paint_nnlayers import Hookmodel
-
-from .conv_paint import load_model, create_model, save_model
 
 
 class ConvPaintWidget(QWidget):
@@ -45,7 +40,7 @@ class ConvPaintWidget(QWidget):
 
 ### Define the basic structure of the widget
     
-    def __init__(self, napari_viewer, parent=None, project=False, third_party=False):
+    def __init__(self, napari_viewer, parent=None, init_project=False, third_party=False):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         
@@ -60,14 +55,14 @@ class ConvPaintWidget(QWidget):
         self.image_std = None
         self.third_party = third_party
 
-
+        # Create main layout
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
 
         # Create and add tabs
-        self.tab_names = ['Home', 'Files', 'Model']
+        self.tab_names = ['Home', 'Project', 'Model']
         self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
-        self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False) # R: Why only index? If custom is "respnsive", so should be the index
+        self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False) # R: Why only index? If custom is "respnsive", so should be the index
         self.main_layout.addWidget(self.tabs)
 
         self.tabs.widget(0).layout().setAlignment(Qt.AlignTop)
@@ -88,13 +83,13 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Home', self.options_group.gbox)
 
         # Add elements to "Layer selection" group
-        # data layer (widget for selecting the layer to segment)
+        # Data layer (widget for selecting the layer to segment)
         self.select_layer_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
         self.select_layer_widget.reset_choices()
         # Reset choices when napari layers are added or removed
         self.viewer.layers.events.inserted.connect(self.select_layer_widget.reset_choices)
         self.viewer.layers.events.removed.connect(self.select_layer_widget.reset_choices)
-        # annotation layer
+        # Annotation layer
         self.select_annotation_layer_widget = create_widget(annotation=napari.layers.Labels, label='Pick annotation')
         self.select_annotation_layer_widget.reset_choices()
         # Reset choices when napari layers are added or removed
@@ -114,15 +109,20 @@ class ConvPaintWidget(QWidget):
         self.train_classif_btn = QPushButton('Train')
         self.train_classif_btn.setToolTip('Train model on annotations')
         self.train_group.glayout.addWidget(self.train_classif_btn, 0,0,1,1)
-        self.check_use_project = QCheckBox('Use multiple files')
-        self.check_use_project.setToolTip('Activate Files Tab to use multiple files to train the model')
+        self.check_auto_seg = QCheckBox('Auto segment')
+        self.check_auto_seg.setToolTip('Automatically segment image after training')
+        self.check_auto_seg.setChecked(False)
+        self.train_group.glayout.addWidget(self.check_auto_seg, 0,1,1,1)
+        # Project checkbox
+        self.check_use_project = QCheckBox('Project mode (multiple files)')
+        self.check_use_project.setToolTip('Activate Project tab to use multiple files for training the classifier')
         self.check_use_project.setChecked(False)
         self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
-        # Multiple Image button
-        self.train_classif_on_project_btn = QPushButton('Train on multiple images')
-        self.train_classif_on_project_btn.setToolTip('Train on all images in project select in Files Tab')
+        # Project button
+        self.train_classif_on_project_btn = QPushButton('Train on project')
+        self.train_classif_on_project_btn.setToolTip('Train on all images loaded in Project tab')
         self.train_group.glayout.addWidget(self.train_classif_on_project_btn, 1,1,1,1)
-        if project is False:
+        if init_project is False:
             self.train_classif_on_project_btn.setEnabled(False)
 
         # Add buttons for "Segment" group
@@ -144,8 +144,8 @@ class ConvPaintWidget(QWidget):
         self.radio_rgb = QRadioButton('RGB image')
         self.radio_rgb.setToolTip('Use this option with images displayed as RGB')
         self.radio_single_channel.setChecked(True)
-        # [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]] # R: Why create a list?
-        for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]: x.setEnabled(False)
+        self.channel_buttons = [self.radio_single_channel, self.radio_multi_channel, self.radio_rgb]
+        for x in self.channel_buttons: x.setEnabled(False)
         self.button_group_channels.addButton(self.radio_single_channel, id=1)
         self.button_group_channels.addButton(self.radio_multi_channel, id=2)
         self.button_group_channels.addButton(self.radio_rgb, id=3)
@@ -254,7 +254,8 @@ class ConvPaintWidget(QWidget):
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
         self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,0,1,1])
 
-        if project is True:
+        # If project mode is initially activated, add project tab and widget
+        if init_project is True:
             self._add_project()
 
         # Add connections and initialize by selecting layer
@@ -274,7 +275,7 @@ class ConvPaintWidget(QWidget):
 
         # Train
         self.train_classif_btn.clicked.connect(self.train_classif)
-        self.check_use_project.stateChanged.connect(self._add_project)
+        # self.check_use_project.stateChanged.connect(self._add_project)
         self.train_classif_on_project_btn.clicked.connect(self.train_classif_on_project)
 
         # Predict
@@ -294,6 +295,9 @@ class ConvPaintWidget(QWidget):
         # Options
         self.check_use_custom_model.stateChanged.connect(self._set_custom_model)
         # R: Tiling and downsampling does not seem to trigger anything
+        self.spin_downsample.valueChanged.connect(self.update_params_from_gui)
+        # self.check_tile_annotations.stateChanged.connect()
+        # self.check_tile_image.stateChanged.connect()
         self.radio_no_normalize.toggled.connect(self.reset_stats)
         self.radio_normalized_over_stack.toggled.connect(self.reset_stats)
         self.radio_normalize_by_image.toggled.connect(self.reset_stats)
@@ -442,26 +446,28 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
+        if self.check_auto_seg.isChecked():
+            self.predict()
+
     def _add_project(self, event=None):
-        """Add widget for multi-image project management"""
+        """Add widget for multi-image project management if not already added."""
 
         if self.check_use_project.isChecked():
             if self.project_widget is None:
                 from napari_annotation_project.project_widget import ProjectWidget
                 self.project_widget = ProjectWidget(napari_viewer=self.viewer)
 
-                #self.tabs.add_named_tab('Files', self.project_widget)
-                self.tabs.add_named_tab('Files', self.project_widget.file_list)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_add_file)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_remove_file)
-
-                self.tabs.add_named_tab('Files', self.project_widget.btn_save_annotation)
-                self.tabs.add_named_tab('Files', self.project_widget.btn_load_project)
+                #self.tabs.add_named_tab('Project', self.project_widget)
+                self.tabs.add_named_tab('Project', self.project_widget.file_list)
+                self.tabs.add_named_tab('Project', self.project_widget.btn_add_file)
+                self.tabs.add_named_tab('Project', self.project_widget.btn_remove_file)
+                self.tabs.add_named_tab('Project', self.project_widget.btn_save_annotation)
+                self.tabs.add_named_tab('Project', self.project_widget.btn_load_project)
             
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), True)
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), True)
             self.train_classif_on_project_btn.setEnabled(True)
         else:
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Files'), False)
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False)
             self.train_classif_on_project_btn.setEnabled(False)
 
     def train_classif_on_project(self):
@@ -739,15 +745,20 @@ class ConvPaintWidget(QWidget):
         self.current_model_path.setText('None')
 
         if self.select_layer_widget.value is None:
-            # [x.setEnabled(False) for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]] # R: Why create a list?
-            for x in [self.radio_multi_channel, self.radio_rgb, self.radio_single_channel]: x.setEnabled(False)
+            for x in self.channel_buttons: x.setEnabled(False)
         else:
             self.select_layer()
 
     # Options
 
-    # R: THIS IS NOT DEFINED ! If not necessary, also remove it from add_connections ?
-    # def _set_custom_model(self, event=None):
+    def _set_custom_model(self, event=None):
+        """Add widget for custom model management"""
+        if not self.check_use_custom_model.isChecked():
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
+            # self.qcombo_model_type.setCurrentText('single_layer_vgg16')
+            self.set_default_model()
+        else:
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
 
     def reset_stats(self):
         self.image_mean, self.image_std = None, None

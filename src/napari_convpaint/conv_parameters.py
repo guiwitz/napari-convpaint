@@ -8,17 +8,18 @@ import yaml
 @dataclass
 class Param:
     """Object storing relevant information regarding the processing,
-    e.g. the window size, the analyzed signal, the type of segmentation used.
+    e.g. the window size (padding), the analyzed data, the type of segmentation used.
     """
 
     random_forest: str = None
     # Data parameters
-    normalize: int = None
     multi_channel_training: bool = None
     # Processing parameters
     image_downsample: int = None
     tile_annotations: bool = False
     tile_image: bool = False
+    normalize: int = None
+    use_cuda: bool = None
     # Model parameters
     model_name: str = None
     model_layers: list[str] = None
@@ -26,7 +27,6 @@ class Param:
     scalings: list[int] = None
     order: int = None
     use_min_features: bool = None
-    use_cuda: bool = None
 
 
 
