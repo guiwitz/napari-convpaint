@@ -12,17 +12,21 @@ class Param:
     """
 
     random_forest: str = None
+    # Data parameters
+    normalize: int = None
+    multi_channel_training: bool = None
+    # Processing parameters
+    image_downsample: int = None
+    tile_annotations: bool = False
+    tile_image: bool = False
+    # Model parameters
     model_name: str = None
     model_layers: list[str] = None
+    padding : int = 0
     scalings: list[int] = None
     order: int = None
     use_min_features: bool = None
-    image_downsample: int = None
-    normalize: int = None
-    multi_channel_training: bool = None
     use_cuda: bool = None
-    tile_annotations: bool = False
-    padding : int = 0
 
 
 
