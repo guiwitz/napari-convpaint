@@ -11,7 +11,7 @@ class Param:
     e.g. the window size (padding), the analyzed data, the type of segmentation used.
     """
 
-    random_forest: str = None
+    classifier: str = None
     # Data parameters
     multi_channel_training: bool = None
     # Processing parameters
@@ -46,7 +46,7 @@ class Param:
     
         with open(save_path, "w") as file:
             dict_to_save = dataclasses.asdict(self)
-            dict_to_save = self.convert_path(dict_to_save, 'random_forest')
+            dict_to_save = self.convert_path(dict_to_save, 'classifier')
             
             yaml.dump(dict_to_save, file)
 

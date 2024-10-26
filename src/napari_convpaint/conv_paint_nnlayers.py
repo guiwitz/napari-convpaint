@@ -212,7 +212,7 @@ class Hookmodel(FeatureExtractor):
         ----------
         image: 2d array
             image to segment
-        classifier: sklearn classifier
+        classifier: CatBoost
             classifier to use for prediction
         scalings: list of ints
             downsampling factors

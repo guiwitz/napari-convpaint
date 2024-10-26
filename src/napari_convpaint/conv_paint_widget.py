@@ -1,7 +1,7 @@
 from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox, QButtonGroup,
-                            QRadioButton)
+                            QRadioButton,QDoubleSpinBox)
 from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
@@ -23,7 +23,7 @@ from .conv_paint_nnlayers import Hookmodel
 class ConvPaintWidget(QWidget):
     """
     Implementation of a napari widget for interactive segmentation performed
-    via a random forest model trained on annotations. The filters used to 
+    via a CatBoost Classifier trained on annotations. The filters used to 
     generate the model features are taken from the first layer of a VGG16 model
     as proposed here: https://github.com/hinderling/napari_pixel_classifier
 
@@ -47,7 +47,7 @@ class ConvPaintWidget(QWidget):
         self.param = Param()
         self.model = None
         self.temp_model = None
-        self.random_forest = None
+        self.classifier = None
         self.project_widget = None
         self.features_per_layer = None
         self.selected_channel = None
@@ -106,9 +106,9 @@ class ConvPaintWidget(QWidget):
         self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
 
         # Add buttons for "Train" group
-        self.train_classif_btn = QPushButton('Train')
-        self.train_classif_btn.setToolTip('Train model on annotations')
-        self.train_group.glayout.addWidget(self.train_classif_btn, 0,0,1,1)
+        self.train_classifier_btn = QPushButton('Train')
+        self.train_classifier_btn.setToolTip('Train model on annotations')
+        self.train_group.glayout.addWidget(self.train_classifier_btn, 0,0,1,1)
         self.check_auto_seg = QCheckBox('Auto segment')
         self.check_auto_seg.setToolTip('Automatically segment image after training')
         self.check_auto_seg.setChecked(False)
@@ -119,11 +119,11 @@ class ConvPaintWidget(QWidget):
         self.check_use_project.setChecked(False)
         self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
         # Project button
-        self.train_classif_on_project_btn = QPushButton('Train on project')
-        self.train_classif_on_project_btn.setToolTip('Train on all images loaded in Project tab')
-        self.train_group.glayout.addWidget(self.train_classif_on_project_btn, 1,1,1,1)
+        self.train_classifier_on_project_btn = QPushButton('Train on project')
+        self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Project tab')
+        self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
         if init_project is False:
-            self.train_classif_on_project_btn.setEnabled(False)
+            self.train_classifier_on_project_btn.setEnabled(False)
 
         # Add buttons for "Segment" group
         self.predict_btn = QPushButton('Segment image')
@@ -211,48 +211,89 @@ class ConvPaintWidget(QWidget):
         self.options_group.glayout.addWidget(self.radio_normalized_over_stack, 5,0,1,1)
         self.options_group.glayout.addWidget(self.radio_normalize_by_image, 6,0,1,1)
 
+
         # Add elements to "Model" tab
+        # Create two groups, 'Feature extraction model' and 'CatBoost Classifier parameters'
+        self.model_group = VHGroup('Feature extraction model', orientation='G')
+        self.classifier_params_group = VHGroup('Classifier parameters (CatBoost)', orientation='G')
+
+        # Add model type combo box to model group
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems(sorted(get_all_models().keys()))
         self.qcombo_model_type.setToolTip('Select model architecture')
-        self.tabs.add_named_tab('Model', self.qcombo_model_type, [0,0,1,2])
-        # Button for creating model
+        self.model_group.glayout.addWidget(self.qcombo_model_type, 0, 0, 1, 2)
+
+        # Add create model button to model group
         self.create_model_btn = QPushButton('Set model')
         self.create_model_btn.setToolTip('Set the feature extraction model')
-        self.tabs.add_named_tab('Model', self.create_model_btn, [1,0,1,2])
-        # List of selectable layers
+        self.model_group.glayout.addWidget(self.create_model_btn, 1, 0, 1, 2)
+
+        # Add model output selection list to model group
         self.model_output_selection = QListWidget()
         self.model_output_selection.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.tabs.add_named_tab('Model', self.model_output_selection, [3,0,1,2])
-        # Create scales selection
+        self.model_group.glayout.addWidget(self.model_output_selection, 2, 0, 1, 2)
+
+        # Create and add scales selection to model group
         self.num_scales_combo = QComboBox()
         self.num_scales_combo.addItem('[1]',[1])
         self.num_scales_combo.addItem('[1,2]',[1,2])
         self.num_scales_combo.addItem('[1,2,4]',[1,2,4])
         self.num_scales_combo.addItem('[1,2,4,8]',[1,2,4,8])
-        # Add label and scales selection to layout
         self.num_scales_combo.setCurrentText('[1,2]')
-        self.tabs.add_named_tab('Model', QLabel('Downscaling factors'), [4,0,1,1])
-        self.tabs.add_named_tab('Model', self.num_scales_combo, [4,1,1,1])
-        # "Use min features" checkbox
+        self.model_group.glayout.addWidget(QLabel('Downscaling factors'), 3, 0, 1, 1)
+        self.model_group.glayout.addWidget(self.num_scales_combo, 3, 1, 1, 1)
+
+        # Add min features checkbox to model group
         self.check_use_min_features = QCheckBox('Use min features')
         self.check_use_min_features.setChecked(False)
         self.check_use_min_features.setToolTip('Use same number of features from each layer. Otherwise use all features from each layer.')
-        self.tabs.add_named_tab('Model', self.check_use_min_features, [5,0,1,2])
-        # "Interpolation" order spinbox
+        self.model_group.glayout.addWidget(self.check_use_min_features, 4, 0, 1, 2)
+
+        # Add interpolation order spinbox to model group
         self.spin_interpolation_order = QSpinBox()
         self.spin_interpolation_order.setMinimum(0)
         self.spin_interpolation_order.setMaximum(5)
         self.spin_interpolation_order.setValue(1)
         self.spin_interpolation_order.setToolTip('Interpolation order for image rescaling')
-        self.tabs.add_named_tab('Model', QLabel('Interpolation order'), [6,0,1,1])
-        self.tabs.add_named_tab('Model', self.spin_interpolation_order, [6,1,1,1])
-        self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
-        # "Use cuda" checkbox
+        self.model_group.glayout.addWidget(QLabel('Interpolation order'), 5, 0, 1, 1)
+        self.model_group.glayout.addWidget(self.spin_interpolation_order, 5, 1, 1, 1)
+
+        # Add use cuda checkbox to model group
         self.check_use_cuda = QCheckBox('Use cuda')
         self.check_use_cuda.setChecked(False)
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
-        self.tabs.add_named_tab('Model', self.check_use_cuda, grid_pos=[7,0,1,1])
+        self.model_group.glayout.addWidget(self.check_use_cuda, 6, 0, 1, 2)
+
+        # Add groups to the tab
+        self.tabs.add_named_tab('Model', self.model_group.gbox, [0, 0, 7, 2])
+        self.tabs.add_named_tab('Model', self.classifier_params_group.gbox, [7, 0, 1, 2])
+        self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
+
+        # Add classifier parameters
+        self.spin_iterations = QSpinBox()
+        self.spin_iterations.setMinimum(1)
+        self.spin_iterations.setMaximum(1000)
+        self.spin_iterations.setValue(50)
+        self.spin_iterations.setToolTip('Set the number of iterations for the classifier')
+        self.classifier_params_group.glayout.addWidget(QLabel('Iterations'), 0, 0, 1, 1)
+        self.classifier_params_group.glayout.addWidget(self.spin_iterations, 0, 1, 1, 1)
+
+        self.spin_learning_rate = QDoubleSpinBox()
+        self.spin_learning_rate.setMinimum(0.001)
+        self.spin_learning_rate.setMaximum(1.0)
+        self.spin_learning_rate.setSingleStep(0.01)
+        self.spin_learning_rate.setValue(0.1)
+        self.spin_learning_rate.setToolTip('Set the learning rate for the classifier')
+        self.classifier_params_group.glayout.addWidget(QLabel('Learning Rate'), 1, 0, 1, 1)
+        self.classifier_params_group.glayout.addWidget(self.spin_learning_rate, 1, 1, 1, 1)
+
+        self.spin_depth = QSpinBox()
+        self.spin_depth.setMinimum(1)
+        self.spin_depth.setMaximum(20)
+        self.spin_depth.setValue(5)
+        self.spin_depth.setToolTip('Set the depth of the trees for the classifier')
+        self.classifier_params_group.glayout.addWidget(QLabel('Depth'), 2, 0, 1, 1)
+        self.classifier_params_group.glayout.addWidget(self.spin_depth, 2, 1, 1, 1)
 
         # If project mode is initially activated, add project tab and widget
         if init_project is True:
@@ -274,9 +315,9 @@ class ConvPaintWidget(QWidget):
         self.add_layers_btn.clicked.connect(self.add_empty_layers)
 
         # Train
-        self.train_classif_btn.clicked.connect(self.train_classif)
+        self.train_classifier_btn.clicked.connect(self.train_classifier)
         # self.check_use_project.stateChanged.connect(self._add_project)
-        self.train_classif_on_project_btn.clicked.connect(self.train_classif_on_project)
+        self.train_classifier_on_project_btn.clicked.connect(self.train_classifier_on_project)
 
         # Predict
         self.predict_btn.clicked.connect(self.predict)
@@ -409,8 +450,8 @@ class ConvPaintWidget(QWidget):
 
     # Train
 
-    def train_classif(self):
-        """Given a set of new annotations, update the random forest model."""
+    def train_classifier(self):
+        """Given a set of new annotations, update the CatBoost classifier."""
 
         unique_labels = np.unique(self.select_annotation_layer_widget.value.data)
         if (not 1 in unique_labels) | (not 2 in unique_labels):
@@ -437,7 +478,12 @@ class ConvPaintWidget(QWidget):
                 model=self.model,
                 param=self.param,
             )
-            self.random_forest = train_classifier(features, targets)
+            self.classifier = train_classifier(
+                features, targets,
+                iterations=self.spin_iterations.value(),
+                learning_rate=self.spin_learning_rate.value(),
+                depth=self.spin_depth.value()
+        )
             self.reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
@@ -465,12 +511,12 @@ class ConvPaintWidget(QWidget):
                 self.tabs.add_named_tab('Project', self.project_widget.btn_load_project)
             
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), True)
-            self.train_classif_on_project_btn.setEnabled(True)
+            self.train_classifier_on_project_btn.setEnabled(True)
         else:
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False)
-            self.train_classif_on_project_btn.setEnabled(False)
+            self.train_classifier_on_project_btn.setEnabled(False)
 
-    def train_classif_on_project(self):
+    def train_classifier_on_project(self):
         """Train classifier on all annotations in project.
         !!!! Need to double-check if normalization is done correctly for projects !!!!"""
 
@@ -512,7 +558,7 @@ class ConvPaintWidget(QWidget):
             all_features = np.concatenate(all_features, axis=0)
             all_targets = np.concatenate(all_targets, axis=0)
 
-            self.random_forest = train_classifier(all_features, all_targets)
+            self.classifier = train_classifier(all_features, all_targets)
             self.reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
             self.current_model_path.setText('Unsaved')
@@ -535,8 +581,8 @@ class ConvPaintWidget(QWidget):
             else:
                 raise Exception('You have to define and load a model first')
         
-        if self.random_forest is None:
-            self.train_classif()
+        if self.classifier is None:
+            self.train_classifier()
 
         self.check_prediction_layer_exists()
 
@@ -598,11 +644,11 @@ class ConvPaintWidget(QWidget):
 
             if self.check_tile_image.isChecked():
                 predicted_image = parallel_predict_image(
-                    image=image, model=self.model, classifier=self.random_forest,
+                    image=image, model=self.model, classifier=self.classifier,
                     param = self.param, use_dask=False)
             else:
                 predicted_image = self.model.predict_image(image=image,
-                                                           classifier=self.random_forest,
+                                                           classifier=self.classifier,
                                                            param=self.param,)
             if self.viewer.dims.ndim == 2:
                 self.viewer.layers['segmentation'].data = predicted_image
@@ -621,7 +667,7 @@ class ConvPaintWidget(QWidget):
         """Predict the segmentation of all frames based 
         on a RF model trained with annotations"""
 
-        if self.random_forest is None:
+        if self.classifier is None:
             raise Exception('No model found. Please train a model first.')
         
         if self.model is None:
@@ -661,12 +707,12 @@ class ConvPaintWidget(QWidget):
             if self.check_tile_image.isChecked():
                 predicted_image = parallel_predict_image(image=image, 
                                                          model=self.model,
-                                                         classifier=self.random_forest,
+                                                         classifier=self.classifier,
                                                          param = self.param,
                                                          use_dask=False)
             else:
                 predicted_image = self.model.predict_image(image=image,
-                                                           classifier=self.random_forest,
+                                                           classifier=self.classifier,
                                                            param=self.param)
             self.viewer.layers['segmentation'].data[step] = predicted_image
         with warnings.catch_warnings():
@@ -697,7 +743,7 @@ class ConvPaintWidget(QWidget):
 
     def on_save_model(self, event=None, save_file=None):
             """Select file where to save the classifier model along with the model parameters."""
-            if self.random_forest is None:
+            if self.classifier is None:
                 raise Exception('No model found. Please train a model first.')
             
             if save_file is None:
@@ -707,7 +753,7 @@ class ConvPaintWidget(QWidget):
             
             # Update parameters from GUI before saving
             self.update_params_from_gui()
-            save_model(save_file, self.random_forest, self.model, self.param, )        
+            save_model(save_file, self.classifier, self.model, self.param, )        
             self.current_model_path.setText(save_file.name)
 
     def on_load_model(self, event=None, save_file=None):
@@ -720,8 +766,8 @@ class ConvPaintWidget(QWidget):
         #tick the custom model checkbox
         self.check_use_custom_model.setChecked(True)
         
-        random_forest, model, param, model_state = load_model(save_file)
-        self.random_forest = random_forest
+        classifier, model, param, model_state = load_model(save_file)
+        self.classifier = classifier
         self.param = param
         self.model = model
 
@@ -738,7 +784,7 @@ class ConvPaintWidget(QWidget):
 
     def reset_model(self, event=None):
         self.model = None
-        self.random_forest = None
+        self.classifier = None
         self.predict_btn.setEnabled(False)
         self.predict_all_btn.setEnabled(False)
         self.save_model_btn.setEnabled(False)

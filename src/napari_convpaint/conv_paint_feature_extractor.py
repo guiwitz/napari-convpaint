@@ -21,7 +21,7 @@ class FeatureExtractor:
 
     def get_default_params(self):
         param = Param()
-        param.random_forest: str = None
+        param.classifier: str = None
         param.model_name: str = self.model_name
         param.model_layers: list[str] = None
         param.scalings: list[int] = [1]

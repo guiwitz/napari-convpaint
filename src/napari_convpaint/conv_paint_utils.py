@@ -120,7 +120,7 @@ def parallel_predict_image(image, model, classifier, param, use_dask=False):
         image to segment
     model: Hookmodel
         model to extract features from
-    classifier: sklearn classifier
+    classifier: CatBoostClassifier
         classifier to use for prediction
     scalings: list of ints
         downsampling factors

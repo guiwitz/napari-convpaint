@@ -11,7 +11,7 @@ from .conv_paint_utils import compute_image_stats, normalize_image
 
 def load_trained_classifier(model_path):
     model_path = Path(model_path)
-    random_forest = load(model_path)
+    classifier = load(model_path)
 
     param = Param()
     with open(model_path.parent.joinpath('convpaint_params.yml')) as file:
@@ -19,7 +19,7 @@ def load_trained_classifier(model_path):
     for k in documents.keys():
         setattr(param, k, documents[k])
 
-    return random_forest, param
+    return classifier, param
 
 
 class Classifier():
@@ -36,7 +36,7 @@ class Classifier():
     
     Attributes
     ----------
-    random_forest : sklearn RF classifier
+    classifier : CatBoost classifier
         Classifier to predict the class of each pixel
     param : Param
         Parameters for model
@@ -47,7 +47,7 @@ class Classifier():
 
     def __init__(self, model_path=None):
 
-        self.random_forest = None
+        self.classifier = None
         self.param = None
         self.model = None
 
@@ -61,7 +61,7 @@ class Classifier():
         """Load a pretrained model by loading the joblib model
         and recreating the NN from the param file."""
         
-        self.random_forest, self.param = load_trained_classifier(model_path)
+        self.classifier, self.param = load_trained_classifier(model_path)
         
         self.model = Hookmodel(param=self.param)
 
@@ -69,7 +69,7 @@ class Classifier():
         """Set default model to single_layer_vgg16."""
             
         self.model = Hookmodel(model_name='single_layer_vgg16')
-        self.random_forest = None
+        self.classifier = None
         self.param = self.model.get_default_params()
 
     def save_classifier(self, save_path):
@@ -81,8 +81,8 @@ class Classifier():
             Path to save files to
         """
 
-        dump(self.random_forest, save_path)
-        self.param.random_forest = save_path
+        dump(self.classifier, save_path)
+        self.param.classifier = save_path
         self.param.save_parameters(Path(save_path).parent.joinpath('convpaint_params.yml'))
 
 
@@ -125,7 +125,7 @@ class Classifier():
         for i in range(image.shape[0]):
             im_out[i] = self.model.predict_image(
                 image=image[i],
-                classifier=self.random_forest,
+                classifier=self.classifier,
                 param=self.param)
 
         if save_path is None:

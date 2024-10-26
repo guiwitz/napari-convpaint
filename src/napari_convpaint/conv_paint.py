@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import skimage
 import warnings
-from sklearn.ensemble import RandomForestClassifier
+from catboost import CatBoostClassifier
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
 from napari_convpaint.conv_paint_dino import AVAILABLE_MODELS as DINO_MODELS
@@ -38,19 +38,19 @@ def get_all_models():
 def load_model(model_path):
     with open(model_path, 'rb') as f:
         data = pickle.load(f)
-    random_forest = data['random_forest']
+    classifier = data['classifier']
     param = data['param']
     if 'model_state' in data:
         model_state = data['model_state']
     else:
         model_state = None
     model = create_model(param)
-    return random_forest, model, param, model_state
+    return classifier, model, param, model_state
 
-def save_model(model_path, random_forest, model, param):
+def save_model(model_path, classifier, model, param):
     with open(model_path, 'wb') as f:
         data = {
-            'random_forest': random_forest,
+            'classifier': classifier,
             'param': param,
             'model_state': model.state_dict() if hasattr(model, 'state_dict') else None
         }
@@ -74,17 +74,20 @@ def create_model(param:Param):
     return model
 
 
-def train_classifier(features, targets):
-    """Train a random forest classifier given a set of features and targets."""
+def train_classifier(features, targets, iterations = 50, learning_rate = 0.1, depth = 5):
+    """Train a classifier given a set of features and targets."""
 
     # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=100, n_jobs=-1)
-    random_forest.fit(features, targets)
+    #classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+    #classifier.fit(features, targets)
 
-    #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
-    #random_forest.fit(features, targets-1)
+    #classifier = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
+    #classifier.fit(features, targets-1)
 
-    return random_forest
+    classifier = CatBoostClassifier(iterations=iterations, learning_rate=learning_rate,depth=depth)
+    classifier.fit(features, targets)
+
+    return classifier
 
 
 def get_features_current_layers(image, annotations, model, param:Param):
