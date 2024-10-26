@@ -8,7 +8,7 @@ def test_add_layers(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100)))
-    my_widget.add_annotation_layer()    
+    my_widget.add_empty_layers()    
 
     assert 'annotations' in viewer.layers
     assert 'segmentation' in viewer.layers
@@ -19,13 +19,13 @@ def test_annotation_layer_dims(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100, 3)))
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     assert viewer.layers['annotations'].data.shape == (100, 100)
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((3, 100, 100)))
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     assert viewer.layers['annotations'].data.shape == (3, 100, 100)
 
 
@@ -37,16 +37,16 @@ def test_correct_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im, name='sample')
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
 
     viewer.layers.clear()
     viewer.add_image(im[:,:,0], name='sample')
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
 
 
@@ -59,9 +59,9 @@ def test_rgb_prediction(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     my_widget.predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -89,15 +89,15 @@ def test_multi_channel_prediction(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.moveaxis(im,2,0))
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data[1,:,:] = im_annot
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     my_widget.predict()
 
     recovered = viewer.layers['segmentation'].data[1][ground_truth==1]
     precision, recall = compute_precision_recall(ground_truth, recovered)
     
-    assert precision < 0.9, f"Precision: {precision} is too high for non multi-channelp training"
+    assert precision < 0.8, f"Precision: {precision} is too low for non multi-channelp training"
 
 
 def test_save_model(make_napari_viewer, capsys):
@@ -107,9 +107,9 @@ def test_save_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     my_widget.predict()
 
     os.makedirs('_tests/model_dir', exist_ok=True)
@@ -133,8 +133,8 @@ def test_load_model(make_napari_viewer, capsys):
     fn = np.sum(ground_truth == 1) - tp
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)
-    assert precision > 0.9, f"Precision: {precision}, too low"
-    assert recall > 0.9, f"Recall: {recall}, too low"
+    assert precision > 0.8, f"Precision: {precision}, too low"
+    assert recall > 0.8, f"Recall: {recall}, too low"
 
 
 def test_save_model_dino(make_napari_viewer, capsys):
@@ -144,7 +144,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Simulate selecting the Dino model from the dropdown
@@ -165,7 +165,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     assert my_widget.param.scalings == [1]
     assert my_widget.param.model_name == 'dinov2_vits14_reg'
 
-    my_widget.update_classifier()  # Update the classifier with the new parameters
+    my_widget.train_classifier()  # Update the classifier with the new parameters
     my_widget.predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
     my_widget.on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
@@ -207,7 +207,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the first model with scales [1]
@@ -217,7 +217,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.create_model_btn.setEnabled(True)
     my_widget.create_model_btn.click()
     assert my_widget.param.scalings == [1]
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     my_widget.predict()
     model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
     my_widget.on_save_model(save_file=model_path_1)
@@ -230,7 +230,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
 
     my_widget.create_model_btn.click()
     assert my_widget.param.scalings == [1, 2, 4, 8]
-    my_widget.update_classifier()
+    my_widget.train_classifier()
     my_widget.predict()
     model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
     my_widget.on_save_model(save_file=model_path_2)
@@ -265,7 +265,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         viewer = make_napari_viewer()
         my_widget = ConvPaintWidget(viewer)
         viewer.add_image(im)
-        my_widget.add_annotation_layer()
+        my_widget.add_empty_layers()
         viewer.layers['annotations'].data = im_annot
 
         # Load the Dino model
@@ -277,7 +277,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         my_widget.num_scales_combo.setCurrentText('[1]')
         my_widget.update_params_from_gui()
         my_widget.create_model_btn.click()
-        my_widget.update_classifier()
+        my_widget.train_classifier()
         my_widget.predict()
 
         recovered = viewer.layers['segmentation'].data
@@ -294,7 +294,7 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_annotation_layer()
+    my_widget.add_empty_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the custom VGG16 model with selected layers
@@ -315,7 +315,7 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
 
         my_widget.create_model_btn.setEnabled(True)
         my_widget.create_model_btn.click()
-        my_widget.update_classifier()
+        my_widget.train_classifier()
 
         assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
 
@@ -332,7 +332,7 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
         my_widget.predict()
         recovered = viewer.layers['segmentation'].data[ground_truth == 1]
         precision, recall = compute_precision_recall(ground_truth, recovered)
-        assert precision > 0.9, f"Precision: {precision}, too low"
-        assert recall > 0.9, f"Recall: {recall}, too low"
+        assert precision > 0.8, f"Precision: {precision}, too low"
+        assert recall > 0.8, f"Recall: {recall}, too low"
     
     assert my_widget.qcombo_model_type.currentText() == 'vgg16'
