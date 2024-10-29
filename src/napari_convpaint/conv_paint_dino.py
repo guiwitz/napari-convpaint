@@ -29,12 +29,12 @@ class DinoFeatures(FeatureExtractor):
     def get_default_params(self):
         param = super().get_default_params()
         param.name = self.model_name
-        param.scalings = [1]
-        param.order = 0
+        param.fe_scalings = [1]
+        param.fe_order = 0
         param.image_downsample = 1
         param.normalize = 1
-        param.use_cuda = self.use_cuda
-        param.padding = self.padding
+        param.fe_use_cuda = self.use_cuda
+        param.fe_padding = self.padding
         return param
 
     def _preprocess_image(self, image):
@@ -142,7 +142,7 @@ class DinoFeatures(FeatureExtractor):
         if param.image_downsample > 1:
             image = image[:, ::param.image_downsample, ::param.image_downsample]
         
-        features = self.get_features(image, order=param.order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
+        features = self.get_features(image, order=param.fe_order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
         nb_features = features.shape[0]
 
         if not return_patches:
@@ -150,7 +150,7 @@ class DinoFeatures(FeatureExtractor):
                                 image=features,
                                 output_shape=(nb_features, image.shape[-2], image.shape[-1]),
                                 preserve_range=True,
-                                order=param.order)            
+                                order=param.fe_order)            
         return features
     
     def predict_image(self, image, classifier, param, **kwargs):
@@ -172,7 +172,7 @@ class DinoFeatures(FeatureExtractor):
             predicted_image = skimage.transform.resize(
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=param.order).astype(np.uint8)
+                preserve_range=True, order=param.fe_order).astype(np.uint8)
         predicted_image = predicted_image +1#for XGBoost
         return predicted_image
 
@@ -224,7 +224,7 @@ class DinoFeatures(FeatureExtractor):
         3. Scale up the predictions'''
 
         #add padding
-        padding = param.padding
+        padding = param.fe_padding
         if image.ndim == 2:
             image = np.expand_dims(image, axis=0)
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
@@ -247,7 +247,7 @@ class DinoFeatures(FeatureExtractor):
         predicted_image = skimage.transform.resize(
             image=predicted_image,
             output_shape=(image.shape[-2], image.shape[-1]),
-            preserve_range=True, order=param.order).astype(np.uint8)
+            preserve_range=True, order=param.fe_order).astype(np.uint8)
         
         if padding > 0:
             predicted_image = predicted_image[padding:-padding, padding:-padding]

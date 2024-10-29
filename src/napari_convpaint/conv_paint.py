@@ -59,15 +59,15 @@ def save_model(model_path, classifier, model, param):
 
 def create_model(param:Param):
     """Create a model based on the given parameters."""
-    model_class = get_all_models()[param.model_name]
+    model_class = get_all_models()[param.fe_name]
     model = model_class(
-        model_name=param.model_name,
-        use_cuda=param.use_cuda
+        model_name=param.fe_name,
+        use_cuda=param.fe_use_cuda
     )
     
     if isinstance(model, Hookmodel):
-        if param.model_layers:
-            model.register_hooks(selected_layers=param.model_layers)
+        if param.fe_layers:
+            model.register_hooks(selected_layers=param.fe_layers)
         elif len(model.named_modules) == 1:
             model.register_hooks(selected_layers=[list(model.module_dict.keys())[0]])
     
@@ -136,7 +136,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
     all_targets = []
 
     # find maximal padding necessary
-    padding = param.padding * np.max(param.scalings)
+    padding = param.fe_padding * np.max(param.fe_scalings)
 
     # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
@@ -163,7 +163,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
             boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
         for i in range(len(boxes['label'])):
             # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-            pad_size = param.padding
+            pad_size = param.fe_padding
             x_min = boxes['bbox-0'][i]-pad_size
             x_max = boxes['bbox-2'][i]+pad_size
             y_min = boxes['bbox-1'][i]-pad_size

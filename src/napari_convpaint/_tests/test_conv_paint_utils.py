@@ -20,14 +20,14 @@ def test_hook_model():
 def test_filter_image():
 
     param = conv_parameters.Param()
-    param.model_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+    param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
             'features.12 Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'
             ]
     param.tile_annotations = True
-    param.use_min_features = False
+    param.fe_use_min_features = False
     param.image_downsample = 1
-    param.order = 0
-    param.scalings = [1]
+    param.fe_order = 0
+    param.fe_scalings = [1]
     
     model = conv_paint_nnlayers.Hookmodel(model_name='vgg16',param=param)
     layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',

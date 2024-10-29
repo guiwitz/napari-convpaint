@@ -19,14 +19,18 @@ class Param:
     tile_annotations: bool = False
     tile_image: bool = False
     normalize: int = None
-    use_cuda: bool = None
-    # Model parameters
-    model_name: str = None
-    model_layers: list[str] = None
-    padding : int = 0
-    scalings: list[int] = None
-    order: int = None
-    use_min_features: bool = None
+    # Feature extractor parameters
+    fe_name: str = None
+    fe_layers: list[str] = None
+    fe_scalings: list[int] = None
+    fe_order: int = None
+    fe_padding : int = 0
+    fe_use_min_features: bool = None
+    fe_use_cuda: bool = None
+    # Classifier parameters
+    classif_iterations: int = None
+    classif_learning_rate: float = None
+    classif_depth: int = None
 
 
 
