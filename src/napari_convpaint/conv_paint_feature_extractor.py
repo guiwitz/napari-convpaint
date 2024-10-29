@@ -22,17 +22,17 @@ class FeatureExtractor:
     def get_default_params(self):
         param = Param()
         param.classifier: str = None
-        param.fe_name: str = self.model_name
-        param.fe_layers: list[str] = None
-        param.fe_scalings: list[int] = [1]
-        param.fe_order: int = 0
-        param.fe_use_min_features: bool = False
+        param.model_name: str = self.model_name
+        param.model_layers: list[str] = None
+        param.scalings: list[int] = [1]
+        param.order: int = 0
+        param.use_min_features: bool = False
         param.image_downsample: int = 1
         param.normalize: int = 3 # 0: no normalization, 1: normalize stack, 2: normalize each image
         param.multi_channel_training: bool = False
-        param.fe_use_cuda: bool = False
+        param.use_cuda: bool = False
         param.tile_annotations: bool = False
-        param.fe_padding : int = 0
+        param.padding : int = 0
 
         return param
 
@@ -65,19 +65,19 @@ class FeatureExtractor:
         if param.image_downsample > 1:
             image = image[:, ::param.image_downsample, ::param.image_downsample]
 
-        padding = param.fe_padding
+        padding = param.padding
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
         features_all_scales = []
-        for s in param.fe_scalings:
+        for s in param.scalings:
             image_scaled = image[:, ::s, ::s]
-            features = self.get_features(image_scaled, order=param.fe_order, **kwargs) #features have shape [nb_features, width, height]
+            features = self.get_features(image_scaled, order=param.order, **kwargs) #features have shape [nb_features, width, height]
             nb_features = features.shape[0]
             features = skimage.transform.resize(
                                 image=features,
                                 output_shape=(nb_features, image.shape[-2], image.shape[-1]),
                                 preserve_range=True,
-                                order=param.fe_order)
+                                order=param.order)
             
             features_all_scales.append(features)
         features_all_scales = np.concatenate(features_all_scales, axis=0)
@@ -104,5 +104,5 @@ class FeatureExtractor:
             predicted_image = skimage.transform.resize(
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=param.fe_order).astype(np.uint8)
+                preserve_range=True, order=param.order).astype(np.uint8)
         return predicted_image
