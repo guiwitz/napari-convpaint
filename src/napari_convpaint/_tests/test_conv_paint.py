@@ -8,7 +8,7 @@ def test_add_layers(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100)))
-    my_widget.add_empty_layers()    
+    my_widget._on_add_layers()    
 
     assert 'annotations' in viewer.layers
     assert 'segmentation' in viewer.layers
@@ -19,13 +19,13 @@ def test_annotation_layer_dims(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100, 3)))
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     assert viewer.layers['annotations'].data.shape == (100, 100)
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((3, 100, 100)))
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     assert viewer.layers['annotations'].data.shape == (3, 100, 100)
 
 
@@ -37,16 +37,16 @@ def test_correct_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im, name='sample')
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.train_classifier()
+    my_widget._on_train()
     assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
 
     viewer.layers.clear()
     viewer.add_image(im[:,:,0], name='sample')
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.train_classifier()
+    my_widget._on_train()
     assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
 
 
@@ -59,10 +59,10 @@ def test_rgb_prediction(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.train_classifier()
-    my_widget.predict()
+    my_widget._on_train()
+    my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
     precision, recall = compute_precision_recall(ground_truth, recovered)
@@ -89,10 +89,10 @@ def test_multi_channel_prediction(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.moveaxis(im,2,0))
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data[1,:,:] = im_annot
-    my_widget.train_classifier()
-    my_widget.predict()
+    my_widget._on_train()
+    my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data[1][ground_truth==1]
     precision, recall = compute_precision_recall(ground_truth, recovered)
@@ -107,13 +107,13 @@ def test_save_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
-    my_widget.train_classifier()
-    my_widget.predict()
+    my_widget._on_train()
+    my_widget._on_predict()
 
     os.makedirs('_tests/model_dir', exist_ok=True)
-    my_widget.on_save_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
+    my_widget._on_save_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     assert os.path.exists('_tests/model_dir/test_model.pkl')  # Changed to .pkl
 
 
@@ -125,7 +125,7 @@ def test_load_model(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
     my_widget.on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
-    my_widget.predict()
+    my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
     tp = np.sum(recovered == 2)
@@ -144,7 +144,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Simulate selecting the Dino model from the dropdown
@@ -161,14 +161,14 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.param.image_downsample = 1
     my_widget.param.normalize = 1 #no normalization (button id)
     my_widget.update_gui_from_params()
-    my_widget.create_model_btn.click()  # Load the model
+    my_widget.set_fe_btn.click()  # Load the model
     assert my_widget.param.scalings == [1]
     assert my_widget.param.model_name == 'dinov2_vits14_reg'
 
-    my_widget.train_classifier()  # Update the classifier with the new parameters
-    my_widget.predict()
+    my_widget._on_train()  # Update the classifier with the new parameters
+    my_widget._on_predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
-    my_widget.on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
+    my_widget._on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
     assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
     assert os.path.exists('_tests/model_dir/test_model_dino.pkl')
 
@@ -187,7 +187,7 @@ def test_load_model_dino(make_napari_viewer, capsys):
     my_widget.on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
     # Ensure the model type is set correctly after loading
     assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
-    my_widget.predict()
+    my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
     tp = np.sum(recovered == 2)
@@ -207,46 +207,46 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the first model with scales [1]
     my_widget.check_use_custom_model.setChecked(True)
     my_widget.qcombo_model_type.setCurrentText('single_layer_vgg16')
-    my_widget.num_scales_combo.setCurrentText('[1]')
-    my_widget.create_model_btn.setEnabled(True)
-    my_widget.create_model_btn.click()
+    my_widget.fe_scaling_factors.setCurrentText('[1]')
+    my_widget.set_fe_btn.setEnabled(True)
+    my_widget.set_fe_btn.click()
     assert my_widget.param.scalings == [1]
-    my_widget.train_classifier()
-    my_widget.predict()
+    my_widget._on_train()
+    my_widget._on_predict()
     model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
-    my_widget.on_save_model(save_file=model_path_1)
+    my_widget._on_save_model(save_file=model_path_1)
     assert os.path.exists(model_path_1)
 
     # Create and save the second model with scales [1, 2, 3, 4]. Change in the UI:
-    my_widget.num_scales_combo.setCurrentText('[1,2,4,8]')
-    my_widget.create_model_btn.click()
+    my_widget.fe_scaling_factors.setCurrentText('[1,2,4,8]')
+    my_widget.set_fe_btn.click()
     assert my_widget.param.scalings == [1, 2, 4, 8]
 
-    my_widget.create_model_btn.click()
+    my_widget.set_fe_btn.click()
     assert my_widget.param.scalings == [1, 2, 4, 8]
-    my_widget.train_classifier()
-    my_widget.predict()
+    my_widget._on_train()
+    my_widget._on_predict()
     model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
-    my_widget.on_save_model(save_file=model_path_2)
+    my_widget._on_save_model(save_file=model_path_2)
     assert os.path.exists(model_path_2)
 
     # Load the second model and predict
     my_widget.on_load_model(save_file=model_path_2)
     assert my_widget.param.scalings == [1, 2, 4, 8]
-    my_widget.predict()
+    my_widget._on_predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
 
     # Load the first model and predict
     my_widget.on_load_model(save_file=model_path_1)
     assert my_widget.param.scalings == [1]
-    my_widget.predict()
+    my_widget._on_predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
 
@@ -265,7 +265,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         viewer = make_napari_viewer()
         my_widget = ConvPaintWidget(viewer)
         viewer.add_image(im)
-        my_widget.add_empty_layers()
+        my_widget._on_add_layers()
         viewer.layers['annotations'].data = im_annot
 
         # Load the Dino model
@@ -274,11 +274,11 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         #set widget disable tiling annotations
         my_widget.check_tile_annotations.setChecked(False)
         # Set the scaling to 1
-        my_widget.num_scales_combo.setCurrentText('[1]')
+        my_widget.fe_scaling_factors.setCurrentText('[1]')
         my_widget.update_params_from_gui()
-        my_widget.create_model_btn.click()
-        my_widget.train_classifier()
-        my_widget.predict()
+        my_widget.set_fe_btn.click()
+        my_widget._on_train()
+        my_widget._on_predict()
 
         recovered = viewer.layers['segmentation'].data
         
@@ -294,42 +294,42 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.add_empty_layers()
+    my_widget._on_add_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the custom VGG16 model with selected layers
     my_widget.check_use_custom_model.setChecked(True)
 
     my_widget.qcombo_model_type.setCurrentText('vgg16')
-    #select items from widget.model_output_selection = QListWidget()
+    #select items from widget.fe_layer_selection = QListWidget()
 
-    # Assuming 'self.model_output_selection' is your QListWidget instance
+    # Assuming 'self.fe_layer_selection' is your QListWidget instance
     all_tests = [[0],[1,2],[0,7]]
     for indices_to_select in all_tests:
         # Iterate over the list of indices and select the corresponding items
-        my_widget.model_output_selection.clearSelection()
+        my_widget.fe_layer_selection.clearSelection()
         for index in indices_to_select:
-            item = my_widget.model_output_selection.item(index)
+            item = my_widget.fe_layer_selection.item(index)
             if item:  # Check if the item exists at that index
                 item.setSelected(True)
 
-        my_widget.create_model_btn.setEnabled(True)
-        my_widget.create_model_btn.click()
-        my_widget.train_classifier()
+        my_widget.set_fe_btn.setEnabled(True)
+        my_widget.set_fe_btn.click()
+        my_widget._on_train()
 
-        assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
+        assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
         #save the model
         model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
-        my_widget.on_save_model(save_file=model_path)
+        my_widget._on_save_model(save_file=model_path)
 
     #load the models again and check if the predictions are correct
     for indices_to_select in all_tests:
         model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
         my_widget.on_load_model(save_file=model_path)
-        assert len(my_widget.model_output_selection.selectedItems()) == len(indices_to_select)
+        assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
-        my_widget.predict()
+        my_widget._on_predict()
         recovered = viewer.layers['segmentation'].data[ground_truth == 1]
         precision, recall = compute_precision_recall(ground_truth, recovered)
         assert precision > 0.8, f"Precision: {precision}, too low"
