@@ -12,14 +12,13 @@ class Param:
     """
 
     classifier: str = None
-    # Data parameters
+    # Image processing parameters
     multi_channel_training: bool = None
-    # Processing parameters
+    normalize: int = None
+    # Acceleration parameters
     image_downsample: int = None
     tile_annotations: bool = False
     tile_image: bool = False
-    normalize: int = None
-    use_cuda: bool = None
     # Model parameters
     model_name: str = None
     model_layers: list[str] = None
@@ -27,7 +26,11 @@ class Param:
     scalings: list[int] = None
     order: int = None
     use_min_features: bool = None
-
+    use_cuda: bool = None
+    # Classifier parameters
+    classif_iterations: int = None
+    classif_learning_rate: float = None
+    classif_depth: int = None
 
 
     def __post_init__(self):
