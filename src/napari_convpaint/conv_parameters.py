@@ -13,7 +13,7 @@ class Param:
 
     classifier: str = None
     # Image processing parameters
-    multi_channel_training: bool = None
+    multi_channel_img: bool = None
     normalize: int = None
     # Acceleration parameters
     image_downsample: int = None

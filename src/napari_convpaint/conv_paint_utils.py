@@ -31,7 +31,7 @@ def normalize_image(image, image_mean, image_std):
     """
     Normalize a numpy array with 2-4 dimensions.
 
-    If the array has multiple channels (determined by the multi_channel_training flag), 
+    If the array has multiple channels (determined by the multi_channel_img flag), 
     each channel is normalized independently. If there are multiple time or z frames, 
     they are normalized together.
 

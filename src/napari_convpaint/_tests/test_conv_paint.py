@@ -8,7 +8,7 @@ def test_add_layers(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100)))
-    my_widget._on_add_layers()    
+    my_widget._on_add_annot_seg_layers()    
 
     assert 'annotations' in viewer.layers
     assert 'segmentation' in viewer.layers
@@ -19,13 +19,13 @@ def test_annotation_layer_dims(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100, 3)))
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     assert viewer.layers['annotations'].data.shape == (100, 100)
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((3, 100, 100)))
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     assert viewer.layers['annotations'].data.shape == (3, 100, 100)
 
 
@@ -37,14 +37,14 @@ def test_correct_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im, name='sample')
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
     assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
 
     viewer.layers.clear()
     viewer.add_image(im[:,:,0], name='sample')
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
     assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
@@ -59,7 +59,7 @@ def test_rgb_prediction(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
     my_widget._on_predict()
@@ -89,7 +89,7 @@ def test_multi_channel_prediction(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.moveaxis(im,2,0))
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data[1,:,:] = im_annot
     my_widget._on_train()
     my_widget._on_predict()
@@ -107,7 +107,7 @@ def test_save_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
     my_widget._on_predict()
@@ -144,7 +144,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Simulate selecting the Dino model from the dropdown
@@ -207,7 +207,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the first model with scales [1]
@@ -265,7 +265,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         viewer = make_napari_viewer()
         my_widget = ConvPaintWidget(viewer)
         viewer.add_image(im)
-        my_widget._on_add_layers()
+        my_widget._on_add_annot_seg_layers()
         viewer.layers['annotations'].data = im_annot
 
         # Load the Dino model
@@ -294,7 +294,7 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget._on_add_layers()
+    my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the custom VGG16 model with selected layers
