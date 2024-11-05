@@ -10,6 +10,7 @@ from napari_guitils.gui_structures import VHGroup, TabSet
 from pathlib import Path
 import numpy as np
 import warnings
+from datetime import datetime
 
 from .conv_paint import (get_features_current_layers,
                          get_all_models, train_classifier,
@@ -59,6 +60,7 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = None
         self.third_party = third_party
         # Plugin options
+        self.keep_layers = False
         self.auto_seg = False
         self.use_custom_model = False
 
@@ -127,8 +129,13 @@ class ConvPaintWidget(QWidget):
         self.layer_selection_group.glayout.addWidget(self.annotation_layer_selection_widget.native, 1,1,1,1)
         # Add button for adding annotation/segmentation layers
         self.add_layers_btn = QPushButton('Add annotations/segmentation layers')
-        self.add_layers_btn.setEnabled(False)
+        self.add_layers_btn.setEnabled(True)
         self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
+        # Checkbox for keeping old layers
+        # self.check_keep_layers = QCheckBox('Keep old layers')
+        # self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
+        # self.check_keep_layers.setChecked(self.keep_layers)
+        # self.layer_selection_group.glayout.addWidget(self.check_keep_layers, 2,1,1,1)
 
         # Add buttons for "Train" group
         self.train_classifier_btn = QPushButton('Train')
@@ -364,7 +371,8 @@ class ConvPaintWidget(QWidget):
         self.viewer.layers.events.inserted.connect(self._on_insert_layer)
 
         # Reset layer choices in dropdowns when napari layers are added or removed
-        for layer_widget_reset in [self.annotation_layer_selection_widget.reset_choices, self.image_layer_selection_widget.reset_choices]:
+        for layer_widget_reset in [self.annotation_layer_selection_widget.reset_choices,
+                                   self.image_layer_selection_widget.reset_choices]:
             self.viewer.layers.events.inserted.connect(layer_widget_reset)
             self.viewer.layers.events.removed.connect(layer_widget_reset)
         
@@ -372,10 +380,14 @@ class ConvPaintWidget(QWidget):
         self.image_layer_selection_widget.changed.connect(self._on_select_layer)
         # NOTE: Changing annotation layer does not have to trigger anything
         self.add_layers_btn.clicked.connect(self._on_add_annot_seg_layers)
+        self.check_keep_layers.stateChanged.connect(lambda: setattr(
+            self, 'keep_layers', self.check_keep_layers.isChecked()))
+
 
         # Train
         self.train_classifier_btn.clicked.connect(self._on_train)
-        self.check_auto_seg.stateChanged.connect(lambda: setattr(self, 'auto_seg', self.check_auto_seg.isChecked()))
+        self.check_auto_seg.stateChanged.connect(lambda: setattr(
+            self, 'auto_seg', self.check_auto_seg.isChecked()))
         self.check_use_project.stateChanged.connect(self._on_use_project)
         self.train_classifier_on_project_btn.clicked.connect(self._on_train_on_project)
 
@@ -400,9 +412,12 @@ class ConvPaintWidget(QWidget):
         self._reset_model_btn.clicked.connect(self._on_reset_model)
 
         # Acceleration
-        self.spin_downsample.valueChanged.connect(lambda: setattr(self.param, 'image_downsample', self.spin_downsample.value()))
-        self.check_tile_annotations.stateChanged.connect(lambda: setattr(self.param, 'tile_annotations', self.check_tile_annotations.isChecked()))
-        self.check_tile_image.stateChanged.connect(lambda: setattr(self.param, 'tile_image', self.check_tile_image.isChecked()))
+        self.spin_downsample.valueChanged.connect(lambda: setattr(
+            self.param, 'image_downsample', self.spin_downsample.value()))
+        self.check_tile_annotations.stateChanged.connect(lambda: setattr(
+            self.param, 'tile_annotations', self.check_tile_annotations.isChecked()))
+        self.check_tile_image.stateChanged.connect(lambda: setattr(
+            self.param, 'tile_image', self.check_tile_image.isChecked()))
 
         # Model tab
         # Feature extractor
@@ -909,6 +924,9 @@ class ConvPaintWidget(QWidget):
         no layer is added if it didn't exist before, unless force_add=True (e.g. when the user click
         on the add layer button)"""
 
+        if self.keep_layers:
+            self.create_annot_seg_copies()
+
         self.event = event # R: Why is this needed?
         if self.image_layer_selection_widget.value is None:
             raise Exception('Please select an image layer first')
@@ -942,9 +960,27 @@ class ConvPaintWidget(QWidget):
                 name='segmentation'
                 )
         
+        # Activate the annotation layer, select it in the dropdown and activate paint mode
         if 'annotations' in self.viewer.layers:
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
+            self.viewer.layers['annotations'].mode = 'paint'
+
+    def create_annot_seg_copies(self):
+        """Create copies of the annotations and segmentation layers."""
+        image_name = self.image_layer_selection_widget.value.name
+        data_dim = self.radio_rgb.isChecked()*"RGB" + self.radio_multi_channel.isChecked()*"multiCh" + self.radio_single_channel.isChecked()*"singleCh"
+        # timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+        if 'annotations' in self.viewer.layers:
+            self.viewer.add_labels(
+                data=self.viewer.layers['annotations'].data.copy(),
+                name=f'annotations_{image_name}_{data_dim}' #_{timestamp}'
+                )
+        if 'segmentation' in self.viewer.layers:
+            self.viewer.add_labels(
+                data=self.viewer.layers['segmentation'].data.copy(),
+                name=f'segmentation_{image_name}_{data_dim}' #_{timestamp}'
+                )
 
     def _reset_radio_data_dims(self):
         """set radio buttons depending on selected image type"""
