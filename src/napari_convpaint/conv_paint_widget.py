@@ -65,8 +65,8 @@ class ConvPaintWidget(QWidget):
         ### Define Constants
 
         # Define the default model
-        self.DEFAULT_FE = 'single_layer_vgg16'
-        self.DEFAULT_LAYERS = []
+        self.DEFAULT_FE = 'vgg16'
+        self.DEFAULT_LAYERS_INDEX = 0
         self.DEFAULT_SCALINGS_TEXT = '[1,2]'
         self.DEFAULT_INTERPOLATION_ORDER = 1
         self.DEFAULT_USE_MIN_FEATURES = True
@@ -81,15 +81,15 @@ class ConvPaintWidget(QWidget):
         self.setLayout(self.main_layout)
 
         # Create and add tabs
-        self.tab_names = ['Home', 'Project', 'Model']
+        self.tab_names = ['Home', 'Project', 'Model options']
         self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
         self.main_layout.addWidget(self.tabs)
         # Disable project tab as long as not activated
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False) # R: Why only index? If custom is "respnsive", so should be the index
         
-        # Align rows in the tabs "Home" and "Model" on top
+        # Align rows in the tabs "Home" and "Model options" on top
         self.tabs.widget(self.tabs.tab_names.index('Home')).layout().setAlignment(Qt.AlignTop)
-        self.tabs.widget(self.tabs.tab_names.index('Model')).layout().setAlignment(Qt.AlignTop)
+        self.tabs.widget(self.tabs.tab_names.index('Model options')).layout().setAlignment(Qt.AlignTop)
 
         # === HOME TAB ===
 
@@ -99,16 +99,17 @@ class ConvPaintWidget(QWidget):
         self.segment_group = VHGroup('Segment', orientation='G')
         self.load_save_group = VHGroup('Load/Save', orientation='G')
         self.image_processing_group = VHGroup('Image processing', orientation='G')
-        self.model_group = VHGroup('Model', orientation='G')
         self.acceleration_group = VHGroup('Acceleration', orientation='G')
+        self.model_group = VHGroup('Model', orientation='G')
+
         # Add groups to the tab
         self.tabs.add_named_tab('Home', self.layer_selection_group.gbox)
         self.tabs.add_named_tab('Home', self.train_group.gbox)
         self.tabs.add_named_tab('Home', self.segment_group.gbox)
         self.tabs.add_named_tab('Home', self.load_save_group.gbox)
         self.tabs.add_named_tab('Home', self.image_processing_group.gbox)
-        self.tabs.add_named_tab('Home', self.model_group.gbox)
         self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
+        self.tabs.add_named_tab('Home', self.model_group.gbox)
 
         # Add elements to "Layer selection" group
         # Image layer (widget for selecting the layer to segment)
@@ -194,7 +195,7 @@ class ConvPaintWidget(QWidget):
         self.radio_normalize_by_image = QRadioButton('Normalized by plane')
         self.radio_normalize_by_image.setToolTip('Normalize each plane individually')
         self.radio_normalized_over_stack.setChecked(True)
-        #[x.setEnabled(False) for x in [self.radio_no_normalize, self.radio_normalized_over_stack, self.radio_normalize_by_image]]
+        self.norm_buttons = [self.radio_no_normalize, self.radio_normalized_over_stack, self.radio_normalize_by_image]
         self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
         self.button_group_normalize.addButton(self.radio_normalized_over_stack, id=2)
         self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
@@ -204,19 +205,19 @@ class ConvPaintWidget(QWidget):
 
         # Add buttons for "Model" group
         # Current model label
-        self.model_description = QLabel('None')
-        self.model_group.glayout.addWidget(self.model_description, 0,0,1,2)
+        self.model_description1 = QLabel('None')
+        self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
         self.current_model_path = QLabel('not trained')
         # self.model_group.glayout.addWidget(self.current_model_path, 0,1,1,1)
         # "Use custom Model" checkbox
-        self.check_use_custom_model = QCheckBox('Use custom Model')
-        self.check_use_custom_model.setToolTip('Activate Tab to customize Feature Extractor and Classifier')
-        self.check_use_custom_model.setChecked(False)
-        self.model_group.glayout.addWidget(self.check_use_custom_model, 1,0,1,1)
+        # self.check_use_custom_model = QCheckBox('Use custom Model')
+        # self.check_use_custom_model.setToolTip('Activate Tab to customize Feature Extractor and Classifier')
+        # self.check_use_custom_model.setChecked(False)
+        # self.model_group.glayout.addWidget(self.check_use_custom_model, 1,0,1,1)
         # Reset model button
-        self._reset_model_btn = QPushButton('Reset model')
-        self._reset_model_btn.setToolTip('Discard current model and annotations, create new default model.')
-        self.model_group.glayout.addWidget(self._reset_model_btn, 1,1,1,1)
+        self._reset_model_btn = QPushButton('Reset to default model')
+        self._reset_model_btn.setToolTip('Discard current model, create new default model.')
+        self.model_group.glayout.addWidget(self._reset_model_btn, 1,0,1,2)
 
         # Add elements to "Acceleration" group
         # "Downsample" spinbox
@@ -240,24 +241,28 @@ class ConvPaintWidget(QWidget):
 
         # === MODEL TAB ===
 
-        # Create two groups, 'Feature extractor' and 'CatBoost Classifier parameters'
-        self.fe_group = VHGroup('Feature extractor', orientation='G')
-        self.classifier_params_group = VHGroup('Classifier (CatBoost)', orientation='G')
+        # Create three groups, 'Current model', 'Feature extractor options' and 'Classifier parameters (CatBoost)'
+        self.current_model_group = VHGroup('Current model', orientation='G')
+        self.fe_group = VHGroup('Feature extractor options', orientation='G')
+        self.classifier_params_group = VHGroup('Classifier parameters (CatBoost)', orientation='G')
         # Add groups to the tab
-        self.tabs.add_named_tab('Model', self.fe_group.gbox, [0, 0, 7, 2])
-        self.tabs.add_named_tab('Model', self.classifier_params_group.gbox, [7, 0, 1, 2])
-        self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
+        self.tabs.add_named_tab('Model options', self.current_model_group.gbox, [0, 0, 2, 2])
+        self.tabs.add_named_tab('Model options', self.fe_group.gbox, [3, 0, 7, 2])
+        self.tabs.add_named_tab('Model options', self.classifier_params_group.gbox, [10, 0, 3, 2])
+        self.tabs.setTabEnabled(self.tabs.tab_names.index('Model options'), True)
         
+        # Current model and update button
+        self.model_description2 = QLabel('None')
+        self.current_model_group.glayout.addWidget(self.model_description2, 0, 0, 1, 2)
+        self.set_fe_btn = QPushButton('Replace feature extractor')
+        self.set_fe_btn.setToolTip('Set the feature extraction model')
+        self.current_model_group.glayout.addWidget(self.set_fe_btn, 1, 0, 1, 2)
+
         # Add "FE architecture" combo box to FE group
         self.qcombo_model_type = QComboBox()
         self.qcombo_model_type.addItems(sorted(get_all_models().keys()))
         self.qcombo_model_type.setToolTip('Select architecture of feature extraction model.')
-        self.fe_group.glayout.addWidget(self.qcombo_model_type, 0, 0, 1, 2)
-
-        # Add "Set Feature Extractor" button to model group
-        self.set_fe_btn = QPushButton('Set Feature Extractor')
-        self.set_fe_btn.setToolTip('Set the feature extraction model')
-        self.fe_group.glayout.addWidget(self.set_fe_btn, 1, 0, 1, 2)
+        self.fe_group.glayout.addWidget(self.qcombo_model_type, 2, 0, 1, 2)
 
         # Add "FE layers" list to model group
         self.fe_layer_selection = QListWidget()
@@ -267,7 +272,7 @@ class ConvPaintWidget(QWidget):
         # self.fe_layer_selection.setMinimumHeight(40)
         # Turn off stretching
         # self.fe_group.glayout.setRowStretch(2, 0)
-        self.fe_group.glayout.addWidget(self.fe_layer_selection, 2, 0, 1, 2)
+        self.fe_group.glayout.addWidget(self.fe_layer_selection, 3, 0, 1, 2)
 
         # Create and add scales selection to model group
         self.fe_scaling_factors = QComboBox()
@@ -276,8 +281,8 @@ class ConvPaintWidget(QWidget):
         self.fe_scaling_factors.addItem('[1,2,4]',[1,2,4])
         self.fe_scaling_factors.addItem('[1,2,4,8]',[1,2,4,8])
         self.fe_scaling_factors.setCurrentText('[1,2]')
-        self.fe_group.glayout.addWidget(QLabel('Downscaling factors'), 3, 0, 1, 1)
-        self.fe_group.glayout.addWidget(self.fe_scaling_factors, 3, 1, 1, 1)
+        self.fe_group.glayout.addWidget(QLabel('Downscaling factors'), 4, 0, 1, 1)
+        self.fe_group.glayout.addWidget(self.fe_scaling_factors, 4, 1, 1, 1)
 
         # Add interpolation order spinbox to model group
         self.spin_interpolation_order = QSpinBox()
@@ -285,20 +290,20 @@ class ConvPaintWidget(QWidget):
         self.spin_interpolation_order.setMaximum(5)
         self.spin_interpolation_order.setValue(1)
         self.spin_interpolation_order.setToolTip('Interpolation order for image rescaling')
-        self.fe_group.glayout.addWidget(QLabel('Interpolation order'), 4, 0, 1, 1)
-        self.fe_group.glayout.addWidget(self.spin_interpolation_order, 4, 1, 1, 1)
+        self.fe_group.glayout.addWidget(QLabel('Interpolation order'), 5, 0, 1, 1)
+        self.fe_group.glayout.addWidget(self.spin_interpolation_order, 5, 1, 1, 1)
 
         # Add min features checkbox to model group
         self.check_use_min_features = QCheckBox('Use min features')
         self.check_use_min_features.setChecked(False)
         self.check_use_min_features.setToolTip('Use same number of features from each layer. Otherwise use all features from each layer.')
-        self.fe_group.glayout.addWidget(self.check_use_min_features, 5, 0, 1, 1)
+        self.fe_group.glayout.addWidget(self.check_use_min_features, 6, 0, 1, 1)
 
         # Add use cuda checkbox to model group
         self.check_use_cuda = QCheckBox('Use cuda')
         self.check_use_cuda.setChecked(False)
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
-        self.fe_group.glayout.addWidget(self.check_use_cuda, 5, 1, 1, 1)
+        self.fe_group.glayout.addWidget(self.check_use_cuda, 6, 1, 1, 1)
 
         # Add classifier parameters
         self.spin_iterations = QSpinBox()
@@ -326,7 +331,7 @@ class ConvPaintWidget(QWidget):
         self.classifier_params_group.glayout.addWidget(QLabel('Depth'), 2, 0, 1, 1)
         self.classifier_params_group.glayout.addWidget(self.spin_depth, 2, 1, 1, 1)
 
-        self.set_default_classif_btn = QPushButton('Reset to default')
+        self.set_default_classif_btn = QPushButton('Restore defaults')
         self.set_default_classif_btn.setEnabled(True)
         self.classifier_params_group.glayout.addWidget(self.set_default_classif_btn, 3, 0, 1, 2)
 
@@ -385,7 +390,7 @@ class ConvPaintWidget(QWidget):
         self.radio_normalize_by_image.toggled.connect(self._on_norm_changed)
 
         # Model
-        self.check_use_custom_model.stateChanged.connect(self._on_use_custom_model)
+        # self.check_use_custom_model.stateChanged.connect(self._on_use_custom_model)
         self._reset_model_btn.clicked.connect(self._on_reset_model)
 
         # Acceleration
@@ -399,9 +404,10 @@ class ConvPaintWidget(QWidget):
         self.set_fe_btn.clicked.connect(self._on_set_fe_model)
         self.fe_layer_selection.itemSelectionChanged.connect(self._on_fe_layer_selection_changed)
         self.fe_scaling_factors.currentIndexChanged.connect(self._on_fe_scalings_changed)
-        self.spin_interpolation_order.valueChanged.connect(lambda: setattr(self.param, 'order', self.spin_interpolation_order.value()))
-        self.check_use_cuda.stateChanged.connect(lambda: setattr(self.param, 'use_cuda', self.check_use_cuda.isChecked()))
-        self.check_use_min_features.stateChanged.connect(lambda: setattr(self.param, 'use_min_features', self.check_use_min_features.isChecked()))
+        # The changing of these parameters shall only be applied when the user clicks the button
+        # self.spin_interpolation_order.valueChanged.connect(lambda: setattr(self.param, 'order', self.spin_interpolation_order.value()))
+        # self.check_use_cuda.stateChanged.connect(lambda: setattr(self.param, 'use_cuda', self.check_use_cuda.isChecked()))
+        # self.check_use_min_features.stateChanged.connect(lambda: setattr(self.param, 'use_min_features', self.check_use_min_features.isChecked()))
         # Classifier
         self.spin_iterations.valueChanged.connect(lambda: setattr(self.param, 'classif_iterations', self.spin_iterations.value()))
         self.spin_learning_rate.valueChanged.connect(lambda: setattr(self.param, 'classif_learning_rate', self.spin_learning_rate.value()))
@@ -483,7 +489,7 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             self.current_model_path.setText('in training')
-            self.model_description.setText(self.get_model_description())
+            self._set_model_description()
             pbr.set_description(f"Training")
             features, targets = get_features_current_layers(
                 image=image_stack,
@@ -501,7 +507,7 @@ class ConvPaintWidget(QWidget):
             self.trained = True
             self._reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
-            self.model_description.setText(self.get_model_description())
+            self._set_model_description()
             
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -578,7 +584,7 @@ class ConvPaintWidget(QWidget):
             self.trained = True
             self._reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
-            self.model_description.setText(self.get_model_description())
+            self._set_model_description()
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -744,11 +750,10 @@ class ConvPaintWidget(QWidget):
                 save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
             save_file = Path(save_file)
             
-            # Update parameters from GUI before saving (just to be sure...)
-            self._update_params_from_gui()
+            # self._update_fe_params_from_gui() # NOTE: Doesn't make sense !!
             save_model(save_file, self.classifier, self.model, self.param, )        
             self.current_model_path.setText(save_file.name)
-            self.model_description.setText(self.get_model_description())
+            self._set_model_description()
 
     def _on_load_model(self, event=None, save_file=None):
         """Select classifier file to load along with the model parameters."""
@@ -758,7 +763,7 @@ class ConvPaintWidget(QWidget):
         save_file = Path(save_file)
 
         # Tick the custom model checkbox
-        self.check_use_custom_model.setChecked(True)
+        # self.check_use_custom_model.setChecked(True)
         
         # Load model
         classifier, model, param, model_state = load_model(save_file)
@@ -771,11 +776,13 @@ class ConvPaintWidget(QWidget):
             self.model.load_state_dict(model_state)
         
         # Update GUI
-        self._update_gui_from_params()
-        self._update_gui_from_model()
+        # Select the model type in the dropdown
+        self.qcombo_model_type.setCurrentText(self.param.model_name)
+        self._update_gui_from_param()
+        self._update_gui_fe_layers_from_model()
         self.current_model_path.setText(save_file.name)
         self.trained = True
-        self.model_description.setText(self.get_model_description())
+        self._set_model_description()
         self._reset_predict_buttons()
 
     # Image Processing
@@ -801,30 +808,38 @@ class ConvPaintWidget(QWidget):
 
     # Model
 
-    def _on_use_custom_model(self, event=None):
-        """Change custom model parameter based on flag,
-        and add tab for custom model management if needed."""
-        if self.check_use_custom_model.isChecked():
-            self.use_custom_model = True
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
-        else:
-            self.use_custom_model = False
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
-            # self.qcombo_model_type.setCurrentText('single_layer_vgg16')
-            self._set_default_model()
+    # def _on_use_custom_model(self, event=None):
+    #     """Change custom model parameter based on flag,
+    #     and add tab for custom model management if needed."""
+    #     if self.check_use_custom_model.isChecked():
+    #         self.use_custom_model = True
+    #         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model options'), True)
+    #     else:
+    #         self.use_custom_model = False
+    #         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model options'), False)
+    #         # self.qcombo_model_type.setCurrentText('single_layer_vgg16')
+    #         self._set_default_model()
 
     def _on_reset_model(self, event=None):
         """Reset model to default and update GUI."""
         # self.model = None
-        self._reset_classif()
         self.save_model_btn.setEnabled(False)
-        self._reset_radio_data_dims()
-        self._reset_radio_norm_settings()
         self._set_default_model()
         self._on_select_layer()
-        self.model_description.setText(self.get_model_description())
+        self._reset_classif()
+        self._reset_radio_data_dims()
+        self._reset_radio_norm_settings()
 
     # Model Tab
+
+    def _on_set_fe_model(self, event=None):
+        """Create a neural network model that will be used for feature extraction and
+        reset the classifier."""
+        self._update_fe_params_from_gui()
+        # self.param.model_name = self.qcombo_model_type.currentText()
+        self.model = create_model(self.param)
+        self._reset_classif()
+        self._update_gui_fe_layers_from_model()
 
     def _on_model_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
@@ -832,8 +847,9 @@ class ConvPaintWidget(QWidget):
         model_class = get_all_models()[model_type]
         self.temp_model = model_class(model_name=model_type, use_cuda=self.param.use_cuda)
 
+        # Get selectable layers from the temp model and update the GUI
         if isinstance(self.temp_model, Hookmodel):
-            self._create_fe_layer_selection_for_temp_model(self.temp_model)
+            self._create_fe_layer_selection_from_temp_model(self.temp_model)
             self.fe_layer_selection.setEnabled(True)
             #check if outputs are selected
             if self.fe_layer_selection.count() > 0:
@@ -843,20 +859,12 @@ class ConvPaintWidget(QWidget):
             self.fe_layer_selection.setEnabled(False)
             self.set_fe_btn.setEnabled(True)
 
-        # get the default params for the model and update the GUI
+        # Get the default FE params for the temp model and update the GUI
         default_params = self.temp_model.get_default_params().as_dict()
-        for p_name, default_val in default_params.items():
+        for param_name, default_val in default_params.items():
             if default_val is not None:
-                setattr(self.param, p_name, default_val)
-        self._update_gui_from_params()
-
-    def _on_set_fe_model(self, event=None):
-        """Create a neural network model that will be used for feature extraction and
-        reset the classifier."""
-        self._update_params_from_gui()
-        self.model = create_model(self.param)
-        self._reset_classif()
-        self._update_gui_from_model()
+                setattr(self.param, param_name, default_val)
+        self._update_gui_from_param()
 
     def _on_fe_layer_selection_changed(self):
         #check if temp model is a hookmodel
@@ -870,8 +878,9 @@ class ConvPaintWidget(QWidget):
             self.set_fe_btn.setEnabled(True)
 
     def _on_fe_scalings_changed(self):
-        self._update_scalings_from_gui()
-        self._reset_classif()
+        # self.param.scalings = self.fe_scaling_factors.currentData()
+        # self._reset_classif()
+        return
 
     def _on_reset_classif_params(self):
         self._reset_classif_params()
@@ -950,11 +959,13 @@ class ConvPaintWidget(QWidget):
     def _reset_radio_norm_settings(self, event=None):
         
         self.image_mean, self.image_std = None, None
-        self._add_empty_layers(force_add=False)
 
         if self.image_layer_selection_widget.value is None:
             for x in self.norm_buttons: x.setEnabled(False)
-        elif self.image_layer_selection_widget.value.ndim == 2:
+            return
+        
+        self._add_empty_layers(force_add=False)
+        if self.image_layer_selection_widget.value.ndim == 2:
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalize_by_image.setChecked(True)
             self.radio_normalized_over_stack.setEnabled(False)
@@ -980,37 +991,24 @@ class ConvPaintWidget(QWidget):
 
     def _reset_stats(self):
         self.image_mean, self.image_std = None, None
-              
-    def _update_scalings_from_gui(self):
-        self.param.scalings = self.fe_scaling_factors.currentData()
 
-    def _update_params_from_gui(self):
+    def _update_fe_params_from_gui(self):
         """Update parameters from GUI."""
-        # Image processing parameters
-        self.param.normalize = self.button_group_normalize.checkedId()
-        # Acceleration parameters
-        self.param.image_downsample = self.spin_downsample.value()
-        self.param.tile_annotations = self.check_tile_annotations.isChecked()
-        self.param.tile_image = self.check_tile_image.isChecked()
         # Model
         self.param.model_name = self.qcombo_model_type.currentText()
         self.param.model_layers = self.get_selected_layer_names()
-        self._update_scalings_from_gui()
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.use_cuda = self.check_use_cuda.isChecked()
-        # Classifier
-        self.param.classif_iterations = self.spin_iterations.value()
-        self.param.classif_learning_rate = self.spin_learning_rate.value()
-        self.param.classif_depth = self.spin_depth.value()
+        self.param.scalings = self.fe_scaling_factors.currentData()
 
-    def _update_gui_from_model(self):
+    def _update_gui_fe_layers_from_model(self):
         """Update GUI based on the current model."""
         if self.model is None:
             self.fe_layer_selection.setEnabled(False)
             self.fe_layer_selection.clear()
         elif isinstance(self.model, Hookmodel):
-            self._create_fe_layer_selection()
+            self._create_fe_layer_selection_from_model()
             if len(self.model.named_modules) == 1:
                 self.fe_layer_selection.setCurrentRow(0)
                 self.fe_layer_selection.setEnabled(False)
@@ -1024,6 +1022,16 @@ class ConvPaintWidget(QWidget):
             self.fe_layer_selection.setEnabled(False)
             self.fe_layer_selection.clear()
 
+    def _create_fe_layer_selection_from_model(self):
+        """Update list of selectable layers from the model."""
+        self.fe_layer_selection.clear()
+        self.fe_layer_selection.addItems(self.model.selectable_layer_keys.keys())
+ 
+    def _create_fe_layer_selection_from_temp_model(self, temp_model):
+        """Update list of selectable layers using the temp model (for choosing)."""
+        self.fe_layer_selection.clear()
+        self.fe_layer_selection.addItems(temp_model.selectable_layer_keys.keys())   
+
     def _update_gui_scalings_from_param(self):
         index = self.fe_scaling_factors.findData(self.param.scalings)
         if index != -1:
@@ -1032,7 +1040,7 @@ class ConvPaintWidget(QWidget):
             self.fe_scaling_factors.addItem(str(self.param.scalings), self.param.scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
-    def _update_gui_from_params(self):
+    def _update_gui_from_param(self):
         """Update GUI from parameters."""
         # Image processing parameters
         # NOTE: WHAT TO DO ABOUT MULTICHANNEL ?
@@ -1041,7 +1049,7 @@ class ConvPaintWidget(QWidget):
         self.spin_downsample.setValue(self.param.image_downsample)
         self.check_tile_annotations.setChecked(self.param.tile_annotations)
         self.check_tile_image.setChecked(self.param.tile_image)
-        # Model
+        # Feature Extractor
         self.qcombo_model_type.setCurrentText(self.param.model_name)
         # self.fe_layer_selection.clear()
         self._update_gui_scalings_from_param()
@@ -1052,7 +1060,7 @@ class ConvPaintWidget(QWidget):
         self.spin_iterations.setValue(self.param.classif_iterations)
         self.spin_learning_rate.setValue(self.param.classif_learning_rate)
         self.spin_depth.setValue(self.param.classif_depth)
-   
+
     def _check_create_prediction_layer(self):
         """Check if segmentation layer exists and create it if not."""
         layer_names = [x.name for x in self.viewer.layers]
@@ -1069,22 +1077,12 @@ class ConvPaintWidget(QWidget):
                 data=np.zeros((layer_shape), dtype=np.uint8), name='segmentation'
                 )
 
-    def _create_fe_layer_selection(self):
-        """Update list of selectable layers"""
-        self.fe_layer_selection.clear()
-        self.fe_layer_selection.addItems(self.model.selectable_layer_keys.keys())
- 
-    def _create_fe_layer_selection_for_temp_model(self, temp_model):
-        """Update list of selectable layers using the temp model."""
-        self.fe_layer_selection.clear()
-        self.fe_layer_selection.addItems(temp_model.selectable_layer_keys.keys())
-
     def _reset_classif(self):
         self.classifier = None
         self.current_model_path.setText('not trained')
         self.trained = False
         self._reset_predict_buttons()
-        self.model_description.setText(self.get_model_description())
+        self._set_model_description()
 
     def _reset_classif_params(self):
         """Reset classifier parameters to default values."""
@@ -1100,6 +1098,7 @@ class ConvPaintWidget(QWidget):
     def _reset_fe_params(self):
         # Reset the gui values for the FE
         self.qcombo_model_type.setCurrentText(self.DEFAULT_FE)
+        self.fe_layer_selection.setCurrentRow(self.DEFAULT_LAYERS_INDEX)
         self.fe_scaling_factors.setCurrentText(self.DEFAULT_SCALINGS_TEXT)
         self.spin_interpolation_order.setValue(self.DEFAULT_INTERPOLATION_ORDER)
         self.check_use_min_features.setChecked(self.DEFAULT_USE_MIN_FEATURES)
@@ -1110,6 +1109,20 @@ class ConvPaintWidget(QWidget):
         """Set default model."""
         self._reset_classif_params()
         self._reset_fe_params()
+
+    def _set_model_description(self):
+        if self.model is None:
+            descr = 'No model loaded'
+            return
+        model_name = self.param.model_name if not self.param.model_name is None else 'None'
+        num_layers = len(self.param.model_layers) if not self.param.model_layers is None else 0
+        num_scalings = len(self.param.scalings) if not self.param.scalings is None else 0
+        descr = (model_name +
+        f': {num_layers} layer' + ('s' if num_layers > 1 else '') +
+        f', {num_scalings} scaling' + ('s' if num_scalings > 1 else '') + 
+        f' ({self.current_model_path.text()})')
+        self.model_description1.setText(descr)
+        self.model_description2.setText(descr)
 
     def get_selected_layer_names(self):
         """Get names of selected layers."""
@@ -1177,12 +1190,3 @@ class ConvPaintWidget(QWidget):
                 return '3D_multi'
             else:
                 return '3D_single'
-
-    def get_model_description(self):
-        model_name = self.param.model_name
-        num_layers = len(self.param.model_layers)
-        num_scalings = len(self.param.scalings)
-        return (model_name +
-        f', {num_layers} layer' + ('s' if num_layers > 1 else '') +
-        f', {num_scalings} scaling' + ('s' if num_scalings > 1 else '') + 
-        f' ({self.current_model_path.text()})')
