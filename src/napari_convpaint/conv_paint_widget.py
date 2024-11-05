@@ -70,6 +70,7 @@ class ConvPaintWidget(QWidget):
         self.DEFAULT_SCALINGS_TEXT = '[1,2]'
         self.DEFAULT_INTERPOLATION_ORDER = 1
         self.DEFAULT_USE_MIN_FEATURES = True
+        self.DEFAULT_USE_CUDA = False
 
         # Define the default classifier parameters
         self.DEFAULT_ITERATIONS = 50
@@ -241,22 +242,19 @@ class ConvPaintWidget(QWidget):
 
         # === MODEL TAB ===
 
-        # Create three groups, 'Current model', 'Feature extractor options' and 'Classifier parameters (CatBoost)'
+        # Create three groups, 'Current model', 'Feature extractor' and 'Classifier parameters (CatBoost)'
         self.current_model_group = VHGroup('Current model', orientation='G')
-        self.fe_group = VHGroup('Feature extractor options', orientation='G')
-        self.classifier_params_group = VHGroup('Classifier parameters (CatBoost)', orientation='G')
+        self.fe_group = VHGroup('Feature extractor', orientation='G')
+        self.classifier_params_group = VHGroup('Classifier (CatBoost)', orientation='G')
         # Add groups to the tab
-        self.tabs.add_named_tab('Model options', self.current_model_group.gbox, [0, 0, 2, 2])
-        self.tabs.add_named_tab('Model options', self.fe_group.gbox, [3, 0, 7, 2])
+        self.tabs.add_named_tab('Model options', self.current_model_group.gbox, [0, 0, 1, 2])
+        self.tabs.add_named_tab('Model options', self.fe_group.gbox, [2, 0, 8, 2])
         self.tabs.add_named_tab('Model options', self.classifier_params_group.gbox, [10, 0, 3, 2])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model options'), True)
         
         # Current model and update button
         self.model_description2 = QLabel('None')
         self.current_model_group.glayout.addWidget(self.model_description2, 0, 0, 1, 2)
-        self.set_fe_btn = QPushButton('Replace feature extractor')
-        self.set_fe_btn.setToolTip('Set the feature extraction model')
-        self.current_model_group.glayout.addWidget(self.set_fe_btn, 1, 0, 1, 2)
 
         # Add "FE architecture" combo box to FE group
         self.qcombo_model_type = QComboBox()
@@ -264,7 +262,7 @@ class ConvPaintWidget(QWidget):
         self.qcombo_model_type.setToolTip('Select architecture of feature extraction model.')
         self.fe_group.glayout.addWidget(self.qcombo_model_type, 2, 0, 1, 2)
 
-        # Add "FE layers" list to model group
+        # Add "FE layers" list to FE group
         self.fe_layer_selection = QListWidget()
         self.fe_layer_selection.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.fe_layer_selection.setFixedHeight(200)
@@ -274,7 +272,7 @@ class ConvPaintWidget(QWidget):
         # self.fe_group.glayout.setRowStretch(2, 0)
         self.fe_group.glayout.addWidget(self.fe_layer_selection, 3, 0, 1, 2)
 
-        # Create and add scales selection to model group
+        # Create and add scales selection to FE group
         self.fe_scaling_factors = QComboBox()
         self.fe_scaling_factors.addItem('[1]',[1])
         self.fe_scaling_factors.addItem('[1,2]',[1,2])
@@ -284,7 +282,7 @@ class ConvPaintWidget(QWidget):
         self.fe_group.glayout.addWidget(QLabel('Downscaling factors'), 4, 0, 1, 1)
         self.fe_group.glayout.addWidget(self.fe_scaling_factors, 4, 1, 1, 1)
 
-        # Add interpolation order spinbox to model group
+        # Add interpolation order spinbox to FE group
         self.spin_interpolation_order = QSpinBox()
         self.spin_interpolation_order.setMinimum(0)
         self.spin_interpolation_order.setMaximum(5)
@@ -293,17 +291,25 @@ class ConvPaintWidget(QWidget):
         self.fe_group.glayout.addWidget(QLabel('Interpolation order'), 5, 0, 1, 1)
         self.fe_group.glayout.addWidget(self.spin_interpolation_order, 5, 1, 1, 1)
 
-        # Add min features checkbox to model group
+        # Add min features checkbox to FE group
         self.check_use_min_features = QCheckBox('Use min features')
         self.check_use_min_features.setChecked(False)
         self.check_use_min_features.setToolTip('Use same number of features from each layer. Otherwise use all features from each layer.')
         self.fe_group.glayout.addWidget(self.check_use_min_features, 6, 0, 1, 1)
 
-        # Add use cuda checkbox to model group
+        # Add use cuda checkbox to FE group
         self.check_use_cuda = QCheckBox('Use cuda')
         self.check_use_cuda.setChecked(False)
         self.check_use_cuda.setToolTip('Use GPU for training and segmentation')
         self.fe_group.glayout.addWidget(self.check_use_cuda, 6, 1, 1, 1)
+
+        # Add "set" buttons to FE group
+        self.set_fe_btn = QPushButton('Set feature extractor')
+        self.set_fe_btn.setToolTip('Set the feature extraction model')
+        self.fe_group.glayout.addWidget(self.set_fe_btn, 7, 0, 1, 1)
+        self.reset_default_fe_btn = QPushButton('Reset to default')
+        self.reset_default_fe_btn.setToolTip('Set the feature extractor back to the default model')
+        self.fe_group.glayout.addWidget(self.reset_default_fe_btn, 7, 1, 1, 1)
 
         # Add classifier parameters
         self.spin_iterations = QSpinBox()
@@ -402,6 +408,7 @@ class ConvPaintWidget(QWidget):
         # Feature extractor
         self.qcombo_model_type.currentIndexChanged.connect(self._on_model_selected)
         self.set_fe_btn.clicked.connect(self._on_set_fe_model)
+        self.reset_default_fe_btn.clicked.connect(self._on_reset_default_fe)
         self.fe_layer_selection.itemSelectionChanged.connect(self._on_fe_layer_selection_changed)
         self.fe_scaling_factors.currentIndexChanged.connect(self._on_fe_scalings_changed)
         # The changing of these parameters shall only be applied when the user clicks the button
@@ -782,6 +789,7 @@ class ConvPaintWidget(QWidget):
         self._update_gui_fe_layers_from_model()
         self.current_model_path.setText(save_file.name)
         self.trained = True
+        self.save_model_btn.setEnabled(True)
         self._set_model_description()
         self._reset_predict_buttons()
 
@@ -832,15 +840,6 @@ class ConvPaintWidget(QWidget):
 
     # Model Tab
 
-    def _on_set_fe_model(self, event=None):
-        """Create a neural network model that will be used for feature extraction and
-        reset the classifier."""
-        self._update_fe_params_from_gui()
-        # self.param.model_name = self.qcombo_model_type.currentText()
-        self.model = create_model(self.param)
-        self._reset_classif()
-        self._update_gui_fe_layers_from_model()
-
     def _on_model_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         model_type = self.qcombo_model_type.currentText()
@@ -881,6 +880,18 @@ class ConvPaintWidget(QWidget):
         # self.param.scalings = self.fe_scaling_factors.currentData()
         # self._reset_classif()
         return
+
+    def _on_set_fe_model(self, event=None):
+        """Create a neural network model that will be used for feature extraction and
+        reset the classifier."""
+        self._update_fe_params_from_gui()
+        # self.param.model_name = self.qcombo_model_type.currentText()
+        self.model = create_model(self.param)
+        self._reset_classif()
+        self._update_gui_fe_layers_from_model()
+
+    def _on_reset_default_fe(self, event=None):
+        self._reset_fe_params()
 
     def _on_reset_classif_params(self):
         self._reset_classif_params()
@@ -1081,6 +1092,7 @@ class ConvPaintWidget(QWidget):
         self.classifier = None
         self.current_model_path.setText('not trained')
         self.trained = False
+        self.save_model_btn.setEnabled(False)
         self._reset_predict_buttons()
         self._set_model_description()
 
@@ -1102,6 +1114,7 @@ class ConvPaintWidget(QWidget):
         self.fe_scaling_factors.setCurrentText(self.DEFAULT_SCALINGS_TEXT)
         self.spin_interpolation_order.setValue(self.DEFAULT_INTERPOLATION_ORDER)
         self.check_use_min_features.setChecked(self.DEFAULT_USE_MIN_FEATURES)
+        self.check_use_cuda.setChecked(self.DEFAULT_USE_CUDA)
         # Set default values in param object (by mimicking a click on the "Set FE" button)
         self._on_set_fe_model()
 
