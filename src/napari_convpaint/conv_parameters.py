@@ -14,7 +14,7 @@ class Param:
     classifier: str = None
     # Image processing parameters
     multi_channel_img: bool = None
-    normalize: int = None # 0: no normalization, 1: normalize stack, 2: normalize each image
+    normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
     # Acceleration parameters
     image_downsample: int = None
     tile_annotations: bool = False

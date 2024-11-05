@@ -326,7 +326,7 @@ class ConvPaintWidget(QWidget):
 
         self.set_default_classif_btn = QPushButton('Reset to default')
         self.set_default_classif_btn.setEnabled(True)
-        self.classifier_params_group.glayout.addWidget(self.set_default_classif_btn, 3, 1, 1, 1)
+        self.classifier_params_group.glayout.addWidget(self.set_default_classif_btn, 3, 0, 1, 2)
 
         # === === ===
 
@@ -473,7 +473,7 @@ class ConvPaintWidget(QWidget):
             else:
                 raise Exception('You have to define and load a model first')
 
-        image_stack = self.get_selected_layer_data()
+        image_stack = self.get_data_channel_first_norm()
         
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -552,7 +552,7 @@ class ConvPaintWidget(QWidget):
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
 
-                image_stack = self.get_selected_layer_data()
+                image_stack = self.get_data_channel_first_norm()
 
                 features, targets = get_features_current_layers(
                     model=self.model,
@@ -607,51 +607,51 @@ class ConvPaintWidget(QWidget):
             
             pbr.set_description(f"Prediction")
 
-            if self.viewer.dims.ndim == 2:
-                image = self.get_selected_layer_data()
+            data_dims = self.get_data_dims()
 
-            elif self.viewer.dims.ndim == 3:
-                if self.param.multi_channel_img:
-                    image = self.get_selected_layer_data()
-                elif self.radio_single_channel.isChecked():
-                    step = self.viewer.dims.current_step[0]
-                    image = self.viewer.layers[self.selected_channel].data[step]
-                    if not self.radio_no_normalize.isChecked():
-                        if self.param.normalize == 1: # over stack
-                            image_mean = self.image_mean
-                            image_std = self.image_std
-                        elif self.radio_normalize_by_image.isChecked():
-                            image_mean = self.image_mean[step]
-                            image_std = self.image_std[step]
-                        image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)  
-                elif self.radio_rgb.isChecked():
-                    step = self.viewer.dims.current_step[0]
-                    image = self.viewer.layers[self.selected_channel].data[step]
-                    image = np.moveaxis(image, -1, 0)
-                    
-                    if self.param.normalize == 1: # over stack
-                        image_mean = self.image_mean[:,0,::]
-                        image_std = self.image_std[:,0,::]
-                    if self.param.normalize == 2: # by image
-                        image_mean = self.image_mean[:,step]
-                        image_std = self.image_std[:,step]
-                    image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
+            if data_dims in ['2D', '3D_multi', '2D_RGB']:
+                image = self.get_data_channel_first()
+                if self.param.normalize != 1:
+                    image_mean = self.image_mean
+                    image_std = self.image_std
 
-            elif self.viewer.dims.ndim == 4:
-                # for 4D channel is always first, t/z second
-                step = self.viewer.dims.current_step[1]
-                image = self.viewer.layers[self.selected_channel].data[:, step]
-                if self.param.normalize == 1: # over stack
+            if data_dims == '3D_single':
+                step = self.viewer.dims.current_step[0]
+                image = self.viewer.layers[self.selected_channel].data[step]
+                if self.param.normalize == 2: # over stack
+                    image_mean = self.image_mean
+                    image_std = self.image_std
+                if self.param.normalize == 3: # by image
+                    image_mean = self.image_mean[step]
+                    image_std = self.image_std[step]
+            
+            if data_dims == '3D_RGB':
+                step = self.viewer.dims.current_step[0]
+                image = self.viewer.layers[self.selected_channel].data[step]
+                image = np.moveaxis(image, -1, 0)
+                if self.param.normalize == 2: # over stack
                     image_mean = self.image_mean[:,0,::]
                     image_std = self.image_std[:,0,::]
-                if self.param.normalize == 2: # by image
+                if self.param.normalize == 3: # by image
+                    image_mean = self.image_mean[:,step]
+                    image_std = self.image_std[:,step]
+
+            if data_dims == '4D':
+                # for 4D, channel is always first, t/z second
+                step = self.viewer.dims.current_step[1]
+                image = self.viewer.layers[self.selected_channel].data[:, step]
+                if self.param.normalize == 2: # over stack
+                    image_mean = self.image_mean[:,0,::]
+                    image_std = self.image_std[:,0,::]
+                if self.param.normalize == 3: # by image
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
             
             # Normalize image (using the stats depending on the radio buttons)
-            image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
+            if self.param.normalize != 1:
+                image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
-            if self.check_tile_image.isChecked():
+            if self.param.tile_image:
                 predicted_image = parallel_predict_image(
                     image=image, model=self.model, classifier=self.classifier,
                     param = self.param, use_dask=False)
@@ -659,11 +659,9 @@ class ConvPaintWidget(QWidget):
                 predicted_image = self.model.predict_image(image=image,
                                                            classifier=self.classifier,
                                                            param=self.param,)
-            if self.viewer.dims.ndim == 2:
+            if data_dims in ['2D', '2D_RGB', '3D_multi']:
                 self.viewer.layers['segmentation'].data = predicted_image
-            elif (self.viewer.dims.ndim == 3) and (self.param.multi_channel_img):
-                self.viewer.layers['segmentation'].data = predicted_image
-            else:
+            else: # 3D_single, 4D, 3D_RGB
                 self.viewer.layers['segmentation'].data[step] = predicted_image
             self.viewer.layers['segmentation'].refresh()
 
@@ -712,7 +710,7 @@ class ConvPaintWidget(QWidget):
             else:
                 raise Exception(f'Image stack has wrong dimensionality {image_stack.ndim}')
             
-            if self.check_tile_image.isChecked():
+            if self.param.tile_image:
                 predicted_image = parallel_predict_image(image=image, 
                                                          model=self.model,
                                                          classifier=self.classifier,
@@ -739,7 +737,7 @@ class ConvPaintWidget(QWidget):
                 save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
             save_file = Path(save_file)
             
-            # Update parameters from GUI before saving (just ot be sure...)
+            # Update parameters from GUI before saving (just to be sure...)
             self._update_params_from_gui()
             save_model(save_file, self.classifier, self.model, self.param, )        
             self.current_model_path.setText(save_file.name)
@@ -782,11 +780,11 @@ class ConvPaintWidget(QWidget):
         """Set the normalization options based on radio buttons,
         and update stats."""
         if self.radio_no_normalize.isChecked():
-            self.param.normalize = 0
-        elif self.radio_normalized_over_stack.isChecked():
             self.param.normalize = 1
-        elif self.radio_normalize_by_image.isChecked():
+        elif self.radio_normalized_over_stack.isChecked():
             self.param.normalize = 2
+        elif self.radio_normalize_by_image.isChecked():
+            self.param.normalize = 3
         self._reset_stats()
 
     # Model
@@ -794,14 +792,14 @@ class ConvPaintWidget(QWidget):
     def _on_use_custom_model(self, event=None):
         """Change custom model parameter based on flag,
         and add tab for custom model management if needed."""
-        if not self.check_use_custom_model.isChecked():
+        if self.check_use_custom_model.isChecked():
+            self.use_custom_model = True
+            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
+        else:
             self.use_custom_model = False
             self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), False)
             # self.qcombo_model_type.setCurrentText('single_layer_vgg16')
             self._set_default_model()
-        else:
-            self.use_custom_model = True
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Model'), True)
 
     def _on_reset_model(self, event=None):
         print(self.param)
@@ -824,7 +822,7 @@ class ConvPaintWidget(QWidget):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         model_type = self.qcombo_model_type.currentText()
         model_class = get_all_models()[model_type]
-        self.temp_model = model_class(model_name=model_type, use_cuda=self.check_use_cuda.isChecked())
+        self.temp_model = model_class(model_name=model_type, use_cuda=self.param.use_cuda)
 
         if isinstance(self.temp_model, Hookmodel):
             self._create_fe_layer_selection_for_temp_model(self.temp_model)
@@ -960,7 +958,7 @@ class ConvPaintWidget(QWidget):
         # We need a trained model and an image layer needs to be selected
         if (self.model is not None) and (self.image_layer_selection_widget.value is not None):
             self.segment_btn.setEnabled(True)
-            is_stacked = data_dims in ['4D', '3D_single']
+            is_stacked = data_dims in ['4D', '3D_single', '3D_RGB']
             self.segment_all_btn.setEnabled(is_stacked)
         else:
             self.segment_btn.setEnabled(False)
@@ -1045,10 +1043,12 @@ class ConvPaintWidget(QWidget):
         """Check if segmentation layer exists and create it if not."""
         layer_names = [x.name for x in self.viewer.layers]
         if 'segmentation' not in layer_names:
-            dims = self.get_data_dims()
+            data_dims = self.get_data_dims()
             # Define the shape of the segmentation layer by the type of image
-            if dims in ['RGB' '2D']:
+            if data_dims in ['2D_RGB', '2D']:
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
+            if data_dims == '3D_RGB':
+                layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:3]
             else:
                 layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2:]
             self.viewer.add_labels(
@@ -1089,21 +1089,6 @@ class ConvPaintWidget(QWidget):
         """Set default model."""
         self._reset_classif_params()
         self._reset_fe_params()
-        
-    def get_selected_layer_data(self):
-        """Get data from selected channel. Output has channel (if present) in 
-        first position and is normalized."""
-        image_stack = self.get_data_channel_first()
-        if self.image_mean is None:
-            self.get_image_stats()
-        # Normalize image
-        if not self.radio_no_normalize.isChecked():
-            image_stack = normalize_image(
-                image=image_stack,
-                image_mean=self.image_mean,
-                image_std=self.image_std)
-
-        return image_stack
 
     def get_selected_layer_names(self):
         """Get names of selected layers."""
@@ -1111,48 +1096,64 @@ class ConvPaintWidget(QWidget):
         selected_layers = [x.text() for x in selected_rows]
         return selected_layers
 
+    def get_data_channel_first(self):
+        """Get data from selected channel. If RGB, move channel axis to first position."""
+        image_stack = self.viewer.layers[self.selected_channel].data
+        if self.get_data_dims() in ['2D_RGB', '3D_RGB']:
+            image_stack = np.moveaxis(image_stack, -1, 0)
+        return image_stack
+        
+    def get_data_channel_first_norm(self):
+        """Get data from selected channel. Output has channel (if present) in 
+        first position and is normalized."""
+        image_stack = self.get_data_channel_first()
+        if self.image_mean is None:
+            self.get_image_stats()
+        # Normalize image
+        if self.param.normalize != 1:
+            image_stack = normalize_image(
+                image=image_stack,
+                image_mean=self.image_mean,
+                image_std=self.image_std)
+        return image_stack
+
     def get_image_stats(self):
         # put channels in format (C)(T,Z)YX
         data = self.get_data_channel_first()
         data_dims = self.get_data_dims()
 
-        if self.param.normalize == 1: # normalize over stack
-            if data_dims in ["3D_multi", "RGB"]:
-                print(data.shape)
+        if self.param.normalize == 2: # normalize over stack
+            if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]:
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
-                    ignore_n_first_dims=1)
-            else:
+                    ignore_n_first_dims=1) # ignore channels dimension, but norm over stack
+            else: # 2D or 3D_single
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
-                    ignore_n_first_dims=None)
-        elif self.param.normalize == 2: # normalize by image
-            # also takes into account CXY case (2D multi-channel image) as first dim is dropped
+                    ignore_n_first_dims=None) # for 3D_single, norm over stack
+        elif self.param.normalize == 3: # normalize by image
+            # also takes into account CXY case (3D multi-channel image) as first dim is dropped
             self.image_mean, self.image_std = compute_image_stats(
                 image=data,
-                ignore_n_first_dims=data.ndim-2)
-
-    def get_data_channel_first(self):
-        """Get data from selected channel. If RGB, move channel axis to first position."""
-        image_stack = self.viewer.layers[self.selected_channel].data
-        if self.viewer.layers[self.selected_channel].rgb:
-            image_stack = np.moveaxis(image_stack, -1, 0)
-        return image_stack
+                ignore_n_first_dims=data.ndim-2) # ignore all but the spatial dimensions
 
     def get_data_dims(self):
         """Get data dimensions. Returns '4D', '2D', 'RGB', '3D_multi' or '3D_single'."""
         if (self.image_layer_selection_widget.value.ndim == 1 or
             self.image_layer_selection_widget.value.ndim > 4):
             raise Exception('Image has wrong number of dimensions')
-        # If dimension is 2 or 4, we can return directly
         if self.image_layer_selection_widget.value.ndim == 4:
             return '4D'
-        if self.image_layer_selection_widget.value.rgb:
-            return 'RGB'
         if self.image_layer_selection_widget.value.ndim == 2:
-            return '2D'
-        # If image is 3D, we need to check if it is RGB, multi-channel or single channel
-        if self.param.multi_channel_img:
-            return '3D_multi'
+            if self.image_layer_selection_widget.value.rgb:
+                return '2D_RGB'
+            else:
+                return '2D'
+        # If image is 3D, we need to check if it is RGB (movie), multi-channel or single channel
         else:
-            return '3D_single'
+            if self.image_layer_selection_widget.value.rgb:
+                return '3D_RGB'
+            if self.param.multi_channel_img:
+                return '3D_multi'
+            else:
+                return '3D_single'
