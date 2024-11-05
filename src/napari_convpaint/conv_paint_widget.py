@@ -454,6 +454,8 @@ class ConvPaintWidget(QWidget):
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
+        if self.image_layer_selection_widget.value is not None:
+            self._on_data_dim_changed()
 
         # Enable button to add annotation and segmentation layers if there is data in the image layer
         if self.image_layer_selection_widget.value is None:
@@ -798,6 +800,7 @@ class ConvPaintWidget(QWidget):
     def _on_data_dim_changed(self):
         """Set the image data dimensions based on radio buttons,
         and adjust normalization options."""
+        self._add_empty_layers()
         self.param.multi_channel_img = self.radio_multi_channel.isChecked()
         self._reset_radio_norm_settings()
         self._reset_classif()
@@ -833,7 +836,6 @@ class ConvPaintWidget(QWidget):
         # self.model = None
         self.save_model_btn.setEnabled(False)
         self._set_default_model()
-        self._on_select_layer()
         self._reset_classif()
         self._reset_radio_data_dims()
         self._reset_radio_norm_settings()
@@ -948,6 +950,8 @@ class ConvPaintWidget(QWidget):
         """set radio buttons depending on selected image type"""
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
+            return
+        
         elif self.image_layer_selection_widget.value.rgb:
             self.radio_rgb.setChecked(True)
             self.radio_multi_channel.setEnabled(False)
@@ -975,7 +979,6 @@ class ConvPaintWidget(QWidget):
             for x in self.norm_buttons: x.setEnabled(False)
             return
         
-        self._add_empty_layers(force_add=False)
         if self.image_layer_selection_widget.value.ndim == 2:
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalize_by_image.setChecked(True)
@@ -1110,6 +1113,7 @@ class ConvPaintWidget(QWidget):
     def _reset_fe_params(self):
         # Reset the gui values for the FE
         self.qcombo_model_type.setCurrentText(self.DEFAULT_FE)
+        self.fe_layer_selection.clearSelection()
         self.fe_layer_selection.setCurrentRow(self.DEFAULT_LAYERS_INDEX)
         self.fe_scaling_factors.setCurrentText(self.DEFAULT_SCALINGS_TEXT)
         self.spin_interpolation_order.setValue(self.DEFAULT_INTERPOLATION_ORDER)
