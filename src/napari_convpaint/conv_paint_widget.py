@@ -513,7 +513,7 @@ class ConvPaintWidget(QWidget):
             else:
                 raise Exception('You have to define and load a model first')
 
-        image_stack = self.get_data_channel_first_norm()
+        image_stack = self._get_data_channel_first_norm()
         
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -595,7 +595,7 @@ class ConvPaintWidget(QWidget):
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
 
-                image_stack = self.get_data_channel_first_norm()
+                image_stack = self._get_data_channel_first_norm()
 
                 features, targets = get_features_current_layers(
                     model=self.model,
@@ -642,7 +642,7 @@ class ConvPaintWidget(QWidget):
         self._check_create_prediction_layer()
 
         if self.image_mean is None:
-            self.get_image_stats()
+            self._get_image_stats()
         
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -652,11 +652,11 @@ class ConvPaintWidget(QWidget):
             
             pbr.set_description(f"Prediction")
 
-            data_dims = self.get_data_dims()
+            data_dims = self._get_data_dims()
 
             # Get image data and stats
             if data_dims in ['2D', '3D_multi', '2D_RGB']:
-                image = self.get_data_channel_first()
+                image = self._get_data_channel_first()
                 if self.param.normalize != 1:
                     image_mean = self.image_mean
                     image_std = self.image_std
@@ -734,7 +734,7 @@ class ConvPaintWidget(QWidget):
         self._check_create_prediction_layer()
 
         if self.image_mean is None:
-            self.get_image_stats()
+            self._get_image_stats()
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -827,8 +827,8 @@ class ConvPaintWidget(QWidget):
     def _on_data_dim_changed(self):
         """Set the image data dimensions based on radio buttons,
         and adjust normalization options."""
-        self._add_empty_layers()
         self._adjust_data_dims()
+        self._add_empty_layers()
         self._set_old_data_tag()
 
     def _on_norm_changed(self):
@@ -896,7 +896,7 @@ class ConvPaintWidget(QWidget):
     def _on_fe_layer_selection_changed(self):
         #check if temp model is a hookmodel
         if isinstance(self.temp_model, Hookmodel):
-            selected_layers = self.get_selected_layer_names()
+            selected_layers = self._get_selected_layer_names()
             if len(selected_layers) == 0:
                 self.set_fe_btn.setEnabled(False)
             else:
@@ -1040,7 +1040,7 @@ class ConvPaintWidget(QWidget):
     def _reset_predict_buttons(self):
         # We need a trained model and an image layer needs to be selected
         if (self.trained) and (self.image_layer_selection_widget.value is not None):
-            data_dims = self.get_data_dims()
+            data_dims = self._get_data_dims()
             self.segment_btn.setEnabled(True)
             is_stacked = data_dims in ['4D', '3D_single', '3D_RGB']
             self.segment_all_btn.setEnabled(is_stacked)
@@ -1055,7 +1055,7 @@ class ConvPaintWidget(QWidget):
         """Update parameters from GUI."""
         # Model
         self.param.model_name = self.qcombo_model_type.currentText()
-        self.param.model_layers = self.get_selected_layer_names()
+        self.param.model_layers = self._get_selected_layer_names()
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.use_cuda = self.check_use_cuda.isChecked()
@@ -1131,13 +1131,13 @@ class ConvPaintWidget(QWidget):
             
     def _get_annot_shape(self):
         """Get shape of annotations and segmentation layers to create."""
-        data_dims = self.get_data_dims()
+        data_dims = self._get_data_dims()
         if data_dims in ['2D_RGB', '2D']:
             return self.viewer.layers[self.selected_channel].data.shape[0:2]
         if data_dims in ['3D_RGB', '3D_single']:
             return self.viewer.layers[self.selected_channel].data.shape[0:3]
         else: # 3D_multi, 4D
-            return self.viewer.layers[self.selected_channel].data.shape[-2:]
+            return self.viewer.layers[self.selected_channel].data.shape[1:]
 
     def _reset_classif(self):
         self.classifier = None
@@ -1189,25 +1189,25 @@ class ConvPaintWidget(QWidget):
         self.model_description1.setText(descr)
         self.model_description2.setText(descr)
 
-    def get_selected_layer_names(self):
+    def _get_selected_layer_names(self):
         """Get names of selected layers."""
         selected_rows = self.fe_layer_selection.selectedItems()
         selected_layers = [x.text() for x in selected_rows]
         return selected_layers
 
-    def get_data_channel_first(self):
+    def _get_data_channel_first(self):
         """Get data from selected channel. If RGB, move channel axis to first position."""
         image_stack = self.viewer.layers[self.selected_channel].data
-        if self.get_data_dims() in ['2D_RGB', '3D_RGB']:
+        if self._get_data_dims() in ['2D_RGB', '3D_RGB']:
             image_stack = np.moveaxis(image_stack, -1, 0)
         return image_stack
         
-    def get_data_channel_first_norm(self):
+    def _get_data_channel_first_norm(self):
         """Get data from selected channel. Output has channel (if present) in 
         first position and is normalized."""
-        image_stack = self.get_data_channel_first()
+        image_stack = self._get_data_channel_first()
         if self.image_mean is None:
-            self.get_image_stats()
+            self._get_image_stats()
         # Normalize image
         if self.param.normalize != 1:
             image_stack = normalize_image(
@@ -1216,10 +1216,10 @@ class ConvPaintWidget(QWidget):
                 image_std=self.image_std)
         return image_stack
 
-    def get_image_stats(self):
+    def _get_image_stats(self):
         # put channels in format (C)(T,Z)YX
-        data = self.get_data_channel_first()
-        data_dims = self.get_data_dims()
+        data = self._get_data_channel_first()
+        data_dims = self._get_data_dims()
 
         if self.param.normalize == 2: # normalize over stack
             if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]:
@@ -1236,7 +1236,7 @@ class ConvPaintWidget(QWidget):
                 image=data,
                 ignore_n_first_dims=data.ndim-2) # ignore all but the spatial dimensions
 
-    def get_data_dims(self):
+    def _get_data_dims(self):
         """Get data dimensions. Returns '2D', 'RGB', '3D_multi', '3D_single' or '4D'."""
         num_dims = self.image_layer_selection_widget.value.ndim
         if (num_dims == 1 or num_dims > 4):

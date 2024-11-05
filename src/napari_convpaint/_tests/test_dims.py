@@ -16,7 +16,7 @@ def test_3d_single_channel(make_napari_viewer, capsys):
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
 
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     # check that mean is single number ~127
     assert my_widget.image_mean.shape == ()
@@ -35,7 +35,7 @@ def test_3d_single_channel(make_napari_viewer, capsys):
     # switch to by channel normalization
     my_widget.radio_normalize_by_image.setChecked(True)
     assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
     assert my_widget.image_mean.shape == (3,1,1)
 
     normalized = my_widget.get_selectedlayer_data()
@@ -59,7 +59,7 @@ def test_3d_multi_channel(make_napari_viewer, capsys):
     assert viewer.layers['annotations'].data.ndim == 2, "Annotation layer should be 2D"
 
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     # check that mean is single number ~127
     assert my_widget.image_mean.shape == (3,1,1)
@@ -89,7 +89,7 @@ def test_RGB(make_napari_viewer, capsys):
     assert viewer.layers['annotations'].data.ndim == 2, "Annotation layer should be 2D"
 
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     # check that mean is single number ~127
     assert my_widget.image_mean.shape == (3,1,1)
@@ -117,7 +117,7 @@ def test_4d_image(make_napari_viewer, capsys):
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
     
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
     assert my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
 
@@ -129,7 +129,7 @@ def test_4d_image(make_napari_viewer, capsys):
     for i in range(10):
         viewer.layers['multid_c_t'].data[:,i] = multid_c_t[:,i] *np.exp(-i)
     # update stats and normalize
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
     normalized = my_widget.get_selectedlayer_data()
 
     # check that mean over each full channel is 0
@@ -144,7 +144,7 @@ def test_4d_image(make_napari_viewer, capsys):
     # check that dims are correct
     my_widget.radio_normalize_by_image.setChecked(True)
     assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     assert my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,10,1,1), f"Wrong number of values, expected (3,10,1,1) got {my_widget.image_mean.shape}"
@@ -171,7 +171,7 @@ def test_RGBT_image(make_napari_viewer):
     # check that for a time lapse RGB, annotations are 3D
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
 
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     # check that default stack normalization generates one mean per RGB channel
     my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
@@ -189,7 +189,7 @@ def test_RGBT_image(make_napari_viewer):
     # switch to by image normalization
     my_widget.radio_normalize_by_image.setChecked(True)
     assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     normalized = my_widget.get_selectedlayer_data()
 
