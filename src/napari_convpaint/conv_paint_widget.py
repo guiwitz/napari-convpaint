@@ -47,7 +47,8 @@ class ConvPaintWidget(QWidget):
     def __init__(self, napari_viewer, parent=None, init_project=False, third_party=False):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
-        
+        self.image_mean = None
+        self.image_std = None
         self.param = Param()
         self.model = None
         self.temp_model = None
@@ -55,8 +56,6 @@ class ConvPaintWidget(QWidget):
         self.project_widget = None
         self.features_per_layer = None
         self.selected_channel = None
-        self.image_mean = None
-        self.image_std = None
         self.third_party = third_party
         # Plugin options
         self.auto_seg = False
@@ -325,13 +324,17 @@ class ConvPaintWidget(QWidget):
         self.classifier_params_group.glayout.addWidget(QLabel('Depth'), 2, 0, 1, 1)
         self.classifier_params_group.glayout.addWidget(self.spin_depth, 2, 1, 1, 1)
 
+        self.set_default_classif_btn = QPushButton('Reset to default')
+        self.set_default_classif_btn.setEnabled(True)
+        self.classifier_params_group.glayout.addWidget(self.set_default_classif_btn, 3, 1, 1, 1)
+
         # === === ===
 
         # If project mode is initially activated, add project tab and widget
         if init_project is True:
             self._on_use_project()
 
-        # Add connections and initialize by selecting layer and setting default model
+        # Add connections and initialize by selecting layer and setting default model and params
         self.add_connections()
         self._set_default_model()
         self._on_select_layer()
@@ -401,6 +404,7 @@ class ConvPaintWidget(QWidget):
         self.spin_iterations.valueChanged.connect(lambda: setattr(self.param, 'classif_iterations', self.spin_iterations.value()))
         self.spin_learning_rate.valueChanged.connect(lambda: setattr(self.param, 'classif_learning_rate', self.spin_learning_rate.value()))
         self.spin_depth.valueChanged.connect(lambda: setattr(self.param, 'classif_depth', self.spin_depth.value()))
+        self.set_default_classif_btn.clicked.connect(self._on_reset_classif_params)
 
     # Visibility toggles for key bindings
 
@@ -834,7 +838,10 @@ class ConvPaintWidget(QWidget):
             self.set_fe_btn.setEnabled(True)
 
         # get the default params for the model and update the GUI
-        self.param = self.temp_model.get_default_params()
+        default_params = self.temp_model.get_default_params().as_dict()
+        for p_name, default_val in default_params.items():
+            if default_val is not None:
+                setattr(self.param, p_name, default_val)
         self._update_gui_from_params()
 
     def _on_set_fe_model(self, event=None):
@@ -856,7 +863,11 @@ class ConvPaintWidget(QWidget):
             self.set_fe_btn.setEnabled(True)
 
     def _on_fe_scalings_changed(self):
-            self._update_scalings_from_gui()
+        self._update_scalings_from_gui()
+
+    def _on_reset_classif_params(self):
+        self._reset_classif_params()
+    
 
 ### Helper functions
 
@@ -1060,7 +1071,7 @@ class ConvPaintWidget(QWidget):
         self.spin_iterations.setValue(self.DEFAULT_ITERATIONS)
         self.spin_learning_rate.setValue(self.DEFAULT_LEARNING_RATE)
         self.spin_depth.setValue(self.DEFAULT_DEPTH)
-        # In the param object
+        # In the param object (not done through bindings if values in the widget are not changed)
         self.param.classif_iterations = self.DEFAULT_ITERATIONS
         self.param.classif_learning_rate = self.DEFAULT_LEARNING_RATE
         self.param.classif_depth = self.DEFAULT_DEPTH
@@ -1076,8 +1087,8 @@ class ConvPaintWidget(QWidget):
 
     def _set_default_model(self):#, keep_rgb=False):
         """Set default model."""
-        self._reset_fe_params()
         self._reset_classif_params()
+        self._reset_fe_params()
         
     def get_selected_layer_data(self):
         """Get data from selected channel. Output has channel (if present) in 

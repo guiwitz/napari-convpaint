@@ -1,6 +1,6 @@
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 import dataclasses
 from pathlib import Path
 import yaml
@@ -74,3 +74,6 @@ class Param:
                 dict[path] = dict[path].as_posix()
         
         return dict
+    
+    def as_dict(self):
+        return asdict(self)
