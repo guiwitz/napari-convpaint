@@ -380,8 +380,8 @@ class ConvPaintWidget(QWidget):
         self.image_layer_selection_widget.changed.connect(self._on_select_layer)
         # NOTE: Changing annotation layer does not have to trigger anything
         self.add_layers_btn.clicked.connect(self._on_add_annot_seg_layers)
-        self.check_keep_layers.stateChanged.connect(lambda: setattr(
-            self, 'keep_layers', self.check_keep_layers.isChecked()))
+        # self.check_keep_layers.stateChanged.connect(lambda: setattr(
+        #     self, 'keep_layers', self.check_keep_layers.isChecked()))
 
 
         # Train
