@@ -967,9 +967,9 @@ class ConvPaintWidget(QWidget):
             self.radio_normalized_over_stack.setChecked(True)
 
     def _reset_predict_buttons(self):
-        data_dims = self.get_data_dims()
         # We need a trained model and an image layer needs to be selected
         if (self.trained) and (self.image_layer_selection_widget.value is not None):
+            data_dims = self.get_data_dims()
             self.segment_btn.setEnabled(True)
             is_stacked = data_dims in ['4D', '3D_single', '3D_RGB']
             self.segment_all_btn.setEnabled(is_stacked)
