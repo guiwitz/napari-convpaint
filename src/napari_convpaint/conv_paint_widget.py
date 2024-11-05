@@ -51,6 +51,7 @@ class ConvPaintWidget(QWidget):
         self.image_std = None
         self.param = Param()
         self.model = None
+        self.trained = False
         self.temp_model = None
         self.classifier = None
         self.project_widget = None
@@ -203,9 +204,10 @@ class ConvPaintWidget(QWidget):
 
         # Add buttons for "Model" group
         # Current model label
-        self.model_group.glayout.addWidget(QLabel('Current model:'), 0,0,1,1)
-        self.current_model_path = QLabel('None')
-        self.model_group.glayout.addWidget(self.current_model_path, 0,1,1,1)
+        self.model_description = QLabel('None')
+        self.model_group.glayout.addWidget(self.model_description, 0,0,1,2)
+        self.current_model_path = QLabel('not trained')
+        # self.model_group.glayout.addWidget(self.current_model_path, 0,1,1,1)
         # "Use custom Model" checkbox
         self.check_use_custom_model = QCheckBox('Use custom Model')
         self.check_use_custom_model.setToolTip('Activate Tab to customize Feature Extractor and Classifier')
@@ -454,7 +456,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
-        self._add_empty_layers(self, event, force_add)
+        self._add_empty_layers(event, force_add)
 
     # Train
 
@@ -480,7 +482,8 @@ class ConvPaintWidget(QWidget):
             self.viewer.window._status_bar._toggle_activity_dock(True)
 
         with progress(total=0) as pbr:
-            self.current_model_path.setText('In training')
+            self.current_model_path.setText('in training')
+            self.model_description.setText(self.get_model_description())
             pbr.set_description(f"Training")
             features, targets = get_features_current_layers(
                 image=image_stack,
@@ -494,9 +497,11 @@ class ConvPaintWidget(QWidget):
                 learning_rate=self.param.classif_learning_rate,
                 depth=self.param.classif_depth,
         )
+            self.current_model_path.setText('trained, unsaved')
+            self.trained = True
             self._reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
-            self.current_model_path.setText('Unsaved')
+            self.model_description.setText(self.get_model_description())
             
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -547,7 +552,7 @@ class ConvPaintWidget(QWidget):
         self.viewer.layers.events.removed.disconnect(self._on_reset_model)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            self.current_model_path.setText('In training')
+            self.current_model_path.setText('in training')
             all_features, all_targets = [], []
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
@@ -567,11 +572,13 @@ class ConvPaintWidget(QWidget):
             
             all_features = np.concatenate(all_features, axis=0)
             all_targets = np.concatenate(all_targets, axis=0)
-
             self.classifier = train_classifier(all_features, all_targets)
+
+            self.current_model_path.setText('trained, unsaved')
+            self.trained = True
             self._reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
-            self.current_model_path.setText('Unsaved')
+            self.model_description.setText(self.get_model_description())
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -741,6 +748,7 @@ class ConvPaintWidget(QWidget):
             self._update_params_from_gui()
             save_model(save_file, self.classifier, self.model, self.param, )        
             self.current_model_path.setText(save_file.name)
+            self.model_description.setText(self.get_model_description())
 
     def _on_load_model(self, event=None, save_file=None):
         """Select classifier file to load along with the model parameters."""
@@ -766,6 +774,8 @@ class ConvPaintWidget(QWidget):
         self._update_gui_from_params()
         self._update_gui_from_model()
         self.current_model_path.setText(save_file.name)
+        self.trained = True
+        self.model_description.setText(self.get_model_description())
         self._reset_predict_buttons()
 
     # Image Processing
@@ -802,19 +812,17 @@ class ConvPaintWidget(QWidget):
             self._set_default_model()
 
     def _on_reset_model(self, event=None):
-        print(self.param)
-        return
-        self.model = None
+        """Reset model to default and update GUI."""
+        # self.model = None
+        self.current_model_path.setText('not trained')
+        self.trained = False
         self.classifier = None
-        self.segment_btn.setEnabled(False)
-        self.segment_all_btn.setEnabled(False)
+        self._reset_predict_buttons()
         self.save_model_btn.setEnabled(False)
-        self.current_model_path.setText('None')
-
-        if self.image_layer_selection_widget.value is None:
-            for x in self.channel_buttons: x.setEnabled(False)
-        else:
-            self._on_select_layer()
+        self._reset_radio_data_dims()
+        self._set_default_model()
+        self._on_select_layer()
+        self.model_description.setText(self.get_model_description())
 
     # Model Tab
 
@@ -846,8 +854,10 @@ class ConvPaintWidget(QWidget):
         """Create a neural network model that will be used for feature extraction."""
         self._update_params_from_gui()
         self.model = create_model(self.param)
+        self.current_model_path.setText('not trained')
+        self.trained = False
         self._update_gui_from_model()
-        self.current_model_path.setText('Unsaved')
+        self.model_description.setText(self.get_model_description())
 
     def _on_fe_layer_selection_changed(self):
         #check if temp model is a hookmodel
@@ -934,6 +944,9 @@ class ConvPaintWidget(QWidget):
             self.radio_multi_channel.setEnabled(True)
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setChecked(True)
+        else:
+            for x in self.channel_buttons: x.setEnabled(False)
+
 
     def _reset_radio_norm_settings(self, event=None):
         
@@ -956,7 +969,7 @@ class ConvPaintWidget(QWidget):
     def _reset_predict_buttons(self):
         data_dims = self.get_data_dims()
         # We need a trained model and an image layer needs to be selected
-        if (self.model is not None) and (self.image_layer_selection_widget.value is not None):
+        if (self.trained) and (self.image_layer_selection_widget.value is not None):
             self.segment_btn.setEnabled(True)
             is_stacked = data_dims in ['4D', '3D_single', '3D_RGB']
             self.segment_all_btn.setEnabled(is_stacked)
@@ -1139,21 +1152,29 @@ class ConvPaintWidget(QWidget):
 
     def get_data_dims(self):
         """Get data dimensions. Returns '4D', '2D', 'RGB', '3D_multi' or '3D_single'."""
-        if (self.image_layer_selection_widget.value.ndim == 1 or
-            self.image_layer_selection_widget.value.ndim > 4):
+        num_dims = self.image_layer_selection_widget.value.ndim
+        if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
-        if self.image_layer_selection_widget.value.ndim == 4:
+        if num_dims == 4:
             return '4D'
-        if self.image_layer_selection_widget.value.ndim == 2:
+        if num_dims == 2:
             if self.image_layer_selection_widget.value.rgb:
                 return '2D_RGB'
             else:
                 return '2D'
-        # If image is 3D, we need to check if it is RGB (movie), multi-channel or single channel
-        else:
+        else: # 3D
             if self.image_layer_selection_widget.value.rgb:
                 return '3D_RGB'
             if self.param.multi_channel_img:
                 return '3D_multi'
             else:
                 return '3D_single'
+
+    def get_model_description(self):
+        model_name = self.param.model_name
+        num_layers = len(self.param.model_layers)
+        num_scalings = len(self.param.scalings)
+        return (model_name +
+        f', {num_layers} layer' + ('s' if num_layers > 1 else '') +
+        f', {num_scalings} scaling' + ('s' if num_scalings > 1 else '') + 
+        f' ({self.current_model_path.text()})')
