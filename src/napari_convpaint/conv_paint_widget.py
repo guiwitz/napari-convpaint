@@ -63,6 +63,7 @@ class ConvPaintWidget(QWidget):
         self.keep_layers = False
         self.auto_seg = False
         self.use_custom_model = False
+        self.old_data_tag = "None"
 
         ### Define Constants
 
@@ -130,12 +131,12 @@ class ConvPaintWidget(QWidget):
         # Add button for adding annotation/segmentation layers
         self.add_layers_btn = QPushButton('Add annotations/segmentation layers')
         self.add_layers_btn.setEnabled(True)
-        self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
+        self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,1)
         # Checkbox for keeping old layers
-        # self.check_keep_layers = QCheckBox('Keep old layers')
-        # self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
-        # self.check_keep_layers.setChecked(self.keep_layers)
-        # self.layer_selection_group.glayout.addWidget(self.check_keep_layers, 2,1,1,1)
+        self.check_keep_layers = QCheckBox('Keep old layers')
+        self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
+        self.check_keep_layers.setChecked(self.keep_layers)
+        self.layer_selection_group.glayout.addWidget(self.check_keep_layers, 2,1,1,1)
 
         # Add buttons for "Train" group
         self.train_classifier_btn = QPushButton('Train')
@@ -380,8 +381,8 @@ class ConvPaintWidget(QWidget):
         self.image_layer_selection_widget.changed.connect(self._on_select_layer)
         # NOTE: Changing annotation layer does not have to trigger anything
         self.add_layers_btn.clicked.connect(self._on_add_annot_seg_layers)
-        # self.check_keep_layers.stateChanged.connect(lambda: setattr(
-        #     self, 'keep_layers', self.check_keep_layers.isChecked()))
+        self.check_keep_layers.stateChanged.connect(lambda: setattr(
+            self, 'keep_layers', self.check_keep_layers.isChecked()))
 
 
         # Train
@@ -399,13 +400,19 @@ class ConvPaintWidget(QWidget):
         self.save_model_btn.clicked.connect(self._on_save_model)
         self.load_model_btn.clicked.connect(self._on_load_model)
 
-        # Image Processing
-        self.radio_single_channel.toggled.connect(self._on_data_dim_changed)
-        self.radio_multi_channel.toggled.connect(self._on_data_dim_changed)
-        self.radio_rgb.toggled.connect(self._on_data_dim_changed)
-        self.radio_no_normalize.toggled.connect(self._on_norm_changed)
-        self.radio_normalized_over_stack.toggled.connect(self._on_norm_changed)
-        self.radio_normalize_by_image.toggled.connect(self._on_norm_changed)
+        # Image Processing; only trigger buttons that are activated (checked)
+        self.radio_single_channel.toggled.connect(lambda checked: 
+                                                  checked and self._on_data_dim_changed())
+        self.radio_multi_channel.toggled.connect(lambda checked:
+                                                 checked and self._on_data_dim_changed())
+        self.radio_rgb.toggled.connect(lambda checked:
+                                       checked and self._on_data_dim_changed())
+        self.radio_no_normalize.toggled.connect(lambda checked:
+                                                checked and self._on_norm_changed())
+        self.radio_normalized_over_stack.toggled.connect(lambda checked:
+                                                         checked and self._on_norm_changed())
+        self.radio_normalize_by_image.toggled.connect(lambda checked:
+                                                      checked and self._on_norm_changed())
 
         # Model
         # self.check_use_custom_model.stateChanged.connect(self._on_use_custom_model)
@@ -470,7 +477,7 @@ class ConvPaintWidget(QWidget):
         """Assign the layer to segment and update data radio buttons accordingly"""
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
-            self._on_data_dim_changed()
+            self._adjust_data_dims()
 
         # Enable button to add annotation and segmentation layers if there is data in the image layer
         if self.image_layer_selection_widget.value is None:
@@ -483,6 +490,7 @@ class ConvPaintWidget(QWidget):
             self._reset_radio_data_dims()
             self._reset_radio_norm_settings()
             self._reset_predict_buttons()
+            self._set_old_data_tag()
 
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
@@ -646,6 +654,7 @@ class ConvPaintWidget(QWidget):
 
             data_dims = self.get_data_dims()
 
+            # Get image data and stats
             if data_dims in ['2D', '3D_multi', '2D_RGB']:
                 image = self.get_data_channel_first()
                 if self.param.normalize != 1:
@@ -688,6 +697,7 @@ class ConvPaintWidget(QWidget):
             if self.param.normalize != 1:
                 image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
+            # Predict image
             if self.param.tile_image:
                 predicted_image = parallel_predict_image(
                     image=image, model=self.model, classifier=self.classifier,
@@ -696,6 +706,8 @@ class ConvPaintWidget(QWidget):
                 predicted_image = self.model.predict_image(image=image,
                                                            classifier=self.classifier,
                                                            param=self.param,)
+            
+            # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
                 self.viewer.layers['segmentation'].data = predicted_image
             else: # 3D_single, 4D, 3D_RGB
@@ -816,9 +828,8 @@ class ConvPaintWidget(QWidget):
         """Set the image data dimensions based on radio buttons,
         and adjust normalization options."""
         self._add_empty_layers()
-        self.param.multi_channel_img = self.radio_multi_channel.isChecked()
-        self._reset_radio_norm_settings()
-        self._reset_classif()
+        self._adjust_data_dims()
+        self._set_old_data_tag()
 
     def _on_norm_changed(self):
         """Set the normalization options based on radio buttons,
@@ -925,18 +936,13 @@ class ConvPaintWidget(QWidget):
         on the add layer button)"""
 
         if self.keep_layers:
-            self.create_annot_seg_copies()
+            self._create_annot_seg_copies()
 
         self.event = event # R: Why is this needed?
         if self.image_layer_selection_widget.value is None:
             raise Exception('Please select an image layer first')
         
-        if self.viewer.layers[self.selected_channel].rgb:
-            layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:-1]
-        elif self.param.multi_channel_img:
-            layer_shape = self.viewer.layers[self.selected_channel].data.shape[1::]
-        else:
-            layer_shape = self.viewer.layers[self.selected_channel].data.shape
+        layer_shape = self._get_annot_shape()
 
         annotation_exists = False
         if 'annotations' in self.viewer.layers:
@@ -966,20 +972,23 @@ class ConvPaintWidget(QWidget):
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
 
-    def create_annot_seg_copies(self):
+    def _adjust_data_dims(self):
+        """Adjust data dimensions based on radio buttons."""
+        self.param.multi_channel_img = self.radio_multi_channel.isChecked()
+        self._reset_radio_norm_settings()
+        self._reset_classif()
+
+    def _create_annot_seg_copies(self):
         """Create copies of the annotations and segmentation layers."""
-        image_name = self.image_layer_selection_widget.value.name
-        data_dim = self.radio_rgb.isChecked()*"RGB" + self.radio_multi_channel.isChecked()*"multiCh" + self.radio_single_channel.isChecked()*"singleCh"
-        # timestamp = datetime.now().strftime("%y%m%d%H%M%S")
         if 'annotations' in self.viewer.layers:
             self.viewer.add_labels(
                 data=self.viewer.layers['annotations'].data.copy(),
-                name=f'annotations_{image_name}_{data_dim}' #_{timestamp}'
+                name=f'annotations_{self.old_data_tag}'
                 )
         if 'segmentation' in self.viewer.layers:
             self.viewer.add_labels(
                 data=self.viewer.layers['segmentation'].data.copy(),
-                name=f'segmentation_{image_name}_{data_dim}' #_{timestamp}'
+                name=f'segmentation_{self.old_data_tag}'
                 )
 
     def _reset_radio_data_dims(self):
@@ -1115,17 +1124,20 @@ class ConvPaintWidget(QWidget):
         """Check if segmentation layer exists and create it if not."""
         layer_names = [x.name for x in self.viewer.layers]
         if 'segmentation' not in layer_names:
-            data_dims = self.get_data_dims()
-            # Define the shape of the segmentation layer by the type of image
-            if data_dims in ['2D_RGB', '2D']:
-                layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:2]
-            if data_dims == '3D_RGB':
-                layer_shape = self.viewer.layers[self.selected_channel].data.shape[0:3]
-            else:
-                layer_shape = self.viewer.layers[self.selected_channel].data.shape[-2:]
+            layer_shape = self._get_annot_shape()
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8), name='segmentation'
                 )
+            
+    def _get_annot_shape(self):
+        """Get shape of annotations and segmentation layers to create."""
+        data_dims = self.get_data_dims()
+        if data_dims in ['2D_RGB', '2D']:
+            return self.viewer.layers[self.selected_channel].data.shape[0:2]
+        if data_dims in ['3D_RGB', '3D_single']:
+            return self.viewer.layers[self.selected_channel].data.shape[0:3]
+        else: # 3D_multi, 4D
+            return self.viewer.layers[self.selected_channel].data.shape[-2:]
 
     def _reset_classif(self):
         self.classifier = None
@@ -1225,7 +1237,7 @@ class ConvPaintWidget(QWidget):
                 ignore_n_first_dims=data.ndim-2) # ignore all but the spatial dimensions
 
     def get_data_dims(self):
-        """Get data dimensions. Returns '4D', '2D', 'RGB', '3D_multi' or '3D_single'."""
+        """Get data dimensions. Returns '2D', 'RGB', '3D_multi', '3D_single' or '4D'."""
         num_dims = self.image_layer_selection_widget.value.ndim
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
@@ -1243,3 +1255,9 @@ class ConvPaintWidget(QWidget):
                 return '3D_multi'
             else:
                 return '3D_single'
+            
+    def _set_old_data_tag(self):
+        image_name = self.image_layer_selection_widget.value.name
+        data_dim = self.radio_rgb.isChecked()*"RGB" + self.radio_multi_channel.isChecked()*"multiCh" + self.radio_single_channel.isChecked()*"singleCh"
+        # timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+        self.old_data_tag = f"{image_name}_{data_dim}"
