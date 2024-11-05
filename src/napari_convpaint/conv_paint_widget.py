@@ -785,6 +785,7 @@ class ConvPaintWidget(QWidget):
         and adjust normalization options."""
         self.param.multi_channel_img = self.radio_multi_channel.isChecked()
         self._reset_radio_norm_settings()
+        self._reset_classif()
 
     def _on_norm_changed(self):
         """Set the normalization options based on radio buttons,
@@ -796,6 +797,7 @@ class ConvPaintWidget(QWidget):
         elif self.radio_normalize_by_image.isChecked():
             self.param.normalize = 3
         self._reset_stats()
+        self._reset_classif()
 
     # Model
 
@@ -814,12 +816,10 @@ class ConvPaintWidget(QWidget):
     def _on_reset_model(self, event=None):
         """Reset model to default and update GUI."""
         # self.model = None
-        self.current_model_path.setText('not trained')
-        self.trained = False
-        self.classifier = None
-        self._reset_predict_buttons()
+        self._reset_classif()
         self.save_model_btn.setEnabled(False)
         self._reset_radio_data_dims()
+        self._reset_radio_norm_settings()
         self._set_default_model()
         self._on_select_layer()
         self.model_description.setText(self.get_model_description())
@@ -851,13 +851,12 @@ class ConvPaintWidget(QWidget):
         self._update_gui_from_params()
 
     def _on_set_fe_model(self, event=None):
-        """Create a neural network model that will be used for feature extraction."""
+        """Create a neural network model that will be used for feature extraction and
+        reset the classifier."""
         self._update_params_from_gui()
         self.model = create_model(self.param)
-        self.current_model_path.setText('not trained')
-        self.trained = False
+        self._reset_classif()
         self._update_gui_from_model()
-        self.model_description.setText(self.get_model_description())
 
     def _on_fe_layer_selection_changed(self):
         #check if temp model is a hookmodel
@@ -872,9 +871,11 @@ class ConvPaintWidget(QWidget):
 
     def _on_fe_scalings_changed(self):
         self._update_scalings_from_gui()
+        self._reset_classif()
 
     def _on_reset_classif_params(self):
         self._reset_classif_params()
+        self._reset_classif()
     
 
 ### Helper functions
@@ -925,8 +926,9 @@ class ConvPaintWidget(QWidget):
 
     def _reset_radio_data_dims(self):
         """set radio buttons depending on selected image type"""
-
-        if self.image_layer_selection_widget.value.rgb:
+        if self.image_layer_selection_widget.value is None:
+            for x in self.channel_buttons: x.setEnabled(False)
+        elif self.image_layer_selection_widget.value.rgb:
             self.radio_rgb.setChecked(True)
             self.radio_multi_channel.setEnabled(False)
             self.radio_single_channel.setEnabled(False)
@@ -944,16 +946,15 @@ class ConvPaintWidget(QWidget):
             self.radio_multi_channel.setEnabled(True)
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setChecked(True)
-        else:
-            for x in self.channel_buttons: x.setEnabled(False)
-
 
     def _reset_radio_norm_settings(self, event=None):
         
         self.image_mean, self.image_std = None, None
         self._add_empty_layers(force_add=False)
 
-        if self.image_layer_selection_widget.value.ndim == 2:
+        if self.image_layer_selection_widget.value is None:
+            for x in self.norm_buttons: x.setEnabled(False)
+        elif self.image_layer_selection_widget.value.ndim == 2:
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalize_by_image.setChecked(True)
             self.radio_normalized_over_stack.setEnabled(False)
@@ -1077,6 +1078,13 @@ class ConvPaintWidget(QWidget):
         """Update list of selectable layers using the temp model."""
         self.fe_layer_selection.clear()
         self.fe_layer_selection.addItems(temp_model.selectable_layer_keys.keys())
+
+    def _reset_classif(self):
+        self.classifier = None
+        self.current_model_path.setText('not trained')
+        self.trained = False
+        self._reset_predict_buttons()
+        self.model_description.setText(self.get_model_description())
 
     def _reset_classif_params(self):
         """Reset classifier parameters to default values."""
