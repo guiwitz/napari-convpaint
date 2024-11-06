@@ -31,10 +31,10 @@ class DinoFeatures(FeatureExtractor):
         param.name = self.model_name
         param.scalings = [1]
         param.order = 0
-        param.image_downsample = 1
+        # param.image_downsample = 1
         param.tile_image = False
         param.tile_annotations = False
-        param.normalize = 1
+        # param.normalize = 1
         param.use_cuda = self.use_cuda
         param.padding = self.padding
         return param
