@@ -997,22 +997,24 @@ class ConvPaintWidget(QWidget):
             return
         
         elif self.image_layer_selection_widget.value.rgb:
-            self.radio_rgb.setChecked(True)
-            self.radio_multi_channel.setEnabled(False)
             self.radio_single_channel.setEnabled(False)
+            self.radio_multi_channel.setEnabled(False)
+            self.radio_rgb.setEnabled(True)
+            self.radio_rgb.setChecked(True)
         elif self.image_layer_selection_widget.value.ndim == 2:
-            self.radio_single_channel.setChecked(True)
+            self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(False)
+            self.radio_single_channel.setChecked(True)
         elif self.image_layer_selection_widget.value.ndim == 3:
-            self.radio_rgb.setEnabled(False)
-            self.radio_multi_channel.setEnabled(True)
             self.radio_single_channel.setEnabled(True)
+            self.radio_multi_channel.setEnabled(True)
+            self.radio_rgb.setEnabled(False)
             self.radio_single_channel.setChecked(True)
         elif self.image_layer_selection_widget.value.ndim == 4:
-            self.radio_rgb.setEnabled(False)
-            self.radio_multi_channel.setEnabled(True)
             self.radio_single_channel.setEnabled(False)
+            self.radio_multi_channel.setEnabled(True)
+            self.radio_rgb.setEnabled(False)
             self.radio_multi_channel.setChecked(True)
 
     def _reset_radio_norm_choices(self, event=None):
@@ -1024,14 +1026,17 @@ class ConvPaintWidget(QWidget):
             return
         
         if self.image_layer_selection_widget.value.ndim == 2:
+            self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalize_by_image.setChecked(True)
             self.radio_normalized_over_stack.setEnabled(False)
         elif (self.image_layer_selection_widget.value.ndim == 3) and (self.param.multi_channel_img):
+            self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalize_by_image.setChecked(True)
             self.radio_normalized_over_stack.setEnabled(False)
         else:
+            self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalized_over_stack.setEnabled(True)
             self.radio_normalized_over_stack.setChecked(True)
@@ -1140,7 +1145,6 @@ class ConvPaintWidget(QWidget):
                 setter(val)
         # self.fe_layer_selection.clear()
         self._update_gui_scalings_from_param()
-
 
     def _check_create_prediction_layer(self):
         """Check if segmentation layer exists and create it if not."""
