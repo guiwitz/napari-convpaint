@@ -28,7 +28,7 @@ class FeatureExtractor:
         param.order: int = 0
         param.use_min_features: bool = False
         param.image_downsample: int = 1
-        param.normalize: int = 3 # 0: no normalization, 1: normalize stack, 2: normalize each image
+        param.normalize: int = 3 # 1: no normalization, 2: normalize stack, 3: normalize each image
         param.multi_channel_img: bool = False
         param.use_cuda: bool = False
         param.tile_annotations: bool = False

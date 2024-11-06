@@ -21,10 +21,6 @@ from .conv_parameters import Param
 from .conv_paint_nnlayers import Hookmodel
 
 
-
-
-### Define the main widget class
-
 class ConvPaintWidget(QWidget):
     """
     Implementation of a napari widget for interactive segmentation performed
@@ -364,6 +360,8 @@ class ConvPaintWidget(QWidget):
             layer.events.name.connect(self.image_layer_selection_widget.reset_choices)
         self.viewer.layers.events.inserted.connect(self._on_insert_layer)
 
+        # === HOME TAB ===
+
         # Reset layer choices in dropdowns when napari layers are added or removed
         for layer_widget_reset in [self.annotation_layer_selection_widget.reset_choices,
                                    self.image_layer_selection_widget.reset_choices]:
@@ -376,7 +374,6 @@ class ConvPaintWidget(QWidget):
         self.add_layers_btn.clicked.connect(self._on_add_annot_seg_layers)
         self.check_keep_layers.stateChanged.connect(lambda: setattr(
             self, 'keep_layers', self.check_keep_layers.isChecked()))
-
 
         # Train
         self.train_classifier_btn.clicked.connect(self._on_train)
@@ -418,7 +415,8 @@ class ConvPaintWidget(QWidget):
         self.check_tile_image.stateChanged.connect(lambda: setattr(
             self.param, 'tile_image', self.check_tile_image.isChecked()))
 
-        # Model tab
+        # === MODEL OPTIONS TAB ===
+
         # Feature extractor
         self.qcombo_model_type.currentIndexChanged.connect(self._on_model_selected)
         self.set_fe_btn.clicked.connect(self._on_set_fe_model)
@@ -427,13 +425,14 @@ class ConvPaintWidget(QWidget):
         self.fe_scaling_factors.currentIndexChanged.connect(self._on_fe_scalings_changed)
         # NOTE: Changing interpolation_order, use_min_features and use_cudaof
         # shall only be applied when the user clicks the button to set the FE
+        
         # Classifier
         self.spin_iterations.valueChanged.connect(lambda: setattr(self.param, 'classif_iterations', self.spin_iterations.value()))
         self.spin_learning_rate.valueChanged.connect(lambda: setattr(self.param, 'classif_learning_rate', self.spin_learning_rate.value()))
         self.spin_depth.valueChanged.connect(lambda: setattr(self.param, 'classif_depth', self.spin_depth.value()))
         self.set_default_classif_btn.clicked.connect(self._on_reset_classif_params)
 
-    # Visibility toggles for key bindings
+### Visibility toggles for key bindings
 
     def toggle_annotation(self, event=None):
         """Hide annotation layer."""
@@ -824,7 +823,7 @@ class ConvPaintWidget(QWidget):
         self._reset_radio_data_dim_choices()
         self._reset_radio_norm_choices()
 
-    # Model Tab
+    ### Model Tab
 
     def _on_model_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
@@ -832,24 +831,21 @@ class ConvPaintWidget(QWidget):
         model_class = get_all_models()[model_type]
         self.temp_model = model_class(model_name=model_type, use_cuda=self.param.use_cuda)
 
-        # Get selectable layers from the temp model and update the GUI
-        if isinstance(self.temp_model, Hookmodel):
-            self._create_fe_layer_selection_from_temp_model(self.temp_model)
-            self.fe_layer_selection.setEnabled(True)
-            #check if outputs are selected
-            if self.fe_layer_selection.count() > 0:
-                self.set_fe_btn.setEnabled(False)
-        else:
-            self.fe_layer_selection.clear()
-            self.fe_layer_selection.setEnabled(False)
-            self.set_fe_btn.setEnabled(True)
-
         # Get the default FE params for the temp model and update the GUI
-        default_params = self.temp_model.get_default_params().as_dict()
-        for param_name, default_val in default_params.items():
-            if default_val is not None:
-                setattr(self.param, param_name, default_val)
-        self._update_gui_from_param()
+        self._update_gui_fe_layers_from_temp_model()
+        self._update_gui_scalings_from_temp_model()
+        default_param = self.temp_model.get_default_params()
+        val_to_setter = {
+            "model_name": self.qcombo_model_type.setCurrentText,
+            "order": self.spin_interpolation_order.setValue,
+            "use_min_features": self.check_use_min_features.setChecked,
+            "use_cuda": self.check_use_cuda.setChecked
+        }
+        for attr, setter in val_to_setter.items():
+            val = getattr(default_param, attr, None)
+            if val is not None:
+                if isinstance(val, list): val = str(val)
+                setter(val)
 
     def _on_fe_layer_selection_changed(self):
         """Enable the set button based on the model type."""
@@ -1015,10 +1011,10 @@ class ConvPaintWidget(QWidget):
         # Model
         self.param.model_name = self.qcombo_model_type.currentText()
         self.param.model_layers = self._get_selected_layer_names()
+        self.param.scalings = self.fe_scaling_factors.currentData()
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.use_cuda = self.check_use_cuda.isChecked()
-        self.param.scalings = self.fe_scaling_factors.currentData()
 
     def _update_gui_fe_layers_from_model(self):
         """Update GUI FE layers based on the current model."""
@@ -1044,7 +1040,21 @@ class ConvPaintWidget(QWidget):
         """Update list of selectable layers from the model."""
         self.fe_layer_selection.clear()
         self.fe_layer_selection.addItems(self.model.selectable_layer_keys.keys())
- 
+
+    def _update_gui_fe_layers_from_temp_model(self):
+        """Update GUI FE layers based on the temporary model."""
+        # Get selectable layers from the temp model and update the GUI
+        if isinstance(self.temp_model, Hookmodel):
+            self._create_fe_layer_selection_from_temp_model(self.temp_model)
+            self.fe_layer_selection.setEnabled(True)
+            # Check if outputs are selected
+            if self.fe_layer_selection.count() > 0:
+                self.set_fe_btn.setEnabled(False)
+        else:
+            self.fe_layer_selection.clear()
+            self.fe_layer_selection.setEnabled(False)
+            self.set_fe_btn.setEnabled(True)
+
     def _create_fe_layer_selection_from_temp_model(self, temp_model):
         """Update list of selectable layers using the temp model (for choosing)."""
         self.fe_layer_selection.clear()
@@ -1059,11 +1069,25 @@ class ConvPaintWidget(QWidget):
             self.fe_scaling_factors.addItem(str(self.param.scalings), self.param.scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
+    def _update_gui_scalings_from_temp_model(self):
+        """Update GUI FE scalings from the temporary model."""
+        default_param = self.temp_model.get_default_params()
+        if default_param.scalings is None:
+            return
+        index = self.fe_scaling_factors.findData(default_param.scalings)
+        if index != -1:
+            self.fe_scaling_factors.setCurrentIndex(index)
+        else:
+            self.fe_scaling_factors.addItem(str(default_param.scalings), default_param.scalings)
+            self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
+
     def _update_gui_from_param(self):
         """Update GUI from parameters."""
         # Image processing parameters
         # NOTE: WHAT TO DO ABOUT MULTICHANNEL ?
+        print("A", self.model_description1.text())
         self.button_group_normalize.button(self.param.normalize).setChecked(True)
+        print("B", self.model_description1.text())
         # Acceleration parameters
         self.spin_downsample.setValue(self.param.image_downsample)
         self.check_tile_annotations.setChecked(self.param.tile_annotations)
@@ -1146,8 +1170,8 @@ class ConvPaintWidget(QWidget):
         num_layers = len(self.param.model_layers) if not self.param.model_layers is None else 0
         num_scalings = len(self.param.scalings) if not self.param.scalings is None else 0
         descr = (model_name +
-        f': {num_layers} layer' + ('s' if num_layers > 1 else '') +
-        f', {num_scalings} scaling' + ('s' if num_scalings > 1 else '') + 
+        f': {num_layers} layer' + ('' if num_layers == 1 else 's') +
+        f', {num_scalings} scaling' + ('' if num_scalings == 1 else 's') + 
         f' ({self.current_model_path.text()})')
         self.model_description1.setText(descr)
         self.model_description2.setText(descr)
