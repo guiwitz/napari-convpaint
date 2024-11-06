@@ -1117,22 +1117,28 @@ class ConvPaintWidget(QWidget):
         self.param.multi_channel_img = self.param.multi_channel_img
         self._reset_radio_norm_choices()
 
-        self.button_group_normalize.button(self.param.normalize).setChecked(True)
-        # Acceleration parameters
-        self.spin_downsample.setValue(self.param.image_downsample)
-        self.check_tile_annotations.setChecked(self.param.tile_annotations)
-        self.check_tile_image.setChecked(self.param.tile_image)
-        # Feature Extractor
-        self.qcombo_model_type.setCurrentText(self.param.model_name)
+        if self.param.normalize is not None:
+            self.button_group_normalize.button(self.param.normalize).setChecked(True)
+        val_to_setter = {
+            "image_downsample": self.spin_downsample.setValue,
+            "tile_annotations": self.check_tile_annotations.setChecked,
+            "tile_image": self.check_tile_image.setChecked,
+            "model_name": self.qcombo_model_type.setCurrentText,
+            "order": self.spin_interpolation_order.setValue,
+            "use_min_features": self.check_use_min_features.setChecked,
+            "use_cuda": self.check_use_cuda.setChecked,
+            "classif_iterations": self.spin_iterations.setValue,
+            "classif_learning_rate": self.spin_learning_rate.setValue,
+            "classif_depth": self.spin_depth.setValue
+        }
+        for attr, setter in val_to_setter.items():
+            val = getattr(self.param, attr, None)
+            if val is not None:
+                if isinstance(val, list): val = str(val)
+                setter(val)
         # self.fe_layer_selection.clear()
         self._update_gui_scalings_from_param()
-        self.spin_interpolation_order.setValue(self.param.order)
-        self.check_use_min_features.setChecked(self.param.use_min_features)
-        self.check_use_cuda.setChecked(self.param.use_cuda)
-        # Classifier
-        self.spin_iterations.setValue(self.param.classif_iterations)
-        self.spin_learning_rate.setValue(self.param.classif_learning_rate)
-        self.spin_depth.setValue(self.param.classif_depth)
+
 
     def _check_create_prediction_layer(self):
         """Check if segmentation layer exists and create it if not."""
