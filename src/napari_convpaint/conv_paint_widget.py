@@ -356,7 +356,7 @@ class ConvPaintWidget(QWidget):
         # Add connections and initialize by setting default model and params
         self.add_connections()
         self._reset_default_general_params()
-        self._reset_default_model()
+        self._reset_default_model_params()
         self._update_gui_from_param()
         self._on_select_layer()
 
@@ -835,10 +835,10 @@ class ConvPaintWidget(QWidget):
         """Reset model to default and update GUI."""
         # self.model = None
         self.save_model_btn.setEnabled(False)
-        self._reset_default_model()
+        self._reset_default_model_params()
         self._reset_classif()
-        self._reset_radio_data_dim_choices()
-        self._reset_radio_norm_choices()
+        # self._reset_radio_data_dim_choices()
+        # self._reset_radio_norm_choices()
 
     ### Model Tab
 
@@ -1163,7 +1163,7 @@ class ConvPaintWidget(QWidget):
         # Set default values in param object (by mimicking a click on the "Set FE" button)
         self._on_set_fe_model()
 
-    def _reset_default_model(self):
+    def _reset_default_model_params(self):
         """Set model back to default (FE and Classifier)."""
         self._reset_classif_params()
         self._reset_fe_params()
