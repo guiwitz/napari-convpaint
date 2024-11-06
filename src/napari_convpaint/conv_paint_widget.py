@@ -1102,6 +1102,8 @@ class ConvPaintWidget(QWidget):
 
     def _update_gui_scalings_from_param(self):
         """Update GUI FE scalings from parameters."""
+        if self.param.scalings is None:
+            return
         index = self.fe_scaling_factors.findData(self.param.scalings)
         if index != -1:
             self.fe_scaling_factors.setCurrentIndex(index)
