@@ -57,7 +57,7 @@ class ConvPaintWidget(QWidget):
         self.third_party = third_party
         # Plugin options
         self.keep_layers = False
-        self.auto_seg = False
+        self.auto_seg = True
         self.old_data_tag = "None"
         self.add_layers_flag = True
 
@@ -892,7 +892,29 @@ class ConvPaintWidget(QWidget):
         self.param.order = self.spin_interpolation_order.value()
         self.param.use_min_features = self.check_use_min_features.isChecked()
         self.param.use_cuda = self.check_use_cuda.isChecked()
-        # self.param.model_name = self.qcombo_model_type.currentText()
+        # Get default non-FE params from temp model and update the GUI (also setting the params)
+        default_param = self.temp_model.get_default_params()
+
+        # NOTE: Check how to handle multichannel...
+        if default_param.multi_channel_img is not None:
+            self.param.multi_channel_img = default_param.multi_channel_img
+            self._reset_radio_norm_choices()
+
+        if default_param.normalize is not None:
+            self.button_group_normalize.button(default_param.normalize).setChecked(True)
+        val_to_setter = {
+            "image_downsample": self.spin_downsample.setValue,
+            "tile_annotations": self.check_tile_annotations.setChecked,
+            "tile_image": self.check_tile_image.setChecked,
+            "classif_iterations": self.spin_iterations.setValue,
+            "classif_learning_rate": self.spin_learning_rate.setValue,
+            "classif_depth": self.spin_depth.setValue
+        }
+        for attr, setter in val_to_setter.items():
+            val = getattr(default_param, attr, None)
+            if val is not None:
+                if isinstance(val, list): val = str(val)
+                setter(val)
         # Create the model and reset the classifier
         self.model = create_model(self.param)
         self._reset_classif()
@@ -1066,15 +1088,6 @@ class ConvPaintWidget(QWidget):
             self.fe_layer_selection.setEnabled(False)
             self.set_fe_btn.setEnabled(True)
 
-    def _update_gui_scalings_from_param(self):
-        """Update GUI FE scalings from parameters."""
-        index = self.fe_scaling_factors.findData(self.param.scalings)
-        if index != -1:
-            self.fe_scaling_factors.setCurrentIndex(index)
-        else:
-            self.fe_scaling_factors.addItem(str(self.param.scalings), self.param.scalings)
-            self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
-
     def _update_gui_scalings_from_temp_model(self):
         """Update GUI FE scalings from the temporary model."""
         default_param = self.temp_model.get_default_params()
@@ -1087,10 +1100,23 @@ class ConvPaintWidget(QWidget):
             self.fe_scaling_factors.addItem(str(default_param.scalings), default_param.scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
+    def _update_gui_scalings_from_param(self):
+        """Update GUI FE scalings from parameters."""
+        index = self.fe_scaling_factors.findData(self.param.scalings)
+        if index != -1:
+            self.fe_scaling_factors.setCurrentIndex(index)
+        else:
+            self.fe_scaling_factors.addItem(str(self.param.scalings), self.param.scalings)
+            self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
+
     def _update_gui_from_param(self):
         """Update GUI from parameters."""
         # Image processing parameters
-        # NOTE: WHAT TO DO ABOUT MULTICHANNEL ?
+
+        # NOTE: WHAT TO DO ABOUT MULTICHANNEL? Done seperately through reset_radio_data_dim_choices?
+        self.param.multi_channel_img = self.param.multi_channel_img
+        self._reset_radio_norm_choices()
+
         self.button_group_normalize.button(self.param.normalize).setChecked(True)
         # Acceleration parameters
         self.spin_downsample.setValue(self.param.image_downsample)
@@ -1138,7 +1164,7 @@ class ConvPaintWidget(QWidget):
 
     def _reset_classif_params(self):
         """Reset classifier parameters to default values."""
-        # In the widget
+        # In the widget, which will also trigger to adjust the param object
         self.spin_iterations.setValue(self.DEFAULT_ITERATIONS)
         self.spin_learning_rate.setValue(self.DEFAULT_LEARNING_RATE)
         self.spin_depth.setValue(self.DEFAULT_DEPTH)
@@ -1149,7 +1175,7 @@ class ConvPaintWidget(QWidget):
 
     def _reset_fe_params(self):
         """Reset feature extraction parameters to default values."""
-        # Reset the gui values for the FE
+        # Reset the gui values for the FE, which will also trigger to adjust the param object
         self.qcombo_model_type.setCurrentText(self.DEFAULT_FE)
         self.fe_layer_selection.clearSelection()
         self.fe_layer_selection.setCurrentRow(self.DEFAULT_LAYERS_INDEX)
@@ -1166,10 +1192,16 @@ class ConvPaintWidget(QWidget):
         self._reset_fe_params()
 
     def _reset_default_general_params(self):
-        self.param.normalize = self.DEFAULT_NORM
-        self.param.image_downsample = self.DEFAULT_DOWNSAMPLE
-        self.param.tile_annotations = self.DEFAULT_TILE_ANNOTS
-        self.param.tile_image = self.DEFAULT_TILE_IMG
+        """Set general parameters back to default."""
+        # Set defaults in GUI, which will also trigger to adjust param
+        self.button_group_normalize.button(self.DEFAULT_NORM).setChecked(True)
+        self.spin_downsample.setValue(self.DEFAULT_DOWNSAMPLE)
+        self.check_tile_annotations.setChecked(self.DEFAULT_TILE_ANNOTS)
+        self.check_tile_image.setChecked(self.DEFAULT_TILE_IMG)
+        # self.param.normalize = self.DEFAULT_NORM
+        # self.param.image_downsample = self.DEFAULT_DOWNSAMPLE
+        # self.param.tile_annotations = self.DEFAULT_TILE_ANNOTS
+        # self.param.tile_image = self.DEFAULT_TILE_IMG
 
     def _set_model_description(self):
         """Set the model description text."""
