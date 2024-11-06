@@ -478,13 +478,13 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
             self.add_layers_flag = False # Turn off layer creation, since we do it below
-            self._adjust_data_dims() # Also resets classif and stats (through norm_settings)
-            self._add_empty_layers()
+            # self._adjust_data_dims() # Also resets classif and stats (through norm_settings)
             # Set radio buttons depending on selected image type
             self._reset_radio_data_dim_choices()
             self._reset_radio_norm_choices()
             self._reset_predict_buttons()
-            # Save old data tag
+            # Add empty layers and save old data tag for next addition
+            self._add_empty_layers()
             self._set_old_data_tag()
             # Activate button to add annotation and segmentation layers
             self.add_layers_btn.setEnabled(True)
@@ -776,7 +776,8 @@ class ConvPaintWidget(QWidget):
             save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
         # Save model
-        save_model(save_file, self.classifier, self.model, self.param, )        
+        save_model(save_file, self.classifier, self.model, self.param, )
+        # Adjust the description text
         self.current_model_path.setText(save_file.name)
         self._set_model_description()
 
@@ -792,16 +793,15 @@ class ConvPaintWidget(QWidget):
         self.classifier = classifier
         self.param = param
         self.model = model
-
         # Load model state if available
         if model_state is not None and hasattr(self.model, 'load_state_dict'):
             self.model.load_state_dict(model_state)
-        
         # Update GUI
         self.qcombo_model_type.setCurrentText(self.param.model_name) # Select FE in dropdown
         self._update_gui_from_param()
         self._update_gui_fe_layers_from_model()
         self.current_model_path.setText(save_file.name)
+        # Adjust train flag, set save button, and update description text
         self.trained = True
         self.save_model_btn.setEnabled(True)
         self._set_model_description()
@@ -811,8 +811,10 @@ class ConvPaintWidget(QWidget):
 
     def _on_data_dim_changed(self):
         """Set the image data dimensions based on radio buttons,
-        and adjust normalization options."""
-        self._adjust_data_dims() # Also resets classif and stats (through norm_settings)
+        reset classifier, and adjust normalization options."""
+        self.param.multi_channel_img = self.radio_multi_channel.isChecked()
+        self._reset_classif()
+        self._reset_radio_norm_choices()
         if self.add_layers_flag: # Add layers only if not triggered from layer selection
             self._add_empty_layers()
         self._set_old_data_tag()
@@ -844,12 +846,13 @@ class ConvPaintWidget(QWidget):
 
     def _on_model_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
+        # Create a temporary model to get the layers (to display) and default parameters
         model_type = self.qcombo_model_type.currentText()
         model_class = get_all_models()[model_type]
         self.temp_model = model_class(model_name=model_type, use_cuda=self.param.use_cuda)
-
-        # Get the default FE params for the temp model and update the GUI
+        # Update the GUI to show the layers of the temp model
         self._update_gui_fe_layers_from_temp_model()
+        # Get the default FE params for the temp model and update the GUI
         self._update_gui_scalings_from_temp_model()
         default_param = self.temp_model.get_default_params()
         val_to_setter = {
@@ -882,11 +885,18 @@ class ConvPaintWidget(QWidget):
     def _on_set_fe_model(self, event=None):
         """Create a neural network model that will be used for feature extraction and
         reset the classifier."""
-        self._update_fe_params_from_gui()
+        # Update FE parameters from the GUI
+        self.param.model_name = self.qcombo_model_type.currentText()
+        self.param.model_layers = self._get_selected_layer_names()
+        self.param.scalings = self.fe_scaling_factors.currentData()
+        self.param.order = self.spin_interpolation_order.value()
+        self.param.use_min_features = self.check_use_min_features.isChecked()
+        self.param.use_cuda = self.check_use_cuda.isChecked()
         # self.param.model_name = self.qcombo_model_type.currentText()
+        # Create the model and reset the classifier
         self.model = create_model(self.param)
         self._reset_classif()
-        self._update_gui_fe_layers_from_model()
+        self._update_gui_fe_layers_from_model() # NOTE R: Necessary? (Can only set what's already loaded as temp model...)
 
     def _on_reset_default_fe(self, event=None):
         """Reset the feature extraction model to the default model."""
@@ -944,12 +954,6 @@ class ConvPaintWidget(QWidget):
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
             self.viewer.layers['annotations'].brush_size = 3
-
-    def _adjust_data_dims(self):
-        """Adjust data dimensions based on radio buttons."""
-        self.param.multi_channel_img = self.radio_multi_channel.isChecked()
-        self._reset_radio_norm_choices()
-        self._reset_classif()
 
     def _create_annot_seg_copies(self):
         """Create copies of the annotations and segmentation layers."""
@@ -1025,16 +1029,6 @@ class ConvPaintWidget(QWidget):
     def _reset_stats(self):
         """Reset image stats."""
         self.image_mean, self.image_std = None, None
-
-    def _update_fe_params_from_gui(self):
-        """Update parameters from GUI."""
-        # Model
-        self.param.model_name = self.qcombo_model_type.currentText()
-        self.param.model_layers = self._get_selected_layer_names()
-        self.param.scalings = self.fe_scaling_factors.currentData()
-        self.param.order = self.spin_interpolation_order.value()
-        self.param.use_min_features = self.check_use_min_features.isChecked()
-        self.param.use_cuda = self.check_use_cuda.isChecked()
 
     def _update_gui_fe_layers_from_model(self):
         """Update GUI FE layers based on the current model."""
