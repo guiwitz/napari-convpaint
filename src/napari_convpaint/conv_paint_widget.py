@@ -310,12 +310,12 @@ class ConvPaintWidget(QWidget):
         self.fe_group.glayout.addWidget(self.check_use_cuda, 6, 1, 1, 1)
 
         # Add "set" buttons to FE group
-        self.set_fe_btn = QPushButton('Set feature extractor')
-        self.set_fe_btn.setToolTip('Set the feature extraction model')
-        self.fe_group.glayout.addWidget(self.set_fe_btn, 7, 0, 1, 1)
         self.reset_default_fe_btn = QPushButton('Reset to default')
         self.reset_default_fe_btn.setToolTip('Set the feature extractor back to the default model')
-        self.fe_group.glayout.addWidget(self.reset_default_fe_btn, 7, 1, 1, 1)
+        self.fe_group.glayout.addWidget(self.reset_default_fe_btn, 7, 0, 1, 1)
+        self.set_fe_btn = QPushButton('Set feature extractor')
+        self.set_fe_btn.setToolTip('Set the feature extraction model')
+        self.fe_group.glayout.addWidget(self.set_fe_btn, 7, 1, 1, 1)
 
         # Add classifier parameters
         self.spin_iterations = QSpinBox()
