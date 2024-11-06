@@ -74,7 +74,7 @@ class ConvPaintWidget(QWidget):
         self.DEFAULT_LAYERS_INDEX = 0
         self.DEFAULT_SCALINGS_TEXT = '[1,2]'
         self.DEFAULT_INTERPOLATION_ORDER = 1
-        self.DEFAULT_USE_MIN_FEATURES = True
+        self.DEFAULT_USE_MIN_FEATURES = False
         self.DEFAULT_USE_CUDA = False
 
         # Define the default classifier parameters
