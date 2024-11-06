@@ -1201,15 +1201,16 @@ class ConvPaintWidget(QWidget):
 
     def _reset_default_general_params(self):
         """Set general parameters back to default."""
-        # Set defaults in GUI, which will also trigger to adjust param
+        # Set defaults in GUI
         self.button_group_normalize.button(self.DEFAULT_NORM).setChecked(True)
         self.spin_downsample.setValue(self.DEFAULT_DOWNSAMPLE)
         self.check_tile_annotations.setChecked(self.DEFAULT_TILE_ANNOTS)
         self.check_tile_image.setChecked(self.DEFAULT_TILE_IMG)
-        # self.param.normalize = self.DEFAULT_NORM
-        # self.param.image_downsample = self.DEFAULT_DOWNSAMPLE
-        # self.param.tile_annotations = self.DEFAULT_TILE_ANNOTS
-        # self.param.tile_image = self.DEFAULT_TILE_IMG
+        # Set defaults in param object (not done through bindings if values in the widget are not changed)
+        self.param.normalize = self.DEFAULT_NORM
+        self.param.image_downsample = self.DEFAULT_DOWNSAMPLE
+        self.param.tile_annotations = self.DEFAULT_TILE_ANNOTS
+        self.param.tile_image = self.DEFAULT_TILE_IMG
 
     def _set_model_description(self):
         """Set the model description text."""
