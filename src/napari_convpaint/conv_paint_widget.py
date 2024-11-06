@@ -59,7 +59,7 @@ class ConvPaintWidget(QWidget):
         self.keep_layers = False
         self.auto_seg = False
         self.old_data_tag = "None"
-        self.layers_added = False
+        self.add_layers_flag = True
 
         ### Define Constants
 
@@ -355,8 +355,9 @@ class ConvPaintWidget(QWidget):
 
         # Add connections and initialize by setting default model and params
         self.add_connections()
-        self._reset_default_model()
         self._reset_default_general_params()
+        self._reset_default_model()
+        self._update_gui_from_param()
         self._on_select_layer()
 
         # Add key bindings
@@ -476,12 +477,9 @@ class ConvPaintWidget(QWidget):
         """Assign the layer to segment and update data radio buttons accordingly"""
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
-            self._adjust_data_dims()
-            # Make sure selection and data dim change trigger layer creation only once
-            if not self.layers_added:
-                self._add_empty_layers()
-            else:
-                self.layers_added = False
+            self.add_layers_flag = False # Turn off layer creation, since we do it below
+            self._adjust_data_dims() # Also resets classif and stats (through norm_settings)
+            self._add_empty_layers()
             # Set radio buttons depending on selected image type
             self._reset_radio_data_dim_choices()
             self._reset_radio_norm_choices()
@@ -492,6 +490,8 @@ class ConvPaintWidget(QWidget):
             self.add_layers_btn.setEnabled(True)
         else:
             self.add_layers_btn.setEnabled(False)
+        # Allow other methods again to add layers
+        self.add_layers_flag = True
 
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
@@ -522,14 +522,12 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            print("A", self.image_mean)
             features, targets = get_features_current_layers(
                 image=image_stack_norm,
                 annotations=self.annotation_layer_selection_widget.value.data,
                 model=self.model,
                 param=self.param,
             )
-            print("B", self.image_mean)
             self.classifier = train_classifier(
                 features, targets,
                 iterations=self.param.classif_iterations,
@@ -815,7 +813,8 @@ class ConvPaintWidget(QWidget):
         """Set the image data dimensions based on radio buttons,
         and adjust normalization options."""
         self._adjust_data_dims() # Also resets classif and stats (through norm_settings)
-        self._add_empty_layers()
+        if self.add_layers_flag: # Add layers only if not triggered from layer selection
+            self._add_empty_layers()
         self._set_old_data_tag()
 
     def _on_norm_changed(self):
@@ -906,8 +905,6 @@ class ConvPaintWidget(QWidget):
         remove it and add a new one. If the widget is used as third party (self.third_party=True),
         no layer is added if it didn't exist before, unless force_add=True (e.g. when the user click
         on the add layer button)"""
-
-        self.layers_added = True
 
         if self.keep_layers:
             self._create_annot_seg_copies()
