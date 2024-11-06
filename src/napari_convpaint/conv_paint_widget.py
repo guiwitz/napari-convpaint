@@ -914,17 +914,7 @@ class ConvPaintWidget(QWidget):
         
         layer_shape = self._get_annot_shape()
 
-        annotation_exists = False
-        if 'annotations' in self.viewer.layers:
-            self.viewer.layers.remove('annotations')
-            annotation_exists = True
-
-        if (not self.third_party) | (force_add) | (self.third_party & annotation_exists):
-            self.viewer.add_labels(
-                data=np.zeros((layer_shape), dtype=np.uint8),
-                name='annotations'
-                )
-        
+        # Add segmentation layer; do this first, so that the annotation layer is on top
         segmentation_exists = False
         if 'segmentation' in self.viewer.layers:
             self.viewer.layers.remove('segmentation')
@@ -936,11 +926,24 @@ class ConvPaintWidget(QWidget):
                 name='segmentation'
                 )
         
+        # Add annotation layer
+        annotation_exists = False
+        if 'annotations' in self.viewer.layers:
+            self.viewer.layers.remove('annotations')
+            annotation_exists = True
+
+        if (not self.third_party) | (force_add) | (self.third_party & annotation_exists):
+            self.viewer.add_labels(
+                data=np.zeros((layer_shape), dtype=np.uint8),
+                name='annotations'
+                )
+        
         # Activate the annotation layer, select it in the dropdown and activate paint mode
         if 'annotations' in self.viewer.layers:
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
+            self.viewer.layers['annotations'].brush_size = 3
 
     def _adjust_data_dims(self):
         """Adjust data dimensions based on radio buttons."""
