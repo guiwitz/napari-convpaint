@@ -996,7 +996,7 @@ class ConvPaintWidget(QWidget):
             for x in self.channel_buttons: x.setEnabled(False)
             return
         
-        elif self.image_layer_selection_widget.value.rgb:
+        if self.image_layer_selection_widget.value.rgb:
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(True)

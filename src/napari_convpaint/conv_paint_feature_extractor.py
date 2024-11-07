@@ -21,18 +21,22 @@ class FeatureExtractor:
 
     def get_default_params(self):
         param = Param()
-        param.classifier: str = None
+        # FE params (encouraged to set)
         param.model_name: str = self.model_name
         param.model_layers: list[str] = None
         param.scalings: list[int] = [1]
         param.order: int = 0
         param.use_min_features: bool = False
-        param.image_downsample: int = 1
-        param.normalize: int = 3 # 1: no normalization, 2: normalize stack, 3: normalize each image
-        param.multi_channel_img: bool = False
         param.use_cuda: bool = False
-        param.tile_annotations: bool = False
         param.padding : int = 0
+        # Classifier
+        param.classifier: str = None
+        # General settings (NOTE: only set if shall be enforced by FE !)
+        param.multi_channel_img: bool = None # use multichannel if image dimensions allow
+        param.normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
+        param.image_downsample: int = None
+        param.tile_annotations: bool = None
+        param.tile_image: bool = None
 
         return param
 
