@@ -343,9 +343,9 @@ class ConvPaintWidget(QWidget):
         self.classifier_params_group.glayout.addWidget(QLabel('Depth'), 2, 0, 1, 1)
         self.classifier_params_group.glayout.addWidget(self.spin_depth, 2, 1, 1, 1)
 
-        self.set_default_classif_btn = QPushButton('Restore defaults')
-        self.set_default_classif_btn.setEnabled(True)
-        self.classifier_params_group.glayout.addWidget(self.set_default_classif_btn, 3, 0, 1, 2)
+        self.set_default_clf_btn = QPushButton('Restore defaults')
+        self.set_default_clf_btn.setEnabled(True)
+        self.classifier_params_group.glayout.addWidget(self.set_default_clf_btn, 3, 0, 1, 2)
 
         # === === ===
 
@@ -438,10 +438,10 @@ class ConvPaintWidget(QWidget):
         # shall only be applied when the user clicks the button to set the FE
         
         # Classifier
-        self.spin_iterations.valueChanged.connect(lambda: setattr(self.param, 'classif_iterations', self.spin_iterations.value()))
-        self.spin_learning_rate.valueChanged.connect(lambda: setattr(self.param, 'classif_learning_rate', self.spin_learning_rate.value()))
-        self.spin_depth.valueChanged.connect(lambda: setattr(self.param, 'classif_depth', self.spin_depth.value()))
-        self.set_default_classif_btn.clicked.connect(self._on_reset_classif_params)
+        self.spin_iterations.valueChanged.connect(lambda: setattr(self.param, 'clf_iterations', self.spin_iterations.value()))
+        self.spin_learning_rate.valueChanged.connect(lambda: setattr(self.param, 'clf_learning_rate', self.spin_learning_rate.value()))
+        self.spin_depth.valueChanged.connect(lambda: setattr(self.param, 'clf_depth', self.spin_depth.value()))
+        self.set_default_clf_btn.clicked.connect(self._on_reset_clf_params)
 
 ### Visibility toggles for key bindings
 
@@ -530,9 +530,9 @@ class ConvPaintWidget(QWidget):
             )
             self.classifier = train_classifier(
                 features, targets,
-                iterations=self.param.classif_iterations,
-                learning_rate=self.param.classif_learning_rate,
-                depth=self.param.classif_depth,
+                iterations=self.param.clf_iterations,
+                learning_rate=self.param.clf_learning_rate,
+                depth=self.param.clf_depth,
         )
     
         with warnings.catch_warnings():
@@ -906,9 +906,9 @@ class ConvPaintWidget(QWidget):
             "image_downsample": self.spin_downsample.setValue,
             "tile_annotations": self.check_tile_annotations.setChecked,
             "tile_image": self.check_tile_image.setChecked,
-            "classif_iterations": self.spin_iterations.setValue,
-            "classif_learning_rate": self.spin_learning_rate.setValue,
-            "classif_depth": self.spin_depth.setValue
+            "clf_iterations": self.spin_iterations.setValue,
+            "clf_learning_rate": self.spin_learning_rate.setValue,
+            "clf_depth": self.spin_depth.setValue
         }
         for attr, setter in val_to_setter.items():
             val = getattr(default_param, attr, None)
@@ -924,10 +924,10 @@ class ConvPaintWidget(QWidget):
         """Reset the feature extraction model to the default model."""
         self._reset_fe_params()
 
-    def _on_reset_classif_params(self):
+    def _on_reset_clf_params(self):
         """Reset the classifier parameters to the default values
         and discard the trained model."""
-        self._reset_classif_params()
+        self._reset_clf_params()
         self._reset_classif()
     
 ### Helper functions
@@ -1134,9 +1134,9 @@ class ConvPaintWidget(QWidget):
             "order": self.spin_interpolation_order.setValue,
             "use_min_features": self.check_use_min_features.setChecked,
             "use_cuda": self.check_use_cuda.setChecked,
-            "classif_iterations": self.spin_iterations.setValue,
-            "classif_learning_rate": self.spin_learning_rate.setValue,
-            "classif_depth": self.spin_depth.setValue
+            "clf_iterations": self.spin_iterations.setValue,
+            "clf_learning_rate": self.spin_learning_rate.setValue,
+            "clf_depth": self.spin_depth.setValue
         }
         for attr, setter in val_to_setter.items():
             val = getattr(self.param, attr, None)
@@ -1174,16 +1174,16 @@ class ConvPaintWidget(QWidget):
         self._reset_predict_buttons()
         self._set_model_description()
 
-    def _reset_classif_params(self):
+    def _reset_clf_params(self):
         """Reset classifier parameters to default values."""
         # In the widget, which will also trigger to adjust the param object
         self.spin_iterations.setValue(self.DEFAULT_ITERATIONS)
         self.spin_learning_rate.setValue(self.DEFAULT_LEARNING_RATE)
         self.spin_depth.setValue(self.DEFAULT_DEPTH)
         # In the param object (not done through bindings if values in the widget are not changed)
-        self.param.classif_iterations = self.DEFAULT_ITERATIONS
-        self.param.classif_learning_rate = self.DEFAULT_LEARNING_RATE
-        self.param.classif_depth = self.DEFAULT_DEPTH
+        self.param.clf_iterations = self.DEFAULT_ITERATIONS
+        self.param.clf_learning_rate = self.DEFAULT_LEARNING_RATE
+        self.param.clf_depth = self.DEFAULT_DEPTH
 
     def _reset_fe_params(self):
         """Reset feature extraction parameters to default values."""
@@ -1200,7 +1200,7 @@ class ConvPaintWidget(QWidget):
 
     def _reset_default_model_params(self):
         """Set model back to default (FE and Classifier)."""
-        self._reset_classif_params()
+        self._reset_clf_params()
         self._reset_fe_params()
 
     def _reset_default_general_params(self):

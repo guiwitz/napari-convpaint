@@ -28,9 +28,9 @@ class Param:
     use_min_features: bool = None
     use_cuda: bool = None
     # Classifier parameters
-    classif_iterations: int = None
-    classif_learning_rate: float = None
-    classif_depth: int = None
+    clf_iterations: int = None
+    clf_learning_rate: float = None
+    clf_depth: int = None
 
 
     def __post_init__(self):
