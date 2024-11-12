@@ -36,7 +36,8 @@ class DinoFeatures(FeatureExtractor):
         # param.image_downsample = 1
         param.tile_image = False
         param.tile_annotations = False
-        # param.normalize = 1        return param
+        # param.normalize = 1
+        return param
 
     def _preprocess_image(self, image):
         '''Normalizes input image to image net stats, return to 1x3xHxW tensor.
