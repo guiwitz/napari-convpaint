@@ -40,7 +40,7 @@ class Classifier():
         Classifier to predict the class of each pixel
     param : Param
         Parameters for model
-    model : Hookmodel
+    fe_model : Hookmodel
         Model to extract features from the image
 
     """
@@ -49,7 +49,7 @@ class Classifier():
 
         self.classifier = None
         self.param = None
-        self.model = None
+        self.fe_model = None
 
         if model_path is not None:
             self.load_model(model_path)
@@ -63,14 +63,14 @@ class Classifier():
         
         self.classifier, self.param = load_trained_classifier(model_path)
         
-        self.model = Hookmodel(param=self.param)
+        self.fe_model = Hookmodel(param=self.param)
 
     def default_model(self):
         """Set default model to single_layer_vgg16."""
             
-        self.model = Hookmodel(model_name='single_layer_vgg16')
+        self.fe_model = Hookmodel(model_name='single_layer_vgg16')
         self.classifier = None
-        self.param = self.model.get_default_params()
+        self.param = self.fe_model.get_default_params()
 
     def save_classifier(self, save_path):
         """Save the classifier to a joblib file and the parameters to a yaml file.
@@ -123,7 +123,7 @@ class Classifier():
             image = normalize_image(image, image_mean, image_std)
 
         for i in range(image.shape[0]):
-            im_out[i] = self.model.predict_image(
+            im_out[i] = self.fe_model.predict_image(
                 image=image[i],
                 classifier=self.classifier,
                 param=self.param)
