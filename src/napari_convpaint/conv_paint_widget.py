@@ -827,7 +827,7 @@ class ConvPaintWidget(QWidget):
             self.param.normalize = 2
         elif self.radio_normalize_by_image.isChecked():
             self.param.normalize = 3
-        self._reset_stats()
+        self._get_image_stats()
         self._reset_classif()
 
     # Model
@@ -944,24 +944,22 @@ class ConvPaintWidget(QWidget):
         layer_shape = self._get_annot_shape()
 
         # Add segmentation layer; do this first, so that the annotation layer is on top
-        segmentation_exists = False
-        if 'segmentation' in self.viewer.layers:
+        segmentation_exists = 'segmentation' in self.viewer.layers
+        if segmentation_exists:
             self.viewer.layers.remove('segmentation')
-            segmentation_exists = True
 
-        if (not self.third_party) | (force_add) | (self.third_party & segmentation_exists):
+        if (not self.third_party) | (self.third_party & segmentation_exists) | (force_add):
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8),
                 name='segmentation'
                 )
-        
+    
         # Add annotation layer
-        annotation_exists = False
-        if 'annotations' in self.viewer.layers:
+        annotation_exists = 'annotations' in self.viewer.layers
+        if annotation_exists:
             self.viewer.layers.remove('annotations')
-            annotation_exists = True
 
-        if (not self.third_party) | (force_add) | (self.third_party & annotation_exists):
+        if (not self.third_party) | (self.third_party & annotation_exists) | (force_add):
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8),
                 name='annotations'
@@ -1016,7 +1014,8 @@ class ConvPaintWidget(QWidget):
 
     def _reset_radio_norm_choices(self, event=None):
         """Set radio buttons active/inactive depending on selected image type."""
-        self._reset_stats()
+        # Reset the stats
+        self.image_mean, self.image_std = None, None
 
         if self.image_layer_selection_widget.value is None:
             for x in self.norm_buttons: x.setEnabled(False)
@@ -1046,10 +1045,6 @@ class ConvPaintWidget(QWidget):
         else:
             self.segment_btn.setEnabled(False)
             self.segment_all_btn.setEnabled(False)
-
-    def _reset_stats(self):
-        """Reset image stats."""
-        self.image_mean, self.image_std = None, None
 
     def _update_gui_fe_layers_from_model(self):
         """Update GUI FE layer selection based on the current (e.g. loaded) model."""
@@ -1221,9 +1216,11 @@ class ConvPaintWidget(QWidget):
     def _set_old_data_tag(self):
         """Set the old data tag based on the current image layer and data dimensions."""
         image_name = self.image_layer_selection_widget.value.name
-        data_dim = self.radio_rgb.isChecked()*"RGB" + self.radio_multi_channel.isChecked()*"multiCh" + self.radio_single_channel.isChecked()*"singleCh"
+        data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
+                    self.radio_multi_channel.isChecked()*"multiCh" +
+                    self.radio_single_channel.isChecked()*"singleCh")
         # timestamp = datetime.now().strftime("%y%m%d%H%M%S")
-        self.old_data_tag = f"{image_name}_{data_dim}"
+        self.old_data_tag = f"{image_name}_{data_dim_str}"
 
     def _get_selected_layer_names(self):
         """Get names of selected layers."""
