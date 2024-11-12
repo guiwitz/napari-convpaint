@@ -787,18 +787,28 @@ class ConvPaintWidget(QWidget):
             dialog = QFileDialog()
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
-        # Load model and update parameters with it
         classifier, model, param, model_state = load_model(save_file)
-        self.classifier = classifier
+
+        # Load params and update GUI from them
         self.param = param
+        # Check if the loaded multichannel setting is compatible with data
+        data_dims = self._get_data_dims()
+        if data_dims in ['2D', '2D_RGB', '3D_rgb'] and self.param.multi_channel_img:
+            warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}.' +
+                            'This might cause problems.')
+        # Update GUI from the loaded parameters
+        self._update_gui_from_param()
+        
+        # Load model and model state if available
         self.fe_model = model
-        # Load model state if available
         if model_state is not None and hasattr(self.fe_model, 'load_state_dict'):
             self.fe_model.load_state_dict(model_state)
-        # Update GUI
-        self.qcombo_fe_type.setCurrentText(self.param.fe_name) # Select FE in dropdown
-        self._update_gui_from_param()
+        # Update GUI to show selectable layers of model chosen from drop-down
         self._update_gui_fe_layers_from_model()
+        
+        # Load classifier; note do this after GUI updates to not reset the classifier
+        self.classifier = classifier
+        
         # Adjust trained flag, save button and predict buttons; and update model description
         self.trained = True
         self.save_model_btn.setEnabled(True)
@@ -891,12 +901,27 @@ class ConvPaintWidget(QWidget):
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
         default_param = self.temp_model.get_default_params()
-        # Multichannel NOTE: Check how to handle multichannel...
-        if default_param.multi_channel_img is not None:
-            self.param.multi_channel_img = default_param.multi_channel_img
-            self._reset_radio_norm_choices()
+        enforced_params = [] # List of enforced parameters for raising a warning
+        # Multichannel
+        if ((default_param.multi_channel_img is not None) and
+            (self.param.multi_channel_img != default_param.multi_channel_img)):
+            data_dims = self._get_data_dims()
+            # Catch case where multichannel is enforced on incompatible data
+            if data_dims in ['2D', '2D_RGB', '3D_rgb'] and default_param.multi_channel_img:
+                warnings.warn(f'The feature extractor tried to enforce multichannel on {data_dims} data.' +
+                              'This is not supported and will be ignored.')
+            else: # If data is compatible, enforce the default model's multichannel setting
+                enforced_params.append('multi_channel_img')
+                if default_param.multi_channel_img: # If the default model is multi-channel, enforce it
+                    self.param.multi_channel_img = True
+                    self.radio_multi_channel.setChecked(True)
+                else: # If the default model is non-multichannel, reset data dims according to data
+                    self.param.multi_channel_img = False
+                    self._reset_radio_data_dim_choices()
+                self._reset_radio_norm_choices() # Adjust norm options, since multi_channel_img changed
         # Normalization
         if default_param.normalize is not None:
+            enforced_params.append('normalize')
             self.button_group_normalize.button(default_param.normalize).setChecked(True)
         # Other params
         val_to_setter = {
@@ -910,8 +935,11 @@ class ConvPaintWidget(QWidget):
         for attr, setter in val_to_setter.items():
             val = getattr(default_param, attr, None)
             if val is not None:
-                if isinstance(val, list): val = str(val)
+                enforced_params.append(attr)
+                if isinstance(val, list):
+                    val = str(val)
                 setter(val)
+        if enforced_params: warnings.warn(f'The feature extractor enforced the parameters {enforced_params}')
 
         # Create the model and reset the classifier
         self.fe_model = create_model(self.param)
@@ -986,7 +1014,7 @@ class ConvPaintWidget(QWidget):
                 )
 
     def _reset_radio_data_dim_choices(self):
-        """Set radio buttons active/inactive depending on selected image type"""
+        """Set radio buttons active/inactive depending on selected image type, select a default"""
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
             return
@@ -1005,7 +1033,7 @@ class ConvPaintWidget(QWidget):
             self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
-            self.radio_single_channel.setChecked(True)
+            self.radio_single_channel.setChecked(True) # Default to single channel
         elif self.image_layer_selection_widget.value.ndim == 4: # If 4D, it must be multi channel
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(True)
@@ -1102,20 +1130,32 @@ class ConvPaintWidget(QWidget):
     def _update_gui_from_param(self):
         """Update GUI from parameters."""
 
-        # NOTE: WHAT TO DO ABOUT MULTICHANNEL? Done seperately through reset_radio_data_dim_choices?
-        self.param.multi_channel_img = self.param.multi_channel_img
+        self._reset_radio_data_dim_choices()
+        if self.param.multi_channel_img:
+            self.radio_single_channel.setChecked(False)
+            self.radio_multi_channel.setChecked(True)
+            self.radio_rgb.setChecked(False)
+        elif self.image_layer_selection_widget.value.rgb:
+            self.radio_single_channel.setChecked(False)
+            self.radio_multi_channel.setChecked(False)
+            self.radio_rgb.setChecked(True)
+        else:
+            self.radio_single_channel.setChecked(True)
+            self.radio_multi_channel.setChecked(False)
+            self.radio_rgb.setChecked(False)
         self._reset_radio_norm_choices()
 
         if self.param.normalize is not None:
             self.button_group_normalize.button(self.param.normalize).setChecked(True)
+
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
             "tile_annotations": self.check_tile_annotations.setChecked,
             "tile_image": self.check_tile_image.setChecked,
             "fe_name": self.qcombo_fe_type.setCurrentText,
-            "order": self.spin_interpolation_order.setValue,
-            "use_min_features": self.check_use_min_features.setChecked,
-            "use_cuda": self.check_use_cuda.setChecked,
+            "fe_order": self.spin_interpolation_order.setValue,
+            "fe_use_min_features": self.check_use_min_features.setChecked,
+            "fe_use_cuda": self.check_use_cuda.setChecked,
             "clf_iterations": self.spin_iterations.setValue,
             "clf_learning_rate": self.spin_learning_rate.setValue,
             "clf_depth": self.spin_depth.setValue
@@ -1251,6 +1291,11 @@ class ConvPaintWidget(QWidget):
 
     def _get_image_stats(self):
         """Get image stats depending on the normalization settings and data dimensions."""
+        # If no image is selected, set stats to None
+        if self.image_layer_selection_widget.value is None:
+            self.image_mean, self.image_std = None, None
+            return
+        
         # put channels in format (C, T/Z, H, W)
         data = self._get_data_channel_first()
         data_dims = self._get_data_dims()
@@ -1275,17 +1320,17 @@ class ConvPaintWidget(QWidget):
         num_dims = self.image_layer_selection_widget.value.ndim
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
-        if num_dims == 4:
-            return '4D'
         if num_dims == 2:
             if self.image_layer_selection_widget.value.rgb:
                 return '2D_RGB'
             else:
                 return '2D'
-        else: # 3D
+        if num_dims == 3:
             if self.image_layer_selection_widget.value.rgb:
                 return '3D_RGB'
             if self.param.multi_channel_img:
                 return '3D_multi'
             else:
                 return '3D_single'
+        if num_dims == 4:
+            return '4D'
