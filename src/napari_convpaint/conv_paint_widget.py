@@ -817,7 +817,7 @@ class ConvPaintWidget(QWidget):
         self._reset_radio_norm_choices()
         if self.add_layers_flag: # Add layers only if not triggered from layer selection
             self._add_empty_layers()
-        self._set_old_data_tag()
+            self._set_old_data_tag()
 
     def _on_norm_changed(self):
         """Set the normalization options based on radio buttons,
