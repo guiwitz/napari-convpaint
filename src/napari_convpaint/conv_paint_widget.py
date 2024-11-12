@@ -47,7 +47,7 @@ class ConvPaintWidget(QWidget):
         self.image_mean = None
         self.image_std = None
         self.param = Param()
-        self.model = None
+        self.fe_model = None
         self.trained = False
         self.temp_model = None
         self.classifier = None
@@ -263,10 +263,10 @@ class ConvPaintWidget(QWidget):
         self.current_model_group.glayout.addWidget(self.model_description2, 0, 0, 1, 2)
 
         # Add "FE architecture" combo box to FE group
-        self.qcombo_model_type = QComboBox()
-        self.qcombo_model_type.addItems(sorted(get_all_models().keys()))
-        self.qcombo_model_type.setToolTip('Select architecture of feature extraction model.')
-        self.fe_group.glayout.addWidget(self.qcombo_model_type, 2, 0, 1, 2)
+        self.qcombo_fe_type = QComboBox()
+        self.qcombo_fe_type.addItems(sorted(get_all_models().keys()))
+        self.qcombo_fe_type.setToolTip('Select architecture of feature extraction model.')
+        self.fe_group.glayout.addWidget(self.qcombo_fe_type, 2, 0, 1, 2)
 
         # Add "FE layers" list to FE group
         self.fe_layer_selection = QListWidget()
@@ -429,7 +429,7 @@ class ConvPaintWidget(QWidget):
         # === MODEL OPTIONS TAB ===
 
         # Feature extractor
-        self.qcombo_model_type.currentIndexChanged.connect(self._on_model_selected)
+        self.qcombo_fe_type.currentIndexChanged.connect(self._on_model_selected)
         self.set_fe_btn.clicked.connect(self._on_set_fe_model)
         self.reset_default_fe_btn.clicked.connect(self._on_reset_default_fe)
         self.fe_layer_selection.itemSelectionChanged.connect(self._on_fe_layer_selection_changed)
@@ -508,7 +508,7 @@ class ConvPaintWidget(QWidget):
         if len(unique_labels) < 2:
             raise Exception('You need annotations for at least foreground and background')
         # Check if model is loaded
-        if self.model is None:
+        if self.fe_model is None:
             raise Exception('You have to define and load a model first')
         
         self.current_model_path.setText('in training')
@@ -525,7 +525,7 @@ class ConvPaintWidget(QWidget):
             features, targets = get_features_current_layers(
                 image=image_stack_norm,
                 annotations=self.annotation_layer_selection_widget.value.data,
-                model=self.model,
+                model=self.fe_model,
                 param=self.param,
             )
             self.classifier = train_classifier(
@@ -572,7 +572,7 @@ class ConvPaintWidget(QWidget):
         """Train classifier on all annotations in project.
         !!!! Need to double-check if normalization is done correctly for projects !!!!"""
 
-        if self.model is None:
+        if self.fe_model is None:
             raise Exception('You have to define and load a model first')
 
         num_files = len(self.project_widget.params.file_paths)
@@ -594,7 +594,7 @@ class ConvPaintWidget(QWidget):
                 image_stack = self._get_data_channel_first_norm()
 
                 features, targets = get_features_current_layers(
-                    model=self.model,
+                    model=self.fe_model,
                     image=image_stack,
                     annotations=self.annotation_layer_selection_widget.value.data,
                     param=self.param,
@@ -626,7 +626,7 @@ class ConvPaintWidget(QWidget):
         """Predict the segmentation of the currently viewed frame based 
         on a RF model trained with annotations"""
 
-        if self.model is None:
+        if self.fe_model is None:
             raise Exception('You have to define and load a model first')
         
         if self.classifier is None:
@@ -693,10 +693,10 @@ class ConvPaintWidget(QWidget):
             # Predict image
             if self.param.tile_image:
                 predicted_image = parallel_predict_image(
-                    image=image, model=self.model, classifier=self.classifier,
+                    image=image, model=self.fe_model, classifier=self.classifier,
                     param = self.param, use_dask=False)
             else:
-                predicted_image = self.model.predict_image(image=image,
+                predicted_image = self.fe_model.predict_image(image=image,
                                                            classifier=self.classifier,
                                                            param=self.param,)
             
@@ -718,7 +718,7 @@ class ConvPaintWidget(QWidget):
         if self.classifier is None:
             raise Exception('No model found. Please train a model first.')
         
-        if self.model is None:
+        if self.fe_model is None:
             raise Exception('You have to define and load a model first')
             
         self._check_create_prediction_layer()
@@ -751,12 +751,12 @@ class ConvPaintWidget(QWidget):
             
             if self.param.tile_image:
                 predicted_image = parallel_predict_image(image=image, 
-                                                         model=self.model,
+                                                         model=self.fe_model,
                                                          classifier=self.classifier,
                                                          param = self.param,
                                                          use_dask=False)
             else:
-                predicted_image = self.model.predict_image(image=image,
+                predicted_image = self.fe_model.predict_image(image=image,
                                                            classifier=self.classifier,
                                                            param=self.param)
             self.viewer.layers['segmentation'].data[step] = predicted_image
@@ -776,7 +776,7 @@ class ConvPaintWidget(QWidget):
             save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
         # Save model
-        save_model(save_file, self.classifier, self.model, self.param, )
+        save_model(save_file, self.classifier, self.fe_model, self.param, )
         # Adjust the description text
         self.current_model_path.setText(save_file.name)
         self._set_model_description()
@@ -792,12 +792,12 @@ class ConvPaintWidget(QWidget):
         classifier, model, param, model_state = load_model(save_file)
         self.classifier = classifier
         self.param = param
-        self.model = model
+        self.fe_model = model
         # Load model state if available
-        if model_state is not None and hasattr(self.model, 'load_state_dict'):
-            self.model.load_state_dict(model_state)
+        if model_state is not None and hasattr(self.fe_model, 'load_state_dict'):
+            self.fe_model.load_state_dict(model_state)
         # Update GUI
-        self.qcombo_model_type.setCurrentText(self.param.model_name) # Select FE in dropdown
+        self.qcombo_fe_type.setCurrentText(self.param.fe_name) # Select FE in dropdown
         self._update_gui_from_param()
         self._update_gui_fe_layers_from_model()
         self.current_model_path.setText(save_file.name)
@@ -835,7 +835,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_reset_model(self, event=None):
         """Reset model to default and update GUI."""
-        # self.model = None
+        # self.fe_model = None
         self.save_model_btn.setEnabled(False)
         self._reset_default_model_params()
         self._reset_classif()
@@ -847,16 +847,16 @@ class ConvPaintWidget(QWidget):
     def _on_model_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         # Create a temporary model to get the layers (to display) and default parameters
-        model_type = self.qcombo_model_type.currentText()
-        model_class = get_all_models()[model_type]
-        self.temp_model = model_class(model_name=model_type, use_cuda=self.param.use_cuda)
+        fe_type = self.qcombo_fe_type.currentText()
+        model_class = get_all_models()[fe_type]
+        self.temp_model = model_class(model_name=fe_type, use_cuda=self.param.fe_use_cuda)
         # Update the GUI to show the layers of the temp model
         self._update_gui_fe_layers_from_temp_model()
         # Get the default FE params for the temp model and update the GUI
         self._update_gui_scalings_from_temp_model()
         default_param = self.temp_model.get_default_params()
         val_to_setter = {
-            "model_name": self.qcombo_model_type.setCurrentText,
+            "fe_name": self.qcombo_fe_type.setCurrentText,
             "order": self.spin_interpolation_order.setValue,
             "use_min_features": self.check_use_min_features.setChecked,
             "use_cuda": self.check_use_cuda.setChecked
@@ -886,12 +886,12 @@ class ConvPaintWidget(QWidget):
         """Create a neural network model that will be used for feature extraction and
         reset the classifier."""
         # Update FE parameters from the GUI
-        self.param.model_name = self.qcombo_model_type.currentText()
-        self.param.model_layers = self._get_selected_layer_names()
-        self.param.scalings = self.fe_scaling_factors.currentData()
-        self.param.order = self.spin_interpolation_order.value()
-        self.param.use_min_features = self.check_use_min_features.isChecked()
-        self.param.use_cuda = self.check_use_cuda.isChecked()
+        self.param.fe_name = self.qcombo_fe_type.currentText()
+        self.param.fe_layers = self._get_selected_layer_names()
+        self.param.fe_scalings = self.fe_scaling_factors.currentData()
+        self.param.fe_order = self.spin_interpolation_order.value()
+        self.param.fe_use_min_features = self.check_use_min_features.isChecked()
+        self.param.fe_use_cuda = self.check_use_cuda.isChecked()
         # Get default non-FE params from temp model and update the GUI (also setting the params)
         default_param = self.temp_model.get_default_params()
 
@@ -916,7 +916,7 @@ class ConvPaintWidget(QWidget):
                 if isinstance(val, list): val = str(val)
                 setter(val)
         # Create the model and reset the classifier
-        self.model = create_model(self.param)
+        self.fe_model = create_model(self.param)
         self._reset_classif()
         self._update_gui_fe_layers_from_model() # NOTE R: Necessary? (Can only set what's already loaded as temp model...)
 
@@ -1059,18 +1059,18 @@ class ConvPaintWidget(QWidget):
 
     def _update_gui_fe_layers_from_model(self):
         """Update GUI FE layers based on the current model."""
-        if self.model is None:
+        if self.fe_model is None:
             self.fe_layer_selection.setEnabled(False)
             self.fe_layer_selection.clear()
-        elif isinstance(self.model, Hookmodel):
+        elif isinstance(self.fe_model, Hookmodel):
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(self.model.selectable_layer_keys.keys())
-            if len(self.model.named_modules) == 1:
+            self.fe_layer_selection.addItems(self.fe_model.selectable_layer_keys.keys())
+            if len(self.fe_model.named_modules) == 1:
                 self.fe_layer_selection.setCurrentRow(0)
                 self.fe_layer_selection.setEnabled(False)
             else:
                 self.fe_layer_selection.setEnabled(True)
-                for layer in self.param.model_layers:
+                for layer in self.param.fe_layers:
                     items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
                     for item in items:
                         item.setSelected(True)
@@ -1096,24 +1096,24 @@ class ConvPaintWidget(QWidget):
     def _update_gui_scalings_from_temp_model(self):
         """Update GUI FE scalings from the temporary model."""
         default_param = self.temp_model.get_default_params()
-        if default_param.scalings is None:
+        if default_param.fe_scalings is None:
             return
-        index = self.fe_scaling_factors.findData(default_param.scalings)
+        index = self.fe_scaling_factors.findData(default_param.fe_scalings)
         if index != -1:
             self.fe_scaling_factors.setCurrentIndex(index)
         else:
-            self.fe_scaling_factors.addItem(str(default_param.scalings), default_param.scalings)
+            self.fe_scaling_factors.addItem(str(default_param.fe_scalings), default_param.fe_scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
     def _update_gui_scalings_from_param(self):
         """Update GUI FE scalings from parameters."""
-        if self.param.scalings is None:
+        if self.param.fe_scalings is None:
             return
-        index = self.fe_scaling_factors.findData(self.param.scalings)
+        index = self.fe_scaling_factors.findData(self.param.fe_scalings)
         if index != -1:
             self.fe_scaling_factors.setCurrentIndex(index)
         else:
-            self.fe_scaling_factors.addItem(str(self.param.scalings), self.param.scalings)
+            self.fe_scaling_factors.addItem(str(self.param.fe_scalings), self.param.fe_scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
     def _update_gui_from_param(self):
@@ -1130,7 +1130,7 @@ class ConvPaintWidget(QWidget):
             "image_downsample": self.spin_downsample.setValue,
             "tile_annotations": self.check_tile_annotations.setChecked,
             "tile_image": self.check_tile_image.setChecked,
-            "model_name": self.qcombo_model_type.setCurrentText,
+            "fe_name": self.qcombo_fe_type.setCurrentText,
             "order": self.spin_interpolation_order.setValue,
             "use_min_features": self.check_use_min_features.setChecked,
             "use_cuda": self.check_use_cuda.setChecked,
@@ -1188,7 +1188,7 @@ class ConvPaintWidget(QWidget):
     def _reset_fe_params(self):
         """Reset feature extraction parameters to default values."""
         # Reset the gui values for the FE, which will also trigger to adjust the param object
-        self.qcombo_model_type.setCurrentText(self.DEFAULT_FE)
+        self.qcombo_fe_type.setCurrentText(self.DEFAULT_FE)
         self.fe_layer_selection.clearSelection()
         self.fe_layer_selection.setCurrentRow(self.DEFAULT_LAYERS_INDEX)
         self.fe_scaling_factors.setCurrentText(self.DEFAULT_SCALINGS_TEXT)
@@ -1218,13 +1218,13 @@ class ConvPaintWidget(QWidget):
 
     def _set_model_description(self):
         """Set the model description text."""
-        if self.model is None:
+        if self.fe_model is None:
             descr = 'No model loaded'
             return
-        model_name = self.param.model_name if not self.param.model_name is None else 'None'
-        num_layers = len(self.param.model_layers) if not self.param.model_layers is None else 0
-        num_scalings = len(self.param.scalings) if not self.param.scalings is None else 0
-        descr = (model_name +
+        fe_name = self.param.fe_name if not self.param.fe_name is None else 'None'
+        num_layers = len(self.param.fe_layers) if not self.param.fe_layers is None else 0
+        num_scalings = len(self.param.fe_scalings) if not self.param.fe_scalings is None else 0
+        descr = (fe_name +
         f': {num_layers} layer' + ('' if num_layers == 1 else 's') +
         f', {num_scalings} scaling' + ('' if num_scalings == 1 else 's') + 
         f' ({self.current_model_path.text()})')

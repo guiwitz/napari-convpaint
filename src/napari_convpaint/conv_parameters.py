@@ -20,13 +20,13 @@ class Param:
     tile_annotations: bool = False
     tile_image: bool = False
     # Model parameters
-    model_name: str = None
-    model_layers: list[str] = None
-    padding : int = 0
-    scalings: list[int] = None
-    order: int = None
-    use_min_features: bool = None
-    use_cuda: bool = None
+    fe_name: str = None
+    fe_layers: list[str] = None
+    fe_padding : int = 0
+    fe_scalings: list[int] = None
+    fe_order: int = None
+    fe_use_min_features: bool = None
+    fe_use_cuda: bool = None
     # Classifier parameters
     clf_iterations: int = None
     clf_learning_rate: float = None
@@ -34,7 +34,7 @@ class Param:
 
 
     def __post_init__(self):
-        self.scalings = [1, 2]
+        self.fe_scalings = [1, 2]
 
     def save_parameters(self, save_path):
         """Save parameters as yml file.

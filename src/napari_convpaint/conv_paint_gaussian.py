@@ -30,5 +30,5 @@ class GaussianFeatures(FeatureExtractor):
     def get_default_params(self):
         """Overwrite any default parameters."""
         param = super().get_default_params()
-        param.padding = self.sigma
+        param.fe_padding = self.sigma
         return param
