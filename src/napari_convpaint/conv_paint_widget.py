@@ -89,11 +89,11 @@ class ConvPaintWidget(QWidget):
         self.setLayout(self.main_layout)
 
         # Create and add tabs
-        self.tab_names = ['Home', 'Project', 'Model options']
-        self.tabs = TabSet(self.tab_names, tab_layouts=[None, None, QGridLayout()])
+        self.tab_names = ['Home', 'Model options'] #['Home', 'Project', 'Model options']
+        self.tabs = TabSet(self.tab_names, tab_layouts=[None, QGridLayout()]) # [None, None, QGridLayout()])
         self.main_layout.addWidget(self.tabs)
         # Disable project tab as long as not activated
-        self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False) # R: Why only index? If custom is "respnsive", so should be the index
+        # self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False)
         
         # Align rows in the tabs "Home" and "Model options" on top
         self.tabs.widget(self.tabs.tab_names.index('Home')).layout().setAlignment(Qt.AlignTop)
@@ -151,16 +151,16 @@ class ConvPaintWidget(QWidget):
         self.check_auto_seg.setChecked(self.auto_seg)
         self.train_group.glayout.addWidget(self.check_auto_seg, 0,1,1,1)
         # Project checkbox
-        self.check_use_project = QCheckBox('Project mode (multiple files)')
-        self.check_use_project.setToolTip('Activate Project tab to use multiple files for training the classifier')
-        self.check_use_project.setChecked(False)
-        self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
+        # self.check_use_project = QCheckBox('Project mode (multiple files)')
+        # self.check_use_project.setToolTip('Activate Project tab to use multiple files for training the classifier')
+        # self.check_use_project.setChecked(False)
+        # self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
         # Project button
-        self.train_classifier_on_project_btn = QPushButton('Train on Project')
-        self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Project tab')
-        self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
-        if init_project is False:
-            self.train_classifier_on_project_btn.setEnabled(False)
+        # self.train_classifier_on_project_btn = QPushButton('Train on Project')
+        # self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Project tab')
+        # self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
+        # if init_project is False:
+        #     self.train_classifier_on_project_btn.setEnabled(False)
 
         # Add buttons for "Segment" group
         self.segment_btn = QPushButton('Segment image')
@@ -350,8 +350,8 @@ class ConvPaintWidget(QWidget):
         # === === ===
 
         # If project mode is initially activated, add project tab and widget
-        if init_project is True:
-            self._on_use_project()
+        # if init_project is True:
+        #     self._on_use_project()
 
         # Add connections and initialize by setting default model and params
         self.add_connections()
@@ -390,8 +390,8 @@ class ConvPaintWidget(QWidget):
         self.train_classifier_btn.clicked.connect(self._on_train)
         self.check_auto_seg.stateChanged.connect(lambda: setattr(
             self, 'auto_seg', self.check_auto_seg.isChecked()))
-        self.check_use_project.stateChanged.connect(self._on_use_project)
-        self.train_classifier_on_project_btn.clicked.connect(self._on_train_on_project)
+        # self.check_use_project.stateChanged.connect(self._on_use_project)
+        # self.train_classifier_on_project_btn.clicked.connect(self._on_train_on_project)
 
         # Segment
         self.segment_btn.clicked.connect(self._on_predict)
