@@ -52,14 +52,14 @@ class ConvPaintWidget(QWidget):
         self.temp_model = None
         self.classifier = None
         self.project_widget = None
-        self.features_per_layer = None
         self.selected_channel = None
         self.third_party = third_party
-        # Plugin options
-        self.keep_layers = False
-        self.auto_seg = True
-        self.old_data_tag = "None"
-        self.add_layers_flag = True
+        # Plugin options and attributes
+        self.keep_layers = False # Keep old layers when adding new ones
+        self.auto_seg = True # Automatically segment after training
+        self.old_data_tag = "None" # Tag for the data before layers are added
+        self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
+        self.current_model_path = 'not trained' # Path to the current model (if saved)
 
         ### Define Constants
 
@@ -217,10 +217,9 @@ class ConvPaintWidget(QWidget):
         self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,1,1,1)
 
         # Add buttons for "Model" group
-        # Current model label
+        # Current model description label
         self.model_description1 = QLabel('None')
         self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
-        self.current_model_path = QLabel('not trained')
         # Reset model button
         self._reset_model_btn = QPushButton('Reset to default model')
         self._reset_model_btn.setToolTip('Discard current model, create new default model.')
@@ -434,7 +433,7 @@ class ConvPaintWidget(QWidget):
         self.reset_default_fe_btn.clicked.connect(self._on_reset_default_fe)
         self.fe_layer_selection.itemSelectionChanged.connect(self._on_fe_layer_selection_changed)
         self.fe_scaling_factors.currentIndexChanged.connect(self._on_fe_scalings_changed)
-        # NOTE: Changing interpolation_order, use_min_features and use_cudaof
+        # NOTE: Changing interpolation_order, use_min_features and use_cuda of FE
         # shall only be applied when the user clicks the button to set the FE
         
         # Classifier
@@ -478,7 +477,6 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
             self.add_layers_flag = False # Turn off layer creation, since we do it below
-            # self._adjust_data_dims() # Also resets classif and stats (through norm_settings)
             # Set radio buttons depending on selected image type
             self._reset_radio_data_dim_choices()
             self._reset_radio_norm_choices()
@@ -511,7 +509,8 @@ class ConvPaintWidget(QWidget):
         if self.fe_model is None:
             raise Exception('You have to define and load a model first')
         
-        self.current_model_path.setText('in training')
+        # Set the current model path to 'in training' and adjsut the model description
+        self.current_model_path= 'in training'
         self._set_model_description()
 
         image_stack_norm = self._get_data_channel_first_norm()
@@ -539,7 +538,7 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
-        self.current_model_path.setText('trained, unsaved')
+        self.current_model_path = 'trained, unsaved'
         self.trained = True
         self._reset_predict_buttons()
         self.save_model_btn.setEnabled(True)
@@ -586,7 +585,7 @@ class ConvPaintWidget(QWidget):
         self.viewer.layers.events.removed.disconnect(self._on_reset_model)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            self.current_model_path.setText('in training')
+            self.current_model_path = 'in training'
             all_features, all_targets = [], []
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
@@ -608,7 +607,7 @@ class ConvPaintWidget(QWidget):
             all_targets = np.concatenate(all_targets, axis=0)
             self.classifier = train_classifier(all_features, all_targets)
 
-            self.current_model_path.setText('trained, unsaved')
+            self.current_model_path = 'trained, unsaved'
             self.trained = True
             self._reset_predict_buttons()
             self.save_model_btn.setEnabled(True)
@@ -777,8 +776,8 @@ class ConvPaintWidget(QWidget):
         save_file = Path(save_file)
         # Save model
         save_model(save_file, self.classifier, self.fe_model, self.param, )
-        # Adjust the description text
-        self.current_model_path.setText(save_file.name)
+        # Adjust the model description
+        self.current_model_path = save_file.name
         self._set_model_description()
 
     def _on_load_model(self, event=None, save_file=None):
@@ -788,7 +787,7 @@ class ConvPaintWidget(QWidget):
             dialog = QFileDialog()
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
-        # Load model
+        # Load model and update parameters with it
         classifier, model, param, model_state = load_model(save_file)
         self.classifier = classifier
         self.param = param
@@ -800,12 +799,12 @@ class ConvPaintWidget(QWidget):
         self.qcombo_fe_type.setCurrentText(self.param.fe_name) # Select FE in dropdown
         self._update_gui_from_param()
         self._update_gui_fe_layers_from_model()
-        self.current_model_path.setText(save_file.name)
-        # Adjust train flag, set save button, and update description text
+        # Adjust trained flag, save button and predict buttons; and update model description
         self.trained = True
         self.save_model_btn.setEnabled(True)
-        self._set_model_description()
         self._reset_predict_buttons()
+        self.current_model_path = save_file.name
+        self._set_model_description()
 
     # Image Processing
 
@@ -835,12 +834,9 @@ class ConvPaintWidget(QWidget):
 
     def _on_reset_model(self, event=None):
         """Reset model to default and update GUI."""
-        # self.fe_model = None
         self.save_model_btn.setEnabled(False)
         self._reset_default_model_params()
         self._reset_classif()
-        # self._reset_radio_data_dim_choices()
-        # self._reset_radio_norm_choices()
 
     ### Model Tab
 
@@ -850,16 +846,16 @@ class ConvPaintWidget(QWidget):
         fe_type = self.qcombo_fe_type.currentText()
         model_class = get_all_models()[fe_type]
         self.temp_model = model_class(model_name=fe_type, use_cuda=self.param.fe_use_cuda)
-        # Update the GUI to show the layers of the temp model
-        self._update_gui_fe_layers_from_temp_model()
+        # Update the GUI to show the FE layers of the temp model
+        self._update_gui_fe_layer_choice_from_temp_model()
         # Get the default FE params for the temp model and update the GUI
-        self._update_gui_scalings_from_temp_model()
         default_param = self.temp_model.get_default_params()
+        self._update_gui_fe_scalings(default_param.fe_scalings)
         val_to_setter = {
             "fe_name": self.qcombo_fe_type.setCurrentText,
-            "order": self.spin_interpolation_order.setValue,
-            "use_min_features": self.check_use_min_features.setChecked,
-            "use_cuda": self.check_use_cuda.setChecked
+            "fe_order": self.spin_interpolation_order.setValue,
+            "fe_use_min_features": self.check_use_min_features.setChecked,
+            "fe_use_cuda": self.check_use_cuda.setChecked
         }
         for attr, setter in val_to_setter.items():
             val = getattr(default_param, attr, None)
@@ -892,16 +888,17 @@ class ConvPaintWidget(QWidget):
         self.param.fe_order = self.spin_interpolation_order.value()
         self.param.fe_use_min_features = self.check_use_min_features.isChecked()
         self.param.fe_use_cuda = self.check_use_cuda.isChecked()
+
         # Get default non-FE params from temp model and update the GUI (also setting the params)
         default_param = self.temp_model.get_default_params()
-
-        # NOTE: Check how to handle multichannel...
+        # Multichannel NOTE: Check how to handle multichannel...
         if default_param.multi_channel_img is not None:
             self.param.multi_channel_img = default_param.multi_channel_img
             self._reset_radio_norm_choices()
-
+        # Normalization
         if default_param.normalize is not None:
             self.button_group_normalize.button(default_param.normalize).setChecked(True)
+        # Other params
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
             "tile_annotations": self.check_tile_annotations.setChecked,
@@ -915,10 +912,10 @@ class ConvPaintWidget(QWidget):
             if val is not None:
                 if isinstance(val, list): val = str(val)
                 setter(val)
+
         # Create the model and reset the classifier
         self.fe_model = create_model(self.param)
         self._reset_classif()
-        self._update_gui_fe_layers_from_model() # NOTE R: Necessary? (Can only set what's already loaded as temp model...)
 
     def _on_reset_default_fe(self, event=None):
         """Reset the feature extraction model to the default model."""
@@ -996,22 +993,22 @@ class ConvPaintWidget(QWidget):
             for x in self.channel_buttons: x.setEnabled(False)
             return
         
-        if self.image_layer_selection_widget.value.rgb:
+        if self.image_layer_selection_widget.value.rgb: # If the image is RGB, this is the only option
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(True)
             self.radio_rgb.setChecked(True)
-        elif self.image_layer_selection_widget.value.ndim == 2:
+        elif self.image_layer_selection_widget.value.ndim == 2: # If 2D, only single channel
             self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(False)
             self.radio_single_channel.setChecked(True)
-        elif self.image_layer_selection_widget.value.ndim == 3:
+        elif self.image_layer_selection_widget.value.ndim == 3: # If 3D, single or multi channel
             self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
             self.radio_single_channel.setChecked(True)
-        elif self.image_layer_selection_widget.value.ndim == 4:
+        elif self.image_layer_selection_widget.value.ndim == 4: # If 4D, it must be multi channel
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
@@ -1025,17 +1022,14 @@ class ConvPaintWidget(QWidget):
             for x in self.norm_buttons: x.setEnabled(False)
             return
         
-        if self.image_layer_selection_widget.value.ndim == 2:
+        data_dims = self._get_data_dims()
+        
+        if data_dims in ['2D', '2D_RGB', '3D_multi']:
             self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalize_by_image.setChecked(True)
             self.radio_normalized_over_stack.setEnabled(False)
-        elif (self.image_layer_selection_widget.value.ndim == 3) and (self.param.multi_channel_img):
-            self.radio_no_normalize.setEnabled(True)
-            self.radio_normalize_by_image.setEnabled(True)
-            self.radio_normalize_by_image.setChecked(True)
-            self.radio_normalized_over_stack.setEnabled(False)
-        else:
+        else: # 3D_single, 4D, 3D_RGB
             self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.radio_normalized_over_stack.setEnabled(True)
@@ -1058,67 +1052,60 @@ class ConvPaintWidget(QWidget):
         self.image_mean, self.image_std = None, None
 
     def _update_gui_fe_layers_from_model(self):
-        """Update GUI FE layers based on the current model."""
+        """Update GUI FE layer selection based on the current (e.g. loaded) model."""
         if self.fe_model is None:
             self.fe_layer_selection.setEnabled(False)
             self.fe_layer_selection.clear()
-        elif isinstance(self.fe_model, Hookmodel):
+            return
+        
+        if isinstance(self.fe_model, Hookmodel):
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(self.fe_model.selectable_layer_keys.keys())
-            if len(self.fe_model.named_modules) == 1:
-                self.fe_layer_selection.setCurrentRow(0)
-                self.fe_layer_selection.setEnabled(False)
-            else:
-                self.fe_layer_selection.setEnabled(True)
-                for layer in self.param.fe_layers:
-                    items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
-                    for item in items:
-                        item.setSelected(True)
-        else:
+            layer_keys = self.fe_model.selectable_layer_keys.keys()
+            self.fe_layer_selection.addItems(layer_keys)
+            self.fe_layer_selection.setEnabled(len(layer_keys) > 1) # Only need to enable if multiple layers available
+            for layer in self.param.fe_layers:
+                items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
+                for item in items:
+                    item.setSelected(True)
+        else: # For non-hookmodels, disable the selection
+            self.fe_layer_selection.clear()
             self.fe_layer_selection.setEnabled(False)
-            self.fe_layer_selection.clear()
+        self.set_fe_btn.setEnabled(True)
 
-    def _update_gui_fe_layers_from_temp_model(self):
-        """Update GUI FE layers based on the temporary model."""
+    def _update_gui_fe_layer_choice_from_temp_model(self):
+        """Update GUI selectable FE layers based on the temporary model."""
         # Get selectable layers from the temp model and update the GUI
+        self.set_fe_btn.setEnabled(False)
         if isinstance(self.temp_model, Hookmodel):
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(self.temp_model.selectable_layer_keys.keys())   
-            self.fe_layer_selection.setEnabled(True)
-            # Check if outputs are selected
-            if self.fe_layer_selection.count() > 0:
-                self.set_fe_btn.setEnabled(False)
-        else:
+            layer_keys = self.temp_model.selectable_layer_keys.keys()
+            self.fe_layer_selection.addItems(layer_keys)   
+            if len(layer_keys) == 1: # If only one, we can auto-select
+                self.fe_layer_selection.setCurrentRow(0)
+                self.fe_layer_selection.setEnabled(False)
+                self.set_fe_btn.setEnabled(True)
+            else: # If multiple layers available, enable the selection
+                self.fe_layer_selection.setEnabled(True)
+        else: # For non-hookmodels, disable the selection, and enable the set button
             self.fe_layer_selection.clear()
             self.fe_layer_selection.setEnabled(False)
             self.set_fe_btn.setEnabled(True)
 
-    def _update_gui_scalings_from_temp_model(self):
-        """Update GUI FE scalings from the temporary model."""
-        default_param = self.temp_model.get_default_params()
-        if default_param.fe_scalings is None:
+    def _update_gui_fe_scalings(self, fe_scalings=None):
+        """Update GUI FE scalings (e.g. from the temporary model or param object)."""
+        if fe_scalings is None:
             return
-        index = self.fe_scaling_factors.findData(default_param.fe_scalings)
+        # Find index of the input value (-1 if not found)
+        index = self.fe_scaling_factors.findData(fe_scalings)
         if index != -1:
             self.fe_scaling_factors.setCurrentIndex(index)
+        # If not in list yet, add and select it
         else:
-            self.fe_scaling_factors.addItem(str(default_param.fe_scalings), default_param.fe_scalings)
-            self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
-
-    def _update_gui_scalings_from_param(self):
-        """Update GUI FE scalings from parameters."""
-        if self.param.fe_scalings is None:
-            return
-        index = self.fe_scaling_factors.findData(self.param.fe_scalings)
-        if index != -1:
-            self.fe_scaling_factors.setCurrentIndex(index)
-        else:
-            self.fe_scaling_factors.addItem(str(self.param.fe_scalings), self.param.fe_scalings)
+            self.fe_scaling_factors.addItem(str(fe_scalings), fe_scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
     def _update_gui_from_param(self):
         """Update GUI from parameters."""
-        # Image processing parameters
 
         # NOTE: WHAT TO DO ABOUT MULTICHANNEL? Done seperately through reset_radio_data_dim_choices?
         self.param.multi_channel_img = self.param.multi_channel_img
@@ -1144,7 +1131,7 @@ class ConvPaintWidget(QWidget):
                 if isinstance(val, list): val = str(val)
                 setter(val)
         # self.fe_layer_selection.clear()
-        self._update_gui_scalings_from_param()
+        self._update_gui_fe_scalings(self.param.fe_scalings)
 
     def _check_create_prediction_layer(self):
         """Check if segmentation layer exists and create it if not."""
@@ -1168,7 +1155,7 @@ class ConvPaintWidget(QWidget):
     def _reset_classif(self):
         """Discard the trained classifier."""
         self.classifier = None
-        self.current_model_path.setText('not trained')
+        self.current_model_path = 'not trained'
         self.trained = False
         self.save_model_btn.setEnabled(False)
         self._reset_predict_buttons()
@@ -1227,7 +1214,7 @@ class ConvPaintWidget(QWidget):
         descr = (fe_name +
         f': {num_layers} layer' + ('' if num_layers == 1 else 's') +
         f', {num_scalings} scaling' + ('' if num_scalings == 1 else 's') + 
-        f' ({self.current_model_path.text()})')
+        f' ({self.current_model_path})')
         self.model_description1.setText(descr)
         self.model_description2.setText(descr)
         
@@ -1287,7 +1274,7 @@ class ConvPaintWidget(QWidget):
                 image=data, ignore_n_first_dims=data.ndim-2) # ignore all but the spatial dimensions
 
     def _get_data_dims(self):
-        """Get data dimensions. Returns '2D', 'RGB', '3D_multi', '3D_single' or '4D'."""
+        """Get data dimensions. Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
         num_dims = self.image_layer_selection_widget.value.ndim
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
