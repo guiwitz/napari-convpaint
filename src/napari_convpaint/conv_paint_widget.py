@@ -955,7 +955,7 @@ class ConvPaintWidget(QWidget):
         }
         for attr, setter in val_to_setter.items():
             val = getattr(default_param, attr, None)
-            if val is not None:
+            if val is not None and val != getattr(self.param, attr):
                 enforced_params.append(attr)
                 if isinstance(val, list):
                     val = str(val)
