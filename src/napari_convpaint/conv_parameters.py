@@ -73,6 +73,3 @@ class Param:
                 dict[path] = dict[path].as_posix()
         
         return dict
-    
-    def as_dict(self):
-        return asdict(self)

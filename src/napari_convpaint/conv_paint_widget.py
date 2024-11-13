@@ -17,7 +17,7 @@ from .conv_paint import (get_features_current_layers,
                          load_model, create_model, save_model)
 from .conv_paint_utils import (parallel_predict_image, 
                                normalize_image, compute_image_stats)
-from .conv_parameters import Param
+from .conv_paint_param import Param
 from .conv_paint_nnlayers import Hookmodel
 
 

@@ -1,4 +1,4 @@
-from napari_convpaint import conv_paint, conv_parameters, conv_paint_nnlayers
+from napari_convpaint import conv_paint, conv_paint_param, conv_paint_nnlayers
 from napari_convpaint.convpaint_sample import create_annotation_cell3d
 from torch.nn.modules.container import Sequential
 import numpy as np
@@ -19,7 +19,7 @@ def test_hook_model():
 
 def test_filter_image():
 
-    param = conv_parameters.Param()
+    param = conv_paint_param.Param()
     param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
             'features.12 Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'
             ]

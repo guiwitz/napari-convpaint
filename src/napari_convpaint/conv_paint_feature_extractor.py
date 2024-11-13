@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import skimage
-from .conv_parameters import Param
+from .conv_paint_param import Param
 
 class FeatureExtractor:
     def __init__(self, model_name,**kwargs):

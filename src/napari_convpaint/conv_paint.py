@@ -10,7 +10,7 @@ from napari_convpaint.conv_paint_gaussian import GaussianFeatures
 from napari_convpaint.conv_paint_dino import DinoFeatures
 from .conv_paint_nnlayers import Hookmodel
 import pickle
-from .conv_parameters import Param
+from .conv_paint_param import Param
 
 
 # Initialize the ALL_MODELS dictionary with the models that are always available

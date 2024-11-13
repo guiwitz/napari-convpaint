@@ -4,7 +4,7 @@ from joblib import dump, load
 import zarr
 import numpy as np
 
-from .conv_parameters import Param
+from .conv_paint_param import Param
 from .conv_paint_nnlayers import Hookmodel
 from .conv_paint_utils import compute_image_stats, normalize_image
 
