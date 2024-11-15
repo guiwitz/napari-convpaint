@@ -204,17 +204,17 @@ class ConvPaintWidget(QWidget):
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
         self.radio_no_normalize.setToolTip('No normalization is applied')
-        self.radio_normalized_over_stack = QRadioButton('Normalize over stack')
-        self.radio_normalized_over_stack.setToolTip('Normalize over complete z or t stack')
+        self.radio_normalize_over_stack = QRadioButton('Normalize over stack')
+        self.radio_normalize_over_stack.setToolTip('Normalize over complete z or t stack')
         self.radio_normalize_by_image = QRadioButton('Normalized by plane')
         self.radio_normalize_by_image.setToolTip('Normalize each plane individually')
-        self.radio_normalized_over_stack.setChecked(True)
-        self.norm_buttons = [self.radio_no_normalize, self.radio_normalized_over_stack, self.radio_normalize_by_image]
+        self.radio_normalize_over_stack.setChecked(True)
+        self.norm_buttons = [self.radio_no_normalize, self.radio_normalize_over_stack, self.radio_normalize_by_image]
         self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
-        self.button_group_normalize.addButton(self.radio_normalized_over_stack, id=2)
+        self.button_group_normalize.addButton(self.radio_normalize_over_stack, id=2)
         self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
         self.image_processing_group.glayout.addWidget(self.radio_no_normalize, 0,1,1,1)
-        self.image_processing_group.glayout.addWidget(self.radio_normalized_over_stack, 1,1,1,1)
+        self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,1,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,1,1,1)
 
         # Add buttons for "Model" group
@@ -410,7 +410,7 @@ class ConvPaintWidget(QWidget):
                                        checked and self._on_data_dim_changed())
         self.radio_no_normalize.toggled.connect(lambda checked:
                                                 checked and self._on_norm_changed())
-        self.radio_normalized_over_stack.toggled.connect(lambda checked:
+        self.radio_normalize_over_stack.toggled.connect(lambda checked:
                                                          checked and self._on_norm_changed())
         self.radio_normalize_by_image.toggled.connect(lambda checked:
                                                       checked and self._on_norm_changed())
@@ -848,11 +848,12 @@ class ConvPaintWidget(QWidget):
         and update stats."""
         if self.radio_no_normalize.isChecked():
             self.param.normalize = 1
-        elif self.radio_normalized_over_stack.isChecked():
+        elif self.radio_normalize_over_stack.isChecked():
             self.param.normalize = 2
         elif self.radio_normalize_by_image.isChecked():
             self.param.normalize = 3
-        self._get_image_stats()
+        # self._get_image_stats() # NOTE: Don't we want to set it right away?
+        self.image_mean, self.image_std = None, None
         self._reset_clf()
 
     # Model
@@ -874,7 +875,7 @@ class ConvPaintWidget(QWidget):
         # Update the GUI to show the FE layers of the temp model
         self._update_gui_fe_layer_choice_from_temp_model()
         # Get the default FE params for the temp model and update the GUI
-        default_param = self.temp_model.get_default_params()
+        default_param = self.temp_model.get_default_param()
         self._update_gui_fe_scalings(default_param.fe_scalings)
         val_to_setter = {
             "fe_name": self.qcombo_fe_type.setCurrentText,
@@ -915,7 +916,7 @@ class ConvPaintWidget(QWidget):
         self.param.fe_use_cuda = self.check_use_cuda.isChecked()
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
-        default_param = self.temp_model.get_default_params()
+        default_param = self.temp_model.get_default_param()
         enforced_params = [] # List of enforced parameters for raising a warning
         # Multichannel
         if ((default_param.multi_channel_img is not None) and
@@ -1078,7 +1079,7 @@ class ConvPaintWidget(QWidget):
         
         if data_dims in ['2D', '2D_RGB', '3D_multi']:
             self.radio_no_normalize.setEnabled(True)
-            self.radio_normalized_over_stack.setEnabled(False)
+            self.radio_normalize_over_stack.setEnabled(False)
             self.radio_normalize_by_image.setEnabled(True)
             if self.param.normalize == 2: # If initially over stack, reset to by image
                 self.radio_normalize_by_image.setChecked(True)
@@ -1086,7 +1087,7 @@ class ConvPaintWidget(QWidget):
                 self.button_group_normalize.button(self.param.normalize).setChecked(True)
         else: # 3D_single, 4D, 3D_RGB
             self.radio_no_normalize.setEnabled(True)
-            self.radio_normalized_over_stack.setEnabled(True)
+            self.radio_normalize_over_stack.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.button_group_normalize.button(self.param.normalize).setChecked(True)
 

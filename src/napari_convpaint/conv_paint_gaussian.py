@@ -27,8 +27,8 @@ class GaussianFeatures(FeatureExtractor):
         #print(im_filter.shape) for RGB image --> e.g (3, 134, 139)
         return im_filter
     
-    def get_default_params(self):
+    def get_default_param(self):
         """Overwrite any default parameters."""
-        param = super().get_default_params()
+        param = super().get_default_param()
         param.fe_padding = self.sigma
         return param

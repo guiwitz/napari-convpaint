@@ -70,7 +70,7 @@ class Classifier():
             
         self.fe_model = Hookmodel(model_name='single_layer_vgg16')
         self.classifier = None
-        self.param = self.fe_model.get_default_params()
+        self.param = self.fe_model.get_default_param()
 
     def save_classifier(self, save_path):
         """Save the classifier to a joblib file and the parameters to a yaml file.

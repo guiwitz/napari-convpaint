@@ -89,8 +89,8 @@ class Hookmodel(FeatureExtractor):
         self.outputs.append(output)
         assert False
 
-    def get_default_params(self):
-        param = super().get_default_params()
+    def get_default_param(self):
+        param = super().get_default_param()
         param.fe_scalings = [1,2,4]
         param.tile_annotations = True
         param.fe_padding = self.get_max_kernel_size() // 2

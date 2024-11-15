@@ -19,7 +19,10 @@ class FeatureExtractor:
         """
         raise NotImplementedError("Subclasses must implement get_features method.")
 
-    def get_default_params(self):
+    def get_default_param(self):
+        """
+        Get the defaul parameters that the FE shall set/enforce when chosen by the user.
+        """
         param = Param()
         # FE params (encouraged to set)
         param.fe_name: str = self.model_name
@@ -53,12 +56,8 @@ class FeatureExtractor:
         ----------
         image: 2d array
             image to segment
-        scalings: list of ints
-            downsampling factors
-        order: int
-            interpolation order for low scale resizing
-        image_downsample: int, optional
-            downsample image by this factor before extracting features, by default 1
+        param: Param
+            object containing the parameters for the feature extraction
 
         Returns
         -------

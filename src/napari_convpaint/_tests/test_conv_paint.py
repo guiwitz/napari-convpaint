@@ -40,14 +40,14 @@ def test_correct_model(make_napari_viewer, capsys):
     my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
-    assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
+    assert my_widget.qcombo_fe_type.currentText() == 'vgg16', "Model type not updated correctly"
 
     viewer.layers.clear()
     viewer.add_image(im[:,:,0], name='sample')
     my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
-    assert my_widget.qcombo_model_type.currentText() == 'single_layer_vgg16', "Model type not updated correctly"
+    assert my_widget.qcombo_fe_type.currentText() == 'vgg16', "Model type not updated correctly"
 
 
 def test_rgb_prediction(make_napari_viewer, capsys):
@@ -124,7 +124,7 @@ def test_load_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
+    my_widget._on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -148,19 +148,18 @@ def test_save_model_dino(make_napari_viewer, capsys):
     viewer.layers['annotations'].data = im_annot
 
     # Simulate selecting the Dino model from the dropdown
-    my_widget.qcombo_model_type.setCurrentText('dinov2_vits14_reg')
-    assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
+    my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     
-    my_widget.check_use_custom_model.setChecked(True)
     my_widget.param.fe_scalings = [1]
     my_widget.param.fe_order = 0  # Set interpolation order to 0
     my_widget.param.fe_name = 'dinov2_vits14_reg'
     my_widget.param.fe_use_cuda = False
     my_widget.param.fe_use_min_features = False
-    my_widget.param.use_tile_annotations = False
+    my_widget.param.tile_annotations = False
     my_widget.param.image_downsample = 1
     my_widget.param.normalize = 1 #no normalization (button id)
-    my_widget.update_gui_from_params()
+    my_widget._update_gui_from_param()
     my_widget.set_fe_btn.click()  # Load the model
     assert my_widget.param.fe_scalings == [1]
     assert my_widget.param.fe_name == 'dinov2_vits14_reg'
@@ -169,7 +168,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget._on_predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
     my_widget._on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
-    assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     assert os.path.exists('_tests/model_dir/test_model_dino.pkl')
 
 
@@ -179,14 +178,13 @@ def test_load_model_dino(make_napari_viewer, capsys):
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
-    my_widget.check_use_custom_model.setChecked(True)
 
     viewer.add_image(im)
 
     # Load the Dino model
-    my_widget.on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
+    my_widget._on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
     # Ensure the model type is set correctly after loading
-    assert my_widget.qcombo_model_type.currentText() == 'dinov2_vits14_reg'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -211,8 +209,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer.layers['annotations'].data = im_annot
 
     # Create and save the first model with scales [1]
-    my_widget.check_use_custom_model.setChecked(True)
-    my_widget.qcombo_model_type.setCurrentText('single_layer_vgg16')
+    my_widget.qcombo_fe_type.setCurrentText('vgg16')
     my_widget.fe_scaling_factors.setCurrentText('[1]')
     my_widget.set_fe_btn.setEnabled(True)
     my_widget.set_fe_btn.click()
@@ -237,14 +234,14 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     assert os.path.exists(model_path_2)
 
     # Load the second model and predict
-    my_widget.on_load_model(save_file=model_path_2)
+    my_widget._on_load_model(save_file=model_path_2)
     assert my_widget.param.fe_scalings == [1, 2, 4, 8]
     my_widget._on_predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
 
     # Load the first model and predict
-    my_widget.on_load_model(save_file=model_path_1)
+    my_widget._on_load_model(save_file=model_path_1)
     assert my_widget.param.fe_scalings == [1]
     my_widget._on_predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
@@ -253,7 +250,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
 
 # test dino model with different image sizes
 def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
-    sizes = [(140, 140), (100, 100), (120, 120),(14,14)]
+    sizes = [(140, 140), (100, 100), (120, 120), (28,28)]
     for size in sizes:
         #left side: class 1, right side: class 2 (0 and 255)
         im = np.zeros(size, dtype=np.uint8)
@@ -269,14 +266,13 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         viewer.layers['annotations'].data = im_annot
 
         # Load the Dino model
-        my_widget.check_use_custom_model.setChecked(True)
-        my_widget.qcombo_model_type.setCurrentText('dinov2_vits14_reg')
-        #set widget disable tiling annotations
-        my_widget.check_tile_annotations.setChecked(False)
+        my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
         # Set the scaling to 1
         my_widget.fe_scaling_factors.setCurrentText('[1]')
-        my_widget.update_params_from_gui()
         my_widget.set_fe_btn.click()
+        #set widget disable tiling annotations (should be done automatically, but just to be sure)
+        my_widget.check_tile_annotations.setChecked(False)
+        # my_widget._update_params_from_gui() # is done automatically
         my_widget._on_train()
         my_widget._on_predict()
 
@@ -297,10 +293,9 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
     my_widget._on_add_annot_seg_layers()
     viewer.layers['annotations'].data = im_annot
 
-    # Create and save the custom VGG16 model with selected layers
-    my_widget.check_use_custom_model.setChecked(True)
+    # Create and save the custom vgg16 model with selected layers
 
-    my_widget.qcombo_model_type.setCurrentText('vgg16')
+    my_widget.qcombo_fe_type.setCurrentText('vgg16')
     #select items from widget.fe_layer_selection = QListWidget()
 
     # Assuming 'self.fe_layer_selection' is your QListWidget instance
@@ -326,7 +321,7 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
     #load the models again and check if the predictions are correct
     for indices_to_select in all_tests:
         model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
-        my_widget.on_load_model(save_file=model_path)
+        my_widget._on_load_model(save_file=model_path)
         assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
         my_widget._on_predict()
@@ -335,4 +330,4 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
         assert precision > 0.8, f"Precision: {precision}, too low"
         assert recall > 0.8, f"Recall: {recall}, too low"
     
-    assert my_widget.qcombo_model_type.currentText() == 'vgg16'
+    assert my_widget.qcombo_fe_type.currentText() == 'vgg16'

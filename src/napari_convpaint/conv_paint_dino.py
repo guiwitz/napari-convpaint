@@ -26,8 +26,8 @@ class DinoFeatures(FeatureExtractor):
             self.device = 'cpu'
         self.model.eval()
 
-    def get_default_params(self):
-        param = super().get_default_params()
+    def get_default_param(self):
+        param = super().get_default_param()
         param.fe_name = self.model_name
         param.fe_scalings = [1]
         param.fe_order = 0
