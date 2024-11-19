@@ -26,7 +26,7 @@ try:
     ALL_MODELS.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
 except ImportError:
     # Handle the case where CellposeFeatures or its dependencies are not available
-    print("Cellpose is not installed and is not available as feature extractor.\n"
+    print("Info: Cellpose is not installed and is not available as feature extractor.\n"
           "Run 'pip install napari-convpaint[cellpose]' to install it.")
 
 
