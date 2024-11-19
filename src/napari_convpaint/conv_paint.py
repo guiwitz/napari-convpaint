@@ -141,6 +141,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
     # iterating over non_empty iteraties of t/z for 3D data
     for ind, t in enumerate(non_empty):
 
+        # PADDING
         if annotations.ndim == 2:
             if image.ndim == 3:
                 current_image = np.pad(image, ((0,0), (padding,padding), (padding,padding)), mode='reflect')
@@ -157,6 +158,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
 
         annot_regions = skimage.morphology.label(current_annot > 0)
 
+        # TILE ANNOTATIONS (applying the padding to each annotations part)
         if param.tile_annotations:
             boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
         else:
@@ -188,6 +190,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
             if param.image_downsample > 1:
                 annot_crop = annot_crop[::param.image_downsample, :: param.image_downsample]
 
+            # EXTRACT TARGETED FEATURES
             #from the [features, w, h] make a list of [features] with len nb_annotations
             mask = annot_crop > 0
             nb_features = extracted_features.shape[0]
@@ -202,8 +205,9 @@ def get_features_current_layers(image, annotations, model, param:Param):
             all_targets.append(targets)
 
 
+    # CONCATENATE FROM DIFFERENT TILES
     all_values = np.concatenate(all_values, axis=0)
-    features = pd.DataFrame(all_values)
+    features = pd.DataFrame(all_values) # [pixels, features]
 
     all_targets = np.concatenate(all_targets, axis=0)
     targets = pd.Series(all_targets)

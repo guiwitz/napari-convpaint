@@ -65,7 +65,7 @@ class ConvPaintWidget(QWidget):
 
         # General parameters
         self.DEFAULT_MULTICHANNEL = False
-        self.DEFAULT_NORM = 3
+        self.DEFAULT_NORM = 2
         self.DEFAULT_DOWNSAMPLE = 1
         self.DEFAULT_TILE_ANNOTS = False
         self.DEFAULT_TILE_IMG = False
