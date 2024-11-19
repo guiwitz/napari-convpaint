@@ -63,6 +63,7 @@ class Hookmodel(FeatureExtractor):
         self.model = self.model.to(self.device)
         self.outputs = []
         self.features_per_layer = []
+        self.selectable_layer_dict = {}
         self.selectable_layer_keys = []
         self.selected_layers = []
 
@@ -91,9 +92,11 @@ class Hookmodel(FeatureExtractor):
 
     def get_default_param(self):
         param = super().get_default_param()
+        param.fe_name = "vgg16"
+        param.fe_layers = self.selectable_layer_keys[0] # default is the first layer
         param.fe_scalings = [1,2,4]
-        param.tile_annotations = True
         param.fe_padding = self.get_max_kernel_size() // 2
+        param.tile_annotations = True # Overwrite non-FE settings
         return param
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
@@ -118,8 +121,8 @@ class Hookmodel(FeatureExtractor):
         self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
         self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
         
-        self.selectable_layer_keys = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
-
+        self.selectable_layer_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
+        self.selectable_layer_keys = list(self.selectable_layer_dict.keys())
 
     def load_single_layer_vgg16(self, keep_rgb=False):
         """Load VGG16 model from torchvision, keep first layer only

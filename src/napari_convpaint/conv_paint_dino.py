@@ -155,29 +155,6 @@ class DinoFeatures(FeatureExtractor):
                                 order=param.fe_order)            
         return features
     
-    def predict_image(self, image, classifier, param, **kwargs):
-        features = self.get_features_scaled(image,param,return_patches=True)
-        nb_features = features.shape[0] #[nb_features, width, height]
-
-        #move features to last dimension
-        features = np.moveaxis(features, 0, -1)
-        features = np.reshape(features, (-1, nb_features))
-
-        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
-
-        all_pixels = pd.DataFrame(features)
-        predictions = classifier.predict(all_pixels)
-
-        predicted_image = np.reshape(predictions, [rows, cols])
-        if param.image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=param.fe_order).astype(np.uint8)
-        predicted_image = predicted_image +1#for XGBoost
-        return predicted_image
-
     def get_features(self, image, return_patches=False, **kwargs):
         '''Given an CxWxH image, extract features.
         Returns features with dimensions nb_features x H x W'''

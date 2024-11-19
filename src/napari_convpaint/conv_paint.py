@@ -13,17 +13,17 @@ import pickle
 from .conv_paint_param import Param
 
 
-# Initialize the ALL_MODELS dictionary with the models that are always available
-ALL_MODELS = {x: Hookmodel for x in NN_MODELS}
-ALL_MODELS.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
-ALL_MODELS.update({x: DinoFeatures for x in DINO_MODELS})
+# Initialize the MODELS TO TYPES dictionary with the models that are always available
+ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
+ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
+ALL_MODELS_TYPES_DICT.update({x: DinoFeatures for x in DINO_MODELS})
 
-# Try to import CellposeFeatures and update the ALL_MODELS dictionary if successful
+# Try to import CellposeFeatures and update the MODELS TO TYPES  dictionary if successful
 # Cellpose is only installed with pip install napari-convpaint[cellpose]
 try:
     from napari_convpaint.conv_paint_cellpose import AVAILABLE_MODELS as CELLPOSE_MODELS
     from napari_convpaint.conv_paint_cellpose import CellposeFeatures
-    ALL_MODELS.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
+    ALL_MODELS_TYPES_DICT.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
 except ImportError:
     # Handle the case where CellposeFeatures or its dependencies are not available
     print("Info: Cellpose is not installed and is not available as feature extractor.\n"
@@ -32,7 +32,7 @@ except ImportError:
 
 def get_all_models():
     """Return a dictionary of all available models"""
-    return ALL_MODELS
+    return ALL_MODELS_TYPES_DICT
 
 
 def load_model(model_path):

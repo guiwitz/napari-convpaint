@@ -73,8 +73,8 @@ class ConvPaintWidget(QWidget):
         # Define the default FE model
         self.DEFAULT_FE = 'vgg16'
         self.DEFAULT_LAYERS_INDEX = 0
-        self.DEFAULT_SCALINGS_TEXT = '[1,2]'
-        self.DEFAULT_INTERPOLATION_ORDER = 1
+        self.DEFAULT_SCALINGS_TEXT = '[1,2,4]'
+        self.DEFAULT_INTERPOLATION_ORDER = 0
         self.DEFAULT_USE_MIN_FEATURES = False
         self.DEFAULT_USE_CUDA = False
 
@@ -200,6 +200,13 @@ class ConvPaintWidget(QWidget):
         self.image_processing_group.glayout.addWidget(self.radio_single_channel, 0,0,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_multi_channel, 1,0,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_rgb, 2,0,1,1)
+        # Create a label to act as a vertical divider
+        # for row in [0,1,2]:
+        divider_label = QLabel('¦\n¦\n¦\n¦')
+        divider_label.setAlignment(Qt.AlignCenter)
+        divider_label.setStyleSheet("font-size: 13px; color: rgba(120, 120, 120, 35%);")
+        # Add the divider to the layout
+        self.image_processing_group.glayout.addWidget(divider_label, 0, 1, 3, 1)
         # "Normalize" radio buttons
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
@@ -213,9 +220,9 @@ class ConvPaintWidget(QWidget):
         self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
         self.button_group_normalize.addButton(self.radio_normalize_over_stack, id=2)
         self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
-        self.image_processing_group.glayout.addWidget(self.radio_no_normalize, 0,1,1,1)
-        self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,1,1,1)
-        self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,1,1,1)
+        self.image_processing_group.glayout.addWidget(self.radio_no_normalize, 0,2,1,1)
+        self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,2,1,1)
+        self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,2,1,1)
 
         # Add buttons for "Model" group
         # Current model description label
@@ -285,7 +292,7 @@ class ConvPaintWidget(QWidget):
         self.fe_scaling_factors.addItem('[1,2,4]',[1,2,4])
         self.fe_scaling_factors.addItem('[1,2,4,8]',[1,2,4,8])
         self.fe_scaling_factors.setCurrentText('[1,2]')
-        self.fe_group.glayout.addWidget(QLabel('Downscaling factors'), 4, 0, 1, 1)
+        self.fe_group.glayout.addWidget(QLabel('Pyramid downscaling factors'), 4, 0, 1, 1)
         self.fe_group.glayout.addWidget(self.fe_scaling_factors, 4, 1, 1, 1)
 
         # Add interpolation order spinbox to FE group
@@ -294,7 +301,7 @@ class ConvPaintWidget(QWidget):
         self.spin_interpolation_order.setMaximum(5)
         self.spin_interpolation_order.setValue(1)
         self.spin_interpolation_order.setToolTip('Interpolation order for image rescaling')
-        self.fe_group.glayout.addWidget(QLabel('Interpolation order'), 5, 0, 1, 1)
+        self.fe_group.glayout.addWidget(QLabel('Pyramid interpolation order'), 5, 0, 1, 1)
         self.fe_group.glayout.addWidget(self.spin_interpolation_order, 5, 1, 1, 1)
 
         # Add min features checkbox to FE group
@@ -343,9 +350,9 @@ class ConvPaintWidget(QWidget):
         self.classifier_params_group.glayout.addWidget(QLabel('Depth'), 2, 0, 1, 1)
         self.classifier_params_group.glayout.addWidget(self.spin_depth, 2, 1, 1, 1)
 
-        self.set_default_clf_btn = QPushButton('Restore defaults')
+        self.set_default_clf_btn = QPushButton('Reset to defaults')
         self.set_default_clf_btn.setEnabled(True)
-        self.classifier_params_group.glayout.addWidget(self.set_default_clf_btn, 3, 0, 1, 2)
+        self.classifier_params_group.glayout.addWidget(self.set_default_clf_btn, 3, 0, 1, 1)
 
         # === === ===
 
@@ -356,7 +363,8 @@ class ConvPaintWidget(QWidget):
         # Add connections and initialize by setting default model and params
         self.add_connections()
         self._reset_default_general_params()
-        self._reset_default_model_params()
+        self._reset_clf_params()
+        self._reset_fe_params()
         self._update_gui_from_param()
         self._on_select_layer()
 
@@ -429,7 +437,7 @@ class ConvPaintWidget(QWidget):
         # === MODEL OPTIONS TAB ===
 
         # Feature extractor
-        self.qcombo_fe_type.currentIndexChanged.connect(self._on_model_selected)
+        self.qcombo_fe_type.currentIndexChanged.connect(self._on_fe_selected)
         self.set_fe_btn.clicked.connect(self._on_set_fe_model)
         self.reset_default_fe_btn.clicked.connect(self._on_reset_default_fe)
         self.fe_layer_selection.itemSelectionChanged.connect(self._on_fe_layer_selection_changed)
@@ -524,7 +532,7 @@ class ConvPaintWidget(QWidget):
         self.current_model_path= 'in training'
         self._set_model_description()
 
-        # TRAIN
+        # Start training
         image_stack_norm = self._get_data_channel_first_norm()
         
         with warnings.catch_warnings():
@@ -637,7 +645,7 @@ class ConvPaintWidget(QWidget):
     def _on_predict(self):
         """Predict the segmentation of the currently viewed frame based 
         on a RF model trained with annotations"""
-
+        # Perform checks as preparation for prediction
         if self.fe_model is None:
             raise Exception('You have to define and load a model first')
         
@@ -648,7 +656,8 @@ class ConvPaintWidget(QWidget):
 
         if self.image_mean is None:
             self._get_image_stats()
-        
+
+        # Start prediction
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
@@ -861,12 +870,13 @@ class ConvPaintWidget(QWidget):
     def _on_reset_model(self, event=None):
         """Reset model to default and update GUI."""
         self.save_model_btn.setEnabled(False)
-        self._reset_default_model_params()
+        self._reset_clf_params()
+        self._reset_fe_params()
         self._reset_clf()
 
     ### Model Tab
 
-    def _on_model_selected(self, index):
+    def _on_fe_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         # Create a temporary model to get the layers (to display) and default parameters
         fe_type = self.qcombo_fe_type.currentText()
@@ -1112,7 +1122,7 @@ class ConvPaintWidget(QWidget):
         
         if isinstance(self.fe_model, Hookmodel):
             self.fe_layer_selection.clear()
-            layer_keys = self.fe_model.selectable_layer_keys.keys()
+            layer_keys = self.fe_model.selectable_layer_keys
             self.fe_layer_selection.addItems(layer_keys)
             self.fe_layer_selection.setEnabled(len(layer_keys) > 1) # Only need to enable if multiple layers available
             for layer in self.param.fe_layers:
@@ -1130,7 +1140,7 @@ class ConvPaintWidget(QWidget):
         self.set_fe_btn.setEnabled(False)
         if isinstance(self.temp_model, Hookmodel):
             self.fe_layer_selection.clear()
-            layer_keys = self.temp_model.selectable_layer_keys.keys()
+            layer_keys = self.temp_model.selectable_layer_keys
             self.fe_layer_selection.addItems(layer_keys)   
             if len(layer_keys) == 1: # If only one, we can auto-select
                 self.fe_layer_selection.setCurrentRow(0)
@@ -1252,8 +1262,7 @@ class ConvPaintWidget(QWidget):
 
     def _reset_default_model_params(self):
         """Set model back to default (FE and Classifier)."""
-        self._reset_clf_params()
-        self._reset_fe_params()
+
 
     def _reset_default_general_params(self):
         """Set general parameters back to default."""
