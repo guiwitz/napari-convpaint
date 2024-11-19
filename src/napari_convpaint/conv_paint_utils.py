@@ -15,6 +15,40 @@ from sklearn.model_selection import train_test_split
 
 from torch.nn.functional import interpolate as torch_interpolate
 
+def downscale_img(image, scaling_factor):
+    """
+    Downscale an image by averaging over non-overlapping blocks of the specified size.
+    """
+    if scaling_factor == 1:
+        return image
+    
+    # Slice the last two dimensions
+    sliced_img = image[
+        ..., 
+        :image.shape[-2] // scaling_factor * scaling_factor, 
+        :image.shape[-1] // scaling_factor * scaling_factor
+    ]
+    # Reshape to group elements for downscaling
+    stacked_blocks = sliced_img.reshape(
+        *image.shape[:-2],  # Preserve all leading dimensions
+        image.shape[-2] // scaling_factor, scaling_factor,
+        image.shape[-1] // scaling_factor, scaling_factor
+    )
+    # Take the median along the scaling dimensions
+    downscaled_img = np.median(stacked_blocks, axis=(-2, -1))
+    return downscaled_img
+
+def upscale_features(image, output_shape, order=1):
+    """
+    Upscale an image to the specified output size.
+    """
+    return skimage.transform.resize(image, output_shape, order=order, mode='reflect', preserve_range=True)
+
+def upscale_class_labels(label_img, output_shape):
+    """
+    Upscale a class label image
+    """
+    return skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
 
 def get_device(use_cuda=None):
     if torch.cuda.is_available() and (use_cuda==True):
