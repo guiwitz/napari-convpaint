@@ -15,13 +15,39 @@ from sklearn.model_selection import train_test_split
 
 from torch.nn.functional import interpolate as torch_interpolate
 
-def downscale_img(image, scaling_factor):
+def scale_img(image, scaling_factor, upscale=False):
     """
     Downscale an image by averaging over non-overlapping blocks of the specified size.
+    OR Upscale by repeating the pixels.
+    
+    Parameters
+    ----------
+    image : np.ndarray
+        Input array to be downscaled. Must have spatial dimensions as the last two dimensions.
+    scaling_factor : int
+        Factor by which to downscale the image.
+    upscale : bool
+        If True, upscale the image by repeating the pixels.
+        
+    Returns
+    -------
+    downscaled_img / upscaled_img : np.ndarray
+        Downscaled array or upscaled array.
     """
+
     if scaling_factor == 1:
         return image
     
+    # If option to UPSCALE is True, return the image upscaled
+    if upscale:
+        # Upscale by duplicating elements
+        upscaled_img = np.repeat(
+            np.repeat(image, scaling_factor, axis=-2), # Repeat along the height
+            scaling_factor, axis=-1                    # Repeat along the width
+            )
+        return upscaled_img
+    
+    # Else DOWNSCALE the image
     # Slice the last two dimensions
     sliced_img = image[
         ..., 
@@ -35,18 +61,18 @@ def downscale_img(image, scaling_factor):
         image.shape[-1] // scaling_factor, scaling_factor
     )
     # Take the median along the scaling dimensions
-    downscaled_img = np.median(stacked_blocks, axis=(-2, -1))
-    return downscaled_img
+    scaled_img = np.median(stacked_blocks, axis=(-2, -1))
+    return scaled_img
 
-def upscale_features(image, output_shape, order=1):
+def rescale_features(image, output_shape, order=1):
     """
-    Upscale an image to the specified output size.
+    Rescale an image to the specified output size.
     """
     return skimage.transform.resize(image, output_shape, order=order, mode='reflect', preserve_range=True)
 
-def upscale_class_labels(label_img, output_shape):
+def rescale_class_labels(label_img, output_shape):
     """
-    Upscale a class label image
+    Rescale a class label image to the specified output size.
     """
     return skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
 
