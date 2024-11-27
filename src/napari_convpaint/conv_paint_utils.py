@@ -203,7 +203,7 @@ def compute_patch_padding(data_stack_shape, effective_patch_size):
     patch_z, patch_h, patch_w = effective_patch_size
     z_pad = (patch_z - (z_dim % patch_z)) % patch_z if patch_z is not None else 0
     h_pad = (patch_h - (h_dim % patch_h)) % patch_h
-    w_pad = (patch_w - (h_dim % patch_w)) % patch_w
+    w_pad = (patch_w - (w_dim % patch_w)) % patch_w
 
     return z_pad, h_pad, w_pad
 
@@ -218,8 +218,8 @@ def pre_process_stack(data_stack, input_scaling, effective_kernel_padding, effec
         padded_stack = pad_to_patch(padded_stack, effective_patch_size)
     return padded_stack
 
-def tile_annots(image, labels): # TODO: IMPLEMENT
-    return image, labels
+def tile_annots_3D(img_stack, annot_stack, effective_kernel_padding, effective_patch_size): # TODO: IMPLEMENT
+    return img_stack, annot_stack
 
 def get_device(use_cuda=None):
     if torch.cuda.is_available() and (use_cuda==True):

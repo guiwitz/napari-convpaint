@@ -63,6 +63,21 @@ class ConvpaintModel:
         # else:
         #     self.fe_model_state = None
 
+    def run_model_checks(self):
+        """Run checks on the model to ensure that it is ready to be used."""
+        if self.fe_model is None:
+            raise ValueError('No feature extractor model set. Please set a feature extractor model first.')
+        if self.classifier is None:
+            raise ValueError('No classifier set. Please train a classifier first.')
+        # Check if the kernel_size and patch_size are compatible
+        ks = self.fe_model.kernel_size
+        ps = self.fe_model.patch_size
+        if ks is not None and ps is not None:
+            if ks[0] is None and ps[0] is not None:
+                raise ValueError('Kernel size is 2D, but patch size is 3D.')
+            if ks[0] is not None and ps[0] is None:
+                raise ValueError('Kernel size is 3D, but patch size is 2D.')
+
     def save_model(self, model_path):
         with open(model_path, 'wb') as f:
             data = {
@@ -91,7 +106,7 @@ class ConvpaintModel:
 
     def pre_process_list(self, data_stack_list):
         """Preprocess a list of data stacks (can be image stack [C, Z, H, W] or annotations [Z, H, W])."""
-        # If single data stack given, convert them to lists
+        # If single data stack given, convert it to a list
         if not isinstance(data_stack_list, list):
             data_stack_list = [data_stack_list]
         
@@ -112,6 +127,28 @@ class ConvpaintModel:
         
         # Return processed stacks
         return processed_data_stack
+
+    def get_annot_img_list(self, img_stack, annot_stack):
+        effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
+        effective_patch_size = self.fe_model.get_effective_patch_size()
+        kernel_size = self.fe_model.kernel_size
+        patch_size = self.fe_model.patch_size
+        extract_3d = ((kernel_size is not None and kernel_size[0] is not None) or
+                      (patch_size is not None and patch_size[0] is not None))
+        tile_annots = self.param.tile_annotations
+        if extract_3d:
+            annot_img_list = conv_paint_utils.extract_annots_3d(img_stack,
+                                                                annot_stack,
+                                                                effective_kernel_padding,
+                                                                effective_patch_size,
+                                                                tile_annots)
+        else:
+            annot_img_list = conv_paint_utils.extract_annots_2d(img_stack,
+                                                                annot_stack,
+                                                                effective_kernel_padding,
+                                                                effective_patch_size,
+                                                                tile_annots)
+        return annot_img_list
 
     def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
         """Train a classifier given a set of features and targets."""
