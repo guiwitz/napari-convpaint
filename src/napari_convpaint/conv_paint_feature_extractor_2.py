@@ -11,17 +11,39 @@ class FeatureExtractor(ABC):
         self.patch_size = None;
 
     @abstractmethod
-    def get_features(self, image):
+    def extract_features(self, image, param, **kwargs):
+        pass
+
+    def extract_features_rgb(self, image, param, **kwargs):
+        all_features = []
+        for channel in image:
+            features = self.extract_features(channel, param, **kwargs)
+            all_features.append(features)
+        return np.concatenate(all_features, axis=0)
+
+    def get_features(self, image, rgb=False, **kwargs):
         """
         Gets the features of an image.
 
         Parameters:
-        - image: The input image. Dimensions are [nb_channels, width, height]
+        - image: The input image. Dimensions are [C, H, W] or [C, Z, H, W] (for FE that support 3D extraction)
+        - rgb: Whether the image shall be treated as RGB format.
 
         Returns:
         - features: The extracted features of the image. [nb_features, width, height]
         """
-        pass
+        if rgb:
+            # Ensure the image dimensions are compatible
+            if image.shape[0] != 3:
+                raise ValueError("RGB image must have 3 channels.")
+            return self.extract_features_rgb(image, **kwargs)
+        
+        # Extract features for each channel and concatenate them
+        all_features = []
+        for channel in image:
+            features = self.extract_features(channel, **kwargs)
+            all_features.append(features)
+        return np.concatenate(all_features, axis=0)
 
     def get_default_param(self):
         """
@@ -87,6 +109,11 @@ class FeatureExtractor(ABC):
         effective_patch_h = (patch_size[1]*scale_factor)
         effective_patch_w = (patch_size[2]*scale_factor)
         return (effective_patch_z, effective_patch_h, effective_patch_w)
+    
+
+
+
+### OLD METHODS
 
     def get_features_scaled(self, image, param, **kwargs):
         """
