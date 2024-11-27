@@ -80,7 +80,7 @@ class FeatureExtractor(ABC):
 
     def get_effective_kernel_padding(self):
         """
-        Get the effective kernel padding for the feature extractor,
+        Get the effective kernel padding for the feature extractor, that should be added on each side
         taking into account the scaling factor for later pyramid scaling.
         This assures that at the edge of the image, the kernel is still centered.
         """

@@ -123,7 +123,7 @@ def pad_for_kernel(data_stack, effective_kernel_padding):
                          "whereas Z can be None.")
     
     # Get padding for each dimension
-    z_pad ,h_pad, w_pad = effective_kernel_padding
+    z_pad, h_pad, w_pad = effective_kernel_padding
 
     # Create padding tuples
     if data_stack.ndim == 4:  # [C, Z, H, W] for images
