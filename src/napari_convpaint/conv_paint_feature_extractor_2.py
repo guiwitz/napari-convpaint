@@ -55,7 +55,39 @@ class FeatureExtractor(ABC):
         Define which parameters need to be absolutley enforced for this feature extractor.
         """
         return param
-    
+
+    def get_effective_kernel_padding(self):
+        """
+        Get the effective kernel padding for the feature extractor,
+        taking into account the scaling factor for later pyramid scaling.
+        This assures that at the edge of the image, the kernel is still centered.
+        """
+        if self.kernel_size is None:
+            return None
+        kernel_size = self.kernel_size
+        scale_factor = np.max(self.param.fe_scalings)
+        # Compute padding for each dimension
+        effective_z_pad = (kernel_size[0] // 2) if kernel_size[0] is not None else 0 # No scaling for z
+        effective_h_pad = (kernel_size[1] // 2) * scale_factor
+        effective_w_pad = (kernel_size[2] // 2) * scale_factor
+        return (effective_z_pad, effective_h_pad, effective_w_pad)
+
+    def get_effective_patch_size(self):
+        """
+        Get the effective patch size for the feature extractor,
+        taking into account the scaling factor for later pyramid scaling.
+        This assures that the scaled image is a multiple of the patch size.
+        """
+        if self.patch_size is None:
+            return None
+        patch_size = self.patch_size
+        scale_factor = np.max(self.param.fe_scalings)
+        # Compute padding for each dimension
+        effective_patch_z = patch_size[0] if patch_size[0] is not None else None # No scaling for z
+        effective_patch_h = (patch_size[1]*scale_factor)
+        effective_patch_w = (patch_size[2]*scale_factor)
+        return (effective_patch_z, effective_patch_h, effective_patch_w)
+
     def get_features_scaled(self, image, param, **kwargs):
         """
         Given a filter model and an image, extract features at different scales.

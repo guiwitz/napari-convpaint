@@ -91,16 +91,6 @@ class ConvpaintModel:
             elif len(self.fe_model.named_modules) == 1:
                 self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
 
-    def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
-        """Train a classifier given a set of features and targets."""
-        if not use_rf:
-            self.classifier = CatBoostClassifier(iterations=iterations, learning_rate=learning_rate,depth=depth)
-            self.classifier.fit(features, targets)
-        else:
-                # train a random forest classififer
-                classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
-                classifier.fit(features, targets)
-
     def pre_process_img_annots_lists(self, img_list, annots_list):
         # If single image and single annot are given, convert them to lists
         if not isinstance(img_list, list):
@@ -118,14 +108,33 @@ class ConvpaintModel:
         return output_img_list, output_annots_list
 
     def pre_process_img_annots_stack(self, img_stack, annots_stack):
-        input_sclaing = self.param.image_downsample
-        kernel_size = self.fe_model.kernel_size
-        patch_size = self.fe_model.patch_size
-        max_scaling = np.max(self.param.fe_scalings)
+        input_scaling = self.param.image_downsample
+        effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
+        effective_patch_size = self.fe_model.get_effective_patch_size()
         # Process input image
-        processed_img_stack = conv_paint_utils.pre_process_img_stack(img_stack, input_sclaing, kernel_size, patch_size, max_scaling)
+        processed_img_stack = conv_paint_utils.pre_process_stack(img_stack,
+                                                                 input_scaling,
+                                                                 effective_kernel_padding,
+                                                                 effective_patch_size)
         # Preprocess input annots
-        processed_annots_stack = conv_paint_utils.pre_process_annots_stack(annots_stack, input_sclaing, kernel_size, patch_size, max_scaling)
+        processed_annots_stack = conv_paint_utils.pre_process_stack(annots_stack,
+                                                                    input_scaling,
+                                                                    effective_kernel_padding,
+                                                                    effective_patch_size)
+        # Return processed stacks
+        return processed_img_stack, processed_annots_stack
+
+
+
+    def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
+        """Train a classifier given a set of features and targets."""
+        if not use_rf:
+            self.classifier = CatBoostClassifier(iterations=iterations, learning_rate=learning_rate,depth=depth)
+            self.classifier.fit(features, targets)
+        else:
+                # train a random forest classififer
+                classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+                classifier.fit(features, targets)
 
     def get_features_targets_img_stack(self, img_stack, annots_stack):
         # Extract stacks with annotations
