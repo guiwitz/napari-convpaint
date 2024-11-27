@@ -96,7 +96,7 @@ def rescale_probs(label_prob_img, output_shape, order=0):
 
 import numpy as np
 
-def pad_for_kernel(data_stack, kernel_size, scale_factor=1):
+def pad_for_kernel(data_stack, effective_kernel_padding):
     """
     Pad a data stack (4D image or 3D annotation) to the kernel size.
     Adds half the kernel size to each side of the data stack.
@@ -109,25 +109,21 @@ def pad_for_kernel(data_stack, kernel_size, scale_factor=1):
         Input data stack to be padded. Shape:
         - [C, Z, H, W] for images (e.g., with multiple channels)
         - [Z, H, W] for annotations
-    kernel_size : tuple of int
-        Size of the kernel to be used for padding, given as (Z, H, W).
-    scale_factor : int, optional
-        Factor by which padding is scaled in the H and W dimensions.
-        Defaults to 1.
+    effective_kernel_padding : tuple of int
+        Effective padding for the kernel size, to be added to each side of the data stack.
+        Takes into account the scale factor for later pyramid scaling.
 
     Returns
     -------
     padded_data : np.ndarray
         Padded data stack with the same shape as the input plus padding.
     """
-    if not isinstance(kernel_size, tuple) or len(kernel_size) != 3:
+    if not isinstance(effective_kernel_padding, tuple) or len(effective_kernel_padding) != 3:
         raise ValueError("kernel_size must be a tuple of three integers (Z, H, W), " +
-                         "where Z can be None.")
+                         "whereas Z can be None.")
     
-    # Compute padding for each dimension
-    z_pad = (kernel_size[0] // 2) if kernel_size[0] is not None else 0
-    h_pad = (kernel_size[1] // 2) * scale_factor
-    w_pad = (kernel_size[2] // 2) * scale_factor
+    # Get padding for each dimension
+    z_pad ,h_pad, w_pad = effective_kernel_padding
 
     # Create padding tuples
     if data_stack.ndim == 4:  # [C, Z, H, W] for images
@@ -144,7 +140,7 @@ def pad_for_kernel(data_stack, kernel_size, scale_factor=1):
 
     return padded_data
 
-def pad_to_patch(data_stack, patch_size, scale_factor=1):
+def pad_to_patch(data_stack, effective_patch_size):
     """
     Pad an image and annotation stack to the next multiple of patch size.
     Takes into account the scale factor (for later pyramid scaling) for padding.
@@ -156,35 +152,17 @@ def pad_to_patch(data_stack, patch_size, scale_factor=1):
         Input data stack to be padded. Shape:
         - [C, Z, H, W] for images (e.g., with multiple channels)
         - [Z, H, W] for annotations
-    patch_size : tuple of int
-        Size of the patch to be used for padding, given as (Z, H, W).
-    scale_factor : int, optional
-        Factor by which padding is scaled in the H and W dimensions.
-        Defaults to 1.
+    effective_patch_size : tuple of int
+        Patch size, to a multiple of which shall be padded
+        Takes into account the scale factor for later pyramid scaling.
 
     Returns
     -------
     padded_data : np.ndarray
         Padded data stack with the same shape as the input plus padding.
     """
-    if not isinstance(patch_size, tuple) or len(patch_size) != 3:
-        raise ValueError("patch_size must be a tuple of three integers (Z, H, W), " +
-                         "where Z can be None.")
-    
-    # Extract dimensions
-    if data_stack.ndim == 4:  # [C, Z, H, W] for images
-        _, z_dim, h_dim, w_dim = data_stack.shape
-    elif data_stack.ndim == 3:  # [Z, H, W] for annotations
-        z_dim, h_dim, w_dim = data_stack.shape
-    else:
-        raise ValueError("Invalid data_stack dimensions. Expected 3D or 4D array.")
-    
-    # Compute padding for each dimension
-    z_pad = (patch_size[0] - (z_dim % patch_size[0])) % patch_size[0] if patch_size[0] is not None else 0
-    effective_patch_h = (patch_size[1]*scale_factor)
-    h_pad = (effective_patch_h - (h_dim % effective_patch_h)) % effective_patch_h
-    effective_patch_w = (patch_size[0]*scale_factor)
-    w_pad = (effective_patch_w - (h_dim % effective_patch_w)) % effective_patch_w
+    # Compute padding
+    z_pad, h_pad, w_pad = compute_patch_padding(data_stack.shape, effective_patch_size)
 
     # Split padding evenly (add extra padding to the end if padding is odd)
     z_pad_front, z_pad_back = z_pad // 2, z_pad - z_pad // 2
@@ -204,15 +182,40 @@ def pad_to_patch(data_stack, patch_size, scale_factor=1):
 
     return padded_data
 
-def pre_process_stack(data_stack, input_scaling, kernel_size, patch_size, max_scaling=1):
+def compute_patch_padding(data_stack_shape, effective_patch_size):
+    """
+    Compute the padding required to make the data stack a multiple of the patch size.
+    Takes into account the scale factor (for later pyramid scaling) for padding.
+    """
+    if not isinstance(effective_patch_size, tuple) or len(effective_patch_size) != 3:
+        raise ValueError("patch_size must be a tuple of three integers (Z, H, W), " +
+                         "whereas Z can be None.")
+    
+    # Extract dimensions
+    if len(data_stack_shape) == 4:  # [C, Z, H, W] for images
+        _, z_dim, h_dim, w_dim = data_stack_shape
+    elif len(data_stack_shape) == 3:  # [Z, H, W] for annotations
+        z_dim, h_dim, w_dim = data_stack_shape
+    else:
+        raise ValueError("Invalid data_stack dimensions. Expected 3D or 4D array.")
+    
+    # Compute padding for each dimension
+    patch_z, patch_h, patch_w = effective_patch_size
+    z_pad = (patch_z - (z_dim % patch_z)) % patch_z if patch_z is not None else 0
+    h_pad = (patch_h - (h_dim % patch_h)) % patch_h
+    w_pad = (patch_w - (h_dim % patch_w)) % patch_w
+
+    return z_pad, h_pad, w_pad
+
+def pre_process_stack(data_stack, input_scaling, effective_kernel_padding, effective_patch_size):
     # Scale input
     scaled_stack = scale_img(data_stack, input_scaling)
     # Pad images and annots; take into account maximum scaling for later pyramid scaling
     padded_stack = scaled_stack
-    if kernel_size is not None:
-        padded_stack = pad_for_kernel(padded_stack, kernel_size, max_scaling)
-    if patch_size is not None:
-        padded_stack = pad_to_patch(padded_stack, patch_size, max_scaling)
+    if effective_kernel_padding is not None:
+        padded_stack = pad_for_kernel(padded_stack, effective_kernel_padding)
+    if effective_patch_size is not None:
+        padded_stack = pad_to_patch(padded_stack, effective_patch_size)
     return padded_stack
 
 def tile_annots(image, labels): # TODO: IMPLEMENT
