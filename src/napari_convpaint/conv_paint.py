@@ -165,7 +165,7 @@ def get_features_current_layers(image, annotations, model, param:Param):
             boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
         for i in range(len(boxes['label'])):
             # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-            pad_size = param.fe_padding
+            pad_size = param.fe_padding # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
             x_min = boxes['bbox-0'][i]-pad_size
             x_max = boxes['bbox-2'][i]+pad_size
             y_min = boxes['bbox-1'][i]-pad_size

@@ -47,10 +47,11 @@ class ConvpaintModel:
             
     def set_default_model(self):
         self.param = Param()
+        self.param.fe_name = 'vgg16'
 
         # ToDo: DEFINE DEFAULT CONVPAINT MODEL HERE
 
-        self.set_fe_model(self.param)
+        self.set_fe_model()
 
     def load_model(self, model_path):
         with open(model_path, 'rb') as f:
@@ -62,6 +63,15 @@ class ConvpaintModel:
             self.fe_model_state = data['model_state']
         # else:
         #     self.fe_model_state = None
+
+    def save_model(self, model_path):
+        with open(model_path, 'wb') as f:
+            data = {
+                'classifier': self.classifier,
+                'param': self.param,
+                'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
+            }
+            pickle.dump(data, f)
 
     def run_model_checks(self):
         """Run checks on the model to ensure that it is ready to be used."""
@@ -77,15 +87,6 @@ class ConvpaintModel:
                 raise ValueError('Kernel size is 2D, but patch size is 3D.')
             if ks[0] is not None and ps[0] is None:
                 raise ValueError('Kernel size is 3D, but patch size is 2D.')
-
-    def save_model(self, model_path):
-        with open(model_path, 'wb') as f:
-            data = {
-                'classifier': self.classifier,
-                'param': self.param,
-                'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
-            }
-            pickle.dump(data, f)
 
     def set_fe_model(self):
         """Set the model based on the given parameters."""
@@ -115,10 +116,10 @@ class ConvpaintModel:
 
         return output_data_stack_list
 
-    def pre_process_stack(self, data_stack):
-        input_scaling = self.param.image_downsample
-        effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
-        effective_patch_size = self.fe_model.get_effective_patch_size()
+    def pre_process_stack(self, data_stack): # TODO: REMOVE EXAMPLE VALUES...
+        input_scaling = 2 #self.param.image_downsample
+        effective_kernel_padding = (0, 12, 12) #self.fe_model.get_effective_kernel_padding()
+        effective_patch_size = None #self.fe_model.get_effective_patch_size()
         # Process input data stack
         processed_data_stack = conv_paint_utils.pre_process_stack(data_stack,
                                                                  input_scaling,
@@ -136,18 +137,26 @@ class ConvpaintModel:
         extract_3d = ((kernel_size is not None and kernel_size[0] is not None) or
                       (patch_size is not None and patch_size[0] is not None))
         tile_annots = self.param.tile_annotations
-        if extract_3d:
+        if extract_3d and tile_annots:
+            annot_img_list = conv_paint_utils.tile_annots_3d(img_stack,
+                                                             annot_stack,
+                                                             effective_kernel_padding,
+                                                             effective_patch_size)
+        elif tile_annots: # 2D tile annotations
+            annot_img_list = conv_paint_utils.tile_annots_2d(img_stack,
+                                                             annot_stack,
+                                                             effective_kernel_padding,
+                                                             effective_patch_size)
+        elif extract_3d: # 3D extract annotations without tiling
             annot_img_list = conv_paint_utils.extract_annots_3d(img_stack,
                                                                 annot_stack,
                                                                 effective_kernel_padding,
-                                                                effective_patch_size,
-                                                                tile_annots)
-        else:
+                                                                effective_patch_size)
+        else: # 2D extract annotations without tiling
             annot_img_list = conv_paint_utils.extract_annots_2d(img_stack,
                                                                 annot_stack,
                                                                 effective_kernel_padding,
-                                                                effective_patch_size,
-                                                                tile_annots)
+                                                                effective_patch_size)
         return annot_img_list
 
     def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
