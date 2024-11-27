@@ -14,8 +14,6 @@ from .conv_paint_nnlayers import Hookmodel
 from .conv_paint_param import Param
 from . import conv_paint_utils
 
-
-
 class ConvpaintModel:
 
     def __init__(self, model_path=None):
@@ -76,55 +74,44 @@ class ConvpaintModel:
 
     def set_fe_model(self):
         """Set the model based on the given parameters."""
-        # self.total_pad = self.param.fe_padding * self.param.image_downsample * np.max(self.param.fe_scalings)
+        # Reset the model and classifier; create a new FE model
         self.fe_model_state = None
-        self.classifier = None # TODO: Decide if Classifier should really be reset here
-        model_class = self.ALL_MODELS_TYPES_DICT[self.param.fe_name]
-        self.fe_model = model_class(
+        self.classifier = None
+        fe_model_class = self.ALL_MODELS_TYPES_DICT[self.param.fe_name]
+        self.fe_model = fe_model_class(
             model_name=self.param.fe_name,
             use_cuda=self.param.fe_use_cuda
         )
-        
+        # Register hooks if the model is a Hookmodel
         if isinstance(self.fe_model, Hookmodel):
             if self.param.fe_layers:
                 self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
             elif len(self.fe_model.named_modules) == 1:
                 self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
 
-    def pre_process_img_annots_lists(self, img_list, annots_list):
-        # If single image and single annot are given, convert them to lists
-        if not isinstance(img_list, list):
-            img_list = [img_list]
-        if not isinstance(annots_list, list):
-            annots_list = [annots_list]
+    def pre_process_list(self, data_stack_list):
+        """Preprocess a list of data stacks (can be image stack [C, Z, H, W] or annotations [Z, H, W])."""
+        # If single data stack given, convert them to lists
+        if not isinstance(data_stack_list, list):
+            data_stack_list = [data_stack_list]
         
-        # Preprocess each image-annot pair
-        output_img_list, output_annots_list = [], []
-        for img_stack, annots_stack in zip(img_list, annots_list):
-            img_stack, annots_stack = self.pre_process_img_annots_stack(img_stack, annots_stack)
-            output_img_list.append(img_stack)
-            output_annots_list.append(annots_stack)
-        
-        return output_img_list, output_annots_list
+        # Preprocess each data_stack in the list
+        output_data_stack_list = [self.pre_process_stack(data_stack) for data_stack in data_stack_list]
 
-    def pre_process_img_annots_stack(self, img_stack, annots_stack):
+        return output_data_stack_list
+
+    def pre_process_stack(self, data_stack):
         input_scaling = self.param.image_downsample
         effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
         effective_patch_size = self.fe_model.get_effective_patch_size()
-        # Process input image
-        processed_img_stack = conv_paint_utils.pre_process_stack(img_stack,
+        # Process input data stack
+        processed_data_stack = conv_paint_utils.pre_process_stack(data_stack,
                                                                  input_scaling,
                                                                  effective_kernel_padding,
                                                                  effective_patch_size)
-        # Preprocess input annots
-        processed_annots_stack = conv_paint_utils.pre_process_stack(annots_stack,
-                                                                    input_scaling,
-                                                                    effective_kernel_padding,
-                                                                    effective_patch_size)
+        
         # Return processed stacks
-        return processed_img_stack, processed_annots_stack
-
-
+        return processed_data_stack
 
     def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
         """Train a classifier given a set of features and targets."""
