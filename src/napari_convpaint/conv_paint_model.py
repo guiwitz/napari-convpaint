@@ -73,23 +73,31 @@ class ConvpaintModel:
             }
             pickle.dump(data, f)
 
-    def run_model_checks(self):
-        """Run checks on the model to ensure that it is ready to be used."""
-        if self.fe_model is None:
-            raise ValueError('No feature extractor model set. Please set a feature extractor model first.')
-        if self.classifier is None:
-            raise ValueError('No classifier set. Please train a classifier first.')
-        # Check if the kernel_size and patch_size are compatible
-        ks = self.fe_model.kernel_size
-        ps = self.fe_model.patch_size
-        if ks is not None and ps is not None:
-            if ks[0] is None and ps[0] is not None:
-                raise ValueError('Kernel size is 2D, but patch size is 3D.')
-            if ks[0] is not None and ps[0] is None:
-                raise ValueError('Kernel size is 3D, but patch size is 2D.')
-
     def set_fe_model(self):
         """Set the model based on the given parameters."""
+
+        # USE THESE AS ARGUMENTS:
+        # # Image processing parameters
+        # multi_channel_img: bool = None
+        # normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
+        # # Acceleration parameters
+        # image_downsample: int = None
+        # tile_annotations: bool = False
+        # tile_image: bool = False
+        # # Model parameters
+        # fe_name: str = None
+        # fe_layers: list[str] = None
+        # fe_padding : int = 0
+        # fe_scalings: list[int] = None
+        # fe_order: int = None
+        # fe_use_min_features: bool = None
+        # fe_use_cuda: bool = None
+        # # Classifier parameters
+        # clf_iterations: int = None
+        # clf_learning_rate: float = None
+        # clf_depth: int = None
+
+
         # Reset the model and classifier; create a new FE model
         self.fe_model_state = None
         self.classifier = None
@@ -104,6 +112,21 @@ class ConvpaintModel:
                 self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
             elif len(self.fe_model.named_modules) == 1:
                 self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
+
+    def run_model_checks(self):
+        """Run checks on the model to ensure that it is ready to be used."""
+        if self.fe_model is None:
+            raise ValueError('No feature extractor model set. Please set a feature extractor model first.')
+        if self.classifier is None:
+            raise ValueError('No classifier set. Please train a classifier first.')
+        # Check if the kernel_size and patch_size are compatible
+        ks = self.fe_model.kernel_size
+        ps = self.fe_model.patch_size
+        if ks is not None and ps is not None:
+            if ks[0] is None and ps[0] is not None:
+                raise ValueError('Kernel size is 2D, but patch size is 3D.')
+            if ks[0] is not None and ps[0] is None:
+                raise ValueError('Kernel size is 3D, but patch size is 2D.')
 
     def pre_process_list(self, data_stack_list):
         """Preprocess a list of data stacks (can be image stack [C, Z, H, W] or annotations [Z, H, W])."""
@@ -168,6 +191,10 @@ class ConvpaintModel:
                 # train a random forest classififer
                 classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
                 classifier.fit(features, targets)
+
+
+
+
 
     def get_features_targets_img_stack(self, img_stack, annots_stack):
         # Extract stacks with annotations
