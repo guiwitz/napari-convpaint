@@ -11,13 +11,20 @@ class FeatureExtractor(ABC):
         self.patch_size = None;
 
     @abstractmethod
-    def extract_features(self, image, param, **kwargs):
+    def extract_features_single_channel(self, image, param, **kwargs):
         pass
 
     def extract_features_rgb(self, image, param, **kwargs):
+        # Ensure the image dimensions are compatible (put Channels first)
+        if image.shape[0] != 3:
+            raise ValueError("RGB image must have 3 channels (and dimensions must be [C, H, W]).")
+        # DEFAULT: Extract features for each channel and concatenate them
+        return self.extract_features_from_channels(image, param, **kwargs)
+    
+    def extract_features_from_channels(self, image, param, **kwargs):
         all_features = []
         for channel in image:
-            features = self.extract_features(channel, param, **kwargs)
+            features = self.extract_features_single_channel(channel, param, **kwargs)
             all_features.append(features)
         return np.concatenate(all_features, axis=0)
 
@@ -26,24 +33,23 @@ class FeatureExtractor(ABC):
         Gets the features of an image.
 
         Parameters:
-        - image: The input image. Dimensions are [C, H, W] or [C, Z, H, W] (for FE that support 3D extraction)
+        - image: The input image.
+            Dimensions are [C, H, W] or [C, Z, H, W] (for Feature Extractors that support 3D extraction)
         - rgb: Whether the image shall be treated as RGB format.
 
         Returns:
         - features: The extracted features of the image. [nb_features, width, height]
         """
+        # Check that the image is 3D (or 4D)
+        if image.ndim != 3 and image.ndim != 4:
+            raise ValueError("Image must have 3 dimensions (or 4 for 3D Feature Extractors).")
+
+        # For RGB images, extract features with the RGB method
         if rgb:
-            # Ensure the image dimensions are compatible
-            if image.shape[0] != 3:
-                raise ValueError("RGB image must have 3 channels.")
-            return self.extract_features_rgb(image, **kwargs)
-        
-        # Extract features for each channel and concatenate them
-        all_features = []
-        for channel in image:
-            features = self.extract_features(channel, **kwargs)
-            all_features.append(features)
-        return np.concatenate(all_features, axis=0)
+            return self.extract_features_rgb(image, self.param, **kwargs)
+
+        # Otherwise, extract features for each channel and concatenate them
+        return self.extract_features_from_channels(image, self.param, **kwargs)
 
     def get_default_param(self):
         """
