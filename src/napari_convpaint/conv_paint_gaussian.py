@@ -26,6 +26,9 @@ class GaussianFeatures(FeatureExtractor):
         im_filter = skimage.filters.gaussian(image, sigma=self.sigma, channel_axis=0)
         #print(im_filter.shape) for RGB image --> e.g (3, 134, 139)
         return im_filter
-
-    def get_padding(self):
-        return self.sigma
+    
+    def get_default_param(self):
+        """Overwrite any default parameters."""
+        param = super().get_default_param()
+        param.fe_padding = self.sigma
+        return param

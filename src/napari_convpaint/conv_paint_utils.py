@@ -5,7 +5,6 @@ import torch
 import numpy as np
 import skimage.transform
 import skimage.morphology as morph
-import pandas as pd
 from joblib import Parallel, delayed
 import einops as ein
 #import xgboost as xgb
@@ -13,10 +12,69 @@ import einops as ein
 
 from torch import nn
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
 
 from torch.nn.functional import interpolate as torch_interpolate
 
+def scale_img(image, scaling_factor, upscale=False):
+    """
+    Downscale an image by averaging over non-overlapping blocks of the specified size.
+    OR Upscale by repeating the pixels.
+    
+    Parameters
+    ----------
+    image : np.ndarray
+        Input array to be downscaled. Must have spatial dimensions as the last two dimensions.
+    scaling_factor : int
+        Factor by which to downscale the image.
+    upscale : bool
+        If True, upscale the image by repeating the pixels.
+        
+    Returns
+    -------
+    downscaled_img / upscaled_img : np.ndarray
+        Downscaled array or upscaled array.
+    """
+
+    if scaling_factor == 1:
+        return image
+    
+    # If option to UPSCALE is True, return the image upscaled
+    if upscale:
+        # Upscale by duplicating elements
+        upscaled_img = np.repeat(
+            np.repeat(image, scaling_factor, axis=-2), # Repeat along the height
+            scaling_factor, axis=-1                    # Repeat along the width
+            )
+        return upscaled_img
+    
+    # Else DOWNSCALE the image
+    # Slice the last two dimensions
+    sliced_img = image[
+        ..., 
+        :image.shape[-2] // scaling_factor * scaling_factor, 
+        :image.shape[-1] // scaling_factor * scaling_factor
+    ]
+    # Reshape to group elements for downscaling
+    stacked_blocks = sliced_img.reshape(
+        *image.shape[:-2],  # Preserve all leading dimensions
+        image.shape[-2] // scaling_factor, scaling_factor,
+        image.shape[-1] // scaling_factor, scaling_factor
+    )
+    # Take the median along the scaling dimensions
+    scaled_img = np.median(stacked_blocks, axis=(-2, -1))
+    return scaled_img
+
+def rescale_features(image, output_shape, order=1):
+    """
+    Rescale an image to the specified output size.
+    """
+    return skimage.transform.resize(image, output_shape, order=order, mode='reflect', preserve_range=True)
+
+def rescale_class_labels(label_img, output_shape):
+    """
+    Rescale a class label image to the specified output size.
+    """
+    return skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
 
 def get_device(use_cuda=None):
     if torch.cuda.is_available() and (use_cuda==True):
@@ -33,7 +91,7 @@ def normalize_image(image, image_mean, image_std):
     """
     Normalize a numpy array with 2-4 dimensions.
 
-    If the array has multiple channels (determined by the multi_channel_training flag), 
+    If the array has multiple channels (determined by the multi_channel_img flag), 
     each channel is normalized independently. If there are multiple time or z frames, 
     they are normalized together.
 
@@ -42,9 +100,9 @@ def normalize_image(image, image_mean, image_std):
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
     image_mean : float or nd.array
-        Mean of the input array along non-channel dimensions. If None, the mean is calculated from the input array.
+        Mean of the input array along non-channel dimensions.
     image_std : float or nd.array
-        Standard deviation of the input array along non-channel dimensions. If None, the standard deviation is calculated from the input array.
+        Standard deviation of the input array along non-channel dimensions.
         
     Returns
     -------
@@ -59,16 +117,14 @@ def normalize_image(image, image_mean, image_std):
     
     if image.ndim < 2 or image.ndim > 4:
         raise ValueError("Array must have 2-4 dimensions")
+    
+    # Avoid division by zero 
+    image_std = np.maximum(image_std, 1e-6)
 
-    # The computing of stats and image normalization is split into two function. This will
-    # allow to normalize even a single image of the stack with the same stats as the whole stack.
-    # This is done in the perspective of handling large stacks that cannot be loaded in memory.
-    # This needs to be implemented:
-        # - computing stats stack by stack and combining the result at the end
-        # - allow to normalize a single image from a stack
     arr_norm = (image - image_mean) / image_std
 
     return arr_norm
+    
 
 def compute_image_stats(image, ignore_n_first_dims=None):
     """
@@ -112,119 +168,8 @@ def compute_image_stats(image, ignore_n_first_dims=None):
     return image_mean, image_std
 
 
-def filter_image(image, model, scalings):
-    """
-    Filter an image with the first layer of a VGG16 model.
-    Apply filter to each scale in scalings.
 
-    Parameters
-    ----------
-    image: 2d array
-        image to filter
-    model: pytorch model
-        first layer of VGG16
-    scalings: list of ints
-        downsampling factors
-
-    Returns
-    -------
-    all_scales: list of 2d array
-        list of filtered images. For each downsampling factor,
-        there are N images, N being the number of filters of the model.
-
-    """
-
-    n_filters = 64
-    # convert to np if dasks array
-    image = np.asarray(image)
-
-    all_scales = []
-    for s in scalings:
-        im_tot = image[::s, ::s].astype(np.float32)
-        # im_tot = np.ones((3,im_tot.shape[0],im_tot.shape[1]), dtype=np.float32) * im_tot
-        im_torch = torch.tensor(im_tot[np.newaxis, np.newaxis, ::])
-        out = model(im_torch)
-        out_np = out.detach().numpy()
-        if s > 1:
-            out_np = skimage.transform.resize(
-                out_np, (1, n_filters, image.shape[0], image.shape[1]), preserve_range=True)
-        all_scales.append(out_np)
-    return all_scales
-
-
-def filter_image_multioutputs(image, hookmodel, scalings=[1], order=0,
-                              image_downsample=1):
-    """Recover the outputs of chosen layers of a pytorch model. Layers and model are
-    specified in the hookmodel object.
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        2d Image to filter
-    hookmodel : Hookmodel
-        Model to extract features from
-    scalings : list of ints, optional
-        Downsampling factors, by default None
-    order : int, optional
-        Interpolation order for low scale resizing,
-        by default 0
-    image_downsample : int, optional
-        Downsample image by this factor before extracting features, by default 1
-
-    Returns
-    -------
-    all_scales : list of np.ndarray
-        List of filtered images. There are N x S images, N being the number of layers
-        of the model, and S the number of scaling factors. Each element has shape [1, F, H, W]
-        where F is the number of filters of the layer.
-        
-    """
-
-    input_channels = hookmodel.named_modules[0][1].in_channels
-    image = np.asarray(image, dtype=np.float32)
-
-    if image.ndim == 2:
-        image = image[::image_downsample, ::image_downsample]
-        image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
-    elif image.ndim == 3:
-        image = image[:, ::image_downsample, ::image_downsample]
-        if image.shape[0] != input_channels:
-            warnings.warn(f'Image has {image.shape[0]} channels, model expects {input_channels}. Using mean projection.')
-            image = np.mean(image, axis=0)
-            image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
-
-    int_mode = 'bilinear' if order > 0 else 'nearest'
-    align_corners = False if order > 0 else None
-
-    all_scales = []
-    with torch.no_grad():
-        for s in scalings:
-            im_tot = image[:, ::s, ::s]
-            im_torch = torch.tensor(im_tot[np.newaxis, ::])
-            # im_torch = hookmodel.transform(im_torch)  # different normalization required
-            hookmodel.outputs = []
-            try:
-                _ = hookmodel(im_torch)
-            except AssertionError as ea:
-               pass
-            except Exception as ex:
-                raise ex
-    
-            for im in hookmodel.outputs:
-                if image.shape[1:3] != im.shape[2:4]:
-                    im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
-                    '''out_np = skimage.transform.resize(
-                        image=out_np,
-                        output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
-                        preserve_range=True, order=order)'''
-    
-                out_np = im.cpu().detach().numpy()
-                all_scales.append(out_np)
-
-    return all_scales
-
-def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
-                  use_min_features=True, image_downsample=1, use_dask=False):
+def parallel_predict_image(image, model, classifier, param, use_dask=False):
     """
     Given a filter model and a classifier, predict the class of 
     each pixel in an image.
@@ -235,7 +180,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
         image to segment
     model: Hookmodel
         model to extract features from
-    classifier: sklearn classifier
+    classifier: CatBoostClassifier
         classifier to use for prediction
     scalings: list of ints
         downsampling factors
@@ -316,10 +261,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                     model.predict_image,
                     image=image_block,
                     classifier=classifier,
-                    scalings=scalings,
-                    order=order,
-                    use_min_features=use_min_features,
-                    image_downsample=image_downsample))
+                    param=param))
                 
                 
                 min_row_ind_collection.append(min_row_ind)
@@ -335,10 +277,7 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
                 predicted_image = model.predict_image(
                     image=image_block,
                     classifier=classifier,
-                    scalings=scalings,
-                    order=order,
-                    use_min_features=use_min_features,
-                    image_downsample=image_downsample
+                    param=param
                 )
                 crop_pred = predicted_image[
                     new_min_row_ind: new_max_row_ind,
@@ -359,278 +298,8 @@ def parallel_predict_image(image, model, classifier, scalings=[1], order=0,
     
     return predicted_image_complete
 
-def get_features_current_layers(image, annotations, model=None, scalings=[1],
-                                order=0, use_min_features=True,
-                                image_downsample=1,tile_annotations=False):
-    """Given a potentially multidimensional image and a set of annotations,
-    extract multiscale features from multiple layers of a model.
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        2D or 3D Image to extract features from. If 3D but annotations are 2D,
-        image is treated as multichannel and not image series
-    annotations : np.ndarray
-        2D, 3D Annotations (1,2) to extract features from
-    model : feature extraction model
-        Model to extract features from the image
-    scalings : list of ints
-        Downsampling factors
-    order : int, optional
-        Interpolation order for low scale resizing, by default 0
-    use_min_features : bool, optional
-        Use minimal number of features, by default True
-    image_downsample : int, optional
-        Downsample image by this factor before extracting features, by default 1
-
-    Returns
-    -------
-    features : pandas DataFrame
-        Extracted features (rows are pixel, columns are features)
-    targets : pandas Series
-        Target values
-    """
-
-    if model is None:
-        raise ValueError('Model must be provided')
-
-    # get indices of first dimension of non-empty annotations. Gives t/z indices
-    if annotations.ndim == 3:
-        non_empty = np.unique(np.where(annotations > 0)[0])
-        if len(non_empty) == 0:
-            warnings.warn('No annotations found')
-            return None, None
-    elif annotations.ndim == 2:
-        non_empty = [0]
-    else:
-        raise Exception('Annotations must be 2D or 3D')
-
-    all_values = []
-    all_targets = []
-
-    # find maximal padding necessary
-    padding = model.get_padding() * np.max(scalings)
-
-    # iterating over non_empty iteraties of t/z for 3D data
-    for ind, t in enumerate(non_empty):
-
-        if annotations.ndim == 2:
-            if image.ndim == 3:
-                current_image = np.pad(image, ((0,0), (padding,padding), (padding,padding)), mode='reflect')
-            else:
-                current_image = np.pad(image, padding, mode='reflect')
-            current_annot = np.pad(annotations, padding, mode='constant')
-        else:
-            if image.ndim == 3:
-                current_image = np.pad(image[t], padding, mode='reflect')
-                current_annot = np.pad(annotations[t], padding, mode='constant')
-            elif image.ndim == 4:
-                current_image = np.pad(image[:, t], ((0,0),(padding, padding),(padding, padding)), mode='reflect')
-                current_annot = np.pad(annotations[t], padding, mode='constant')
-
-        annot_regions = skimage.morphology.label(current_annot > 0)
-
-        if tile_annotations:
-            boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
-        else:
-            boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
-        for i in range(len(boxes['label'])):
-            # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-            pad_size = model.get_padding()
-            x_min = boxes['bbox-0'][i]-pad_size
-            x_max = boxes['bbox-2'][i]+pad_size
-            y_min = boxes['bbox-1'][i]-pad_size
-            y_max = boxes['bbox-3'][i]+pad_size
-
-            # temporary check that bounds are not out of image
-            x_min = max(0, x_min)
-            x_max = min(current_image.shape[-2], x_max)
-            y_min = max(0, y_min)
-            y_max = min(current_image.shape[-1], y_max)
-
-            im_crop = current_image[...,
-                x_min:x_max,
-                y_min:y_max
-            ]
-            annot_crop = current_annot[
-                x_min:x_max,
-                y_min:y_max
-            ]
-            extracted_features = model.get_features_scaled(
-                image=im_crop,
-                scalings=scalings,
-                order=order,
-                use_min_features=use_min_features,
-                image_downsample=image_downsample)
-            
-            if image_downsample > 1:
-                annot_crop = annot_crop[::image_downsample, ::image_downsample]
-
-            #from the [features, w, h] make a list of [features] with len nb_annotations
-            mask = annot_crop > 0
-            nb_features = extracted_features.shape[0]
-
-            extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
-
-            extracted_features = extracted_features[mask]
-            all_values.append(extracted_features)
-
-            targets = annot_crop[annot_crop > 0]
-            targets = targets.flatten()
-            all_targets.append(targets)
-        
-
-    all_values = np.concatenate(all_values, axis=0)
-    features = pd.DataFrame(all_values)
-
-    all_targets = np.concatenate(all_targets, axis=0)
-    targets = pd.Series(all_targets)
-
-    return features, targets
-
-
 rot_model = None
 
-def get_rot_model(device='cpu'):
-    global rot_model
-    if rot_model is not None:
-        return rot_model
-
-    # create a torch model that takes 2 input tensors and convolves first with horizontal edge detector
-    # and second with vertical edge detector, then calculates difference of the two outputs
-
-    # create horizontal edge detector
-    h_edge = np.zeros((1, 2, 3, 3))  # out, in, h, w
-    h_edge[0, 0, 0, :] = -1
-    h_edge[0, 0, 2, :] = 1
-    h_edge = torch.from_numpy(h_edge).float()
-
-    # create vertical edge detector
-    v_edge = np.zeros((1, 2, 3, 3))
-    v_edge[0, 1, :, 0] = 1
-    v_edge[0, 1, :, 2] = -1
-    v_edge = torch.from_numpy(v_edge).float()
-
-    # create kernel summing 2 channels
-    kernel = np.ones((1, 2, 1, 1))
-    kernel = torch.from_numpy(kernel).float()
-
-    # create model
-    model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(in_channels=2, out_channels=2,
-                                                           kernel_size=3, padding=1, bias=False)
-                                        )]))
-    # load edge detectors
-    model.conv1.weight = nn.Parameter(torch.cat([h_edge, v_edge], dim=0))
-    model.conv1.weight.requires_grad = False
-    # create second layer
-    model.add_module('conv2', nn.Conv2d(in_channels=2, out_channels=1, kernel_size=1, bias=False))
-    # load weights for second layer
-    model.conv2.weight = nn.Parameter(kernel)
-    model.conv2.weight.requires_grad = False
-
-    model.eval()
-    rot_model = model.to(device)
-    return rot_model
-
-
-def get_rot_features(grad_x, grad_y, device='cpu'):
-    rot_model = get_rot_model(device=device)
-
-    # create torch tensors
-    grad_x = torch.from_numpy(grad_x).float()
-    grad_y = torch.from_numpy(grad_y).float()
-    # stack tensors
-    grad_xy = torch.stack([grad_x, grad_y], dim=1)
-    # convolve with edge detectors
-    rot = rot_model(grad_xy).detach().numpy()
-    return rot[:, 0]  # single out channels, orig channels are in the batch dimension
-
-
-def append_grad_rot(features, add_grad, add_rot, feature_info, device):
-    """
-    Append gradient and rotation features to a feature array according to add_grad and add_rot flags
-    and updates the feature_info dictionary accordingly.
-    Parameters
-    ----------
-    features: np.ndarray
-        feature array, 3D, CHW
-    add_grad: bool
-        if True, add gradient features: gradient in x, gradient in y. Triples feature number.
-    add_rot: bool
-        if True, add rotor features: convolves grad features with corresponding "edge detector" and sums.
-        adds one feature per original feature.
-    feature_info: dict
-        feature_info[idx] = [idx, name=f'{layer_name}_{sign}_{scale}_{idx:04d}', mult, scale, layer_name,
-         ch_idx, type='gradx'|'grady'|'rot'|'orig', useful:bool]
-
-    Returns
-    -------
-    features: np.ndarray
-    """
-    n_features = features.shape[0]
-    res_features = features
-
-    mult_factor_sign = {1:'+', -1:'-'}
-    
-    if add_grad:
-        grad_x = np.gradient(features, axis=1)
-        grad_y = np.gradient(features, axis=2)
-        all_features = [features, grad_x, grad_y]
-
-        for idx in range(n_features):
-            fi_idx = feature_info[idx]
-            mult, scale, layer_name, ch_idx = fi_idx[2:6]
-            sign=mult_factor_sign[mult]
-
-            gx_idx = idx + n_features
-            gy_idx = idx + 2 * n_features
-            feature_info[gx_idx] = [gx_idx, f'{layer_name}_{sign}_{scale}_{gx_idx:04d}', mult, scale, layer_name,
-                                    ch_idx, 'gradx', True]
-            feature_info[gy_idx] = [gy_idx, f'{layer_name}_{sign}_{scale}_{gy_idx:04d}', mult, scale, layer_name,
-                                    ch_idx, 'grady', True]
-
-        if add_rot:
-            rot = get_rot_features(grad_x, grad_y, device=device)
-            all_features.append(rot)
-
-            for idx in range(n_features):
-                fi_idx = feature_info[idx]
-                mult, scale, layer_name, ch_idx = fi_idx[2:6]
-                sign=mult_factor_sign[mult]
-
-                rot_idx = idx + 3 * n_features
-                feature_info[rot_idx] = [rot_idx, f'{layer_name}_{sign}_{scale}_{rot_idx:04d}', mult, scale, layer_name,
-                                         ch_idx, 'rot', True]
-
-        res_features = np.concatenate(all_features, axis=0)
-
-    return res_features
-
-
-def fill_useless(features_all_samples, feature_info):
-    """
-    Update useless flag in feature_info dictionary based on features:
-    if feature has zero variance, feature is useless
-
-    Parameters
-    ----------
-    features_all_samples: list of pandas DataFrame (raw pixel, columns feature)
-    feature_info: dict
-        see definition in append_grad_rot
-
-    Returns
-    -------
-    None
-    """
-
-    # update useless flag in feature_info dictionary based on features:
-    # if feature has zero variance, feature is useless
-    n_features = features_all_samples[0].shape[1]
-    for idx in range(n_features):
-        # fill values for all samples from dataframe column
-        all_values = np.concatenate([np.asarray(f.iloc[:, idx]) for f in features_all_samples], axis=0)
-        # if feature has zero variance, feature is useless
-        feature_info[idx][7] = np.var(all_values) > 0
 
 
 def get_balanced_mask(ref_mask, tgt_mask):
@@ -792,203 +461,3 @@ def extract_annotated_pixels(features, annotation, full_annotation=True):
         ], axis=0)
 
     return features_sel, targets_sel
-
-
-def get_features_single_img_rich(model, image, annotation, scalings=[1],
-                                 full_annotation=True,
-                                 add_grad=False,
-                                 add_rot=False,
-                                 add_neg=True,
-                                 order=0):
-    """Given a 2D image and annotation,
-        extract multiscale features from multiple layers of a model,
-        add gradient and rotation features,
-        select only pixels in annotations if not full_annotation otherwise balance background and foreground,
-        return features, labels, and feature info dictionary.
-
-        Parameters
-        ----------
-        model : Hookmodel
-            Model to extract features from
-        image : np.ndarray
-            2D or 3D Image to extract features from
-        annotation : np.ndarray
-            2D, 3D Annotations (1,2) to extract features from
-        scalings : list of ints
-            Downsampling factors
-        full_annotation : bool
-            if True, use all pixels in annotations, otherwise balance background and foreground
-            if True - assumes annotations are 0,1,..., where 0 is bg. otherwise assumes 0 is not annotated,
-             and 0 is background, 1 is first class, etc. Default True
-        add_grad : bool
-            if True, add gradient features: gradient in x, gradient in y. Triples feature number. Default False.
-        add_rot : bool
-            if True, add rotor features: convolve grad features with corresponding "edge detector" and sum.
-            Default False.
-        add_neg : bool
-            if True, add all features also for `-image`
-            Default True.
-        order : int, optional
-            Interpolation order for low scale resizing, by default 0
-        use_min_features : bool, optional
-            Use minimal number of features, by default True
-
-        Returns
-        -------
-        features : pandas DataFrame
-            Extracted features (rows are pixel, columns are features)
-        targets : pandas Series
-            Target values
-        feature_info : dict
-                    feature_info[idx] = [idx, name=f'{layer_name}_{sign}_{scale}_{idx:04d}', mult, scale, layer_name, ch_idx,
-                             type='gradx'|'grady'|'rot'|'orig', useful:bool]
-        """
-
-    # get indices of first dimension of non-empty annotation. Gives t/z indices
-    if annotation.ndim != 2 or image.ndim != 2:
-        raise Exception('annotation must be 2D')
-    assert (not add_rot) or add_grad, 'add_grad must be True if add_rot is True'
-
-    if full_annotation:
-        annotation = annotation + 1
-
-    mult_factors = [1, -1] if add_neg else [1]
-    mult_factor_sign = {1:'+', -1:'-'}
-    feature_info = {}
-    extracted_features = []
-    
-    for mf in mult_factors:
-        sign = mult_factor_sign[mf]
-        image_f = (-image) if mf==-1 else image
-        
-        extracted_features.append(np.expand_dims(image_f, axis=(0, 1)))
-        features = filter_image_multioutputs(image_f, model, scalings, order=order)
-        extracted_features.extend(features)
-        
-        idx = len(feature_info)
-        feature_info[idx] = [idx, f'raw_{sign}_1_1', mf, 1, 'raw', 0, 'raw', True]
-    
-        for scale in scalings:
-            for l_idx, (layer_name, n_features) in enumerate(zip(model.selected_layers, model.features_per_layer)):
-                for ch_idx in range(n_features):
-                    idx = len(feature_info)
-                    feature_info[idx] = [idx, f'{layer_name}_{sign}_{scale}_{idx:04d}', mf, scale, layer_name, ch_idx, 'orig', True]
-
-    extracted_features = np.concatenate([] + extracted_features, axis=1)
-    assert len(extracted_features) == 1, 'only one image at a time'
-    extracted_features = extracted_features[0]
-    
-    extracted_features = append_grad_rot(extracted_features, add_grad, add_rot, feature_info, device=model.device)
-
-    # select pixels in annotations
-
-    features, targets = extract_annotated_pixels(extracted_features, annotation, full_annotation=full_annotation)
-    features = pd.DataFrame(features)
-    targets = pd.Series(targets)
-
-    return features, targets, feature_info
-
-
-def get_features_all_samples_rich(model, images, annotations, scalings=[1],
-                                  full_annotation=True,
-                                  add_grad=False,
-                                  add_rot=False,
-                                  add_neg=True,
-                                  order=0):
-    """
-    Given a potentially multidimensional image and a set of annotations,
-    extract multiscale features from multiple layers of a model,
-    add gradient and rotation features,
-    select only pixels in annotations if not full_annotation otherwise balance background and foreground,
-    return features, labels, and feature info dictionary.
-
-    Parameters
-    ----------
-    model : Hookmodel
-        Model to extract features from
-
-    images : np.ndarray
-        2D or 3D Image to extract features from
-    annotations : np.ndarray
-        2D, 3D Annotations (1,2) to extract features from
-    scalings : list of ints
-        Downsampling factors
-    full_annotation : bool
-        if True, use all pixels in annotations, otherwise balance background and foreground
-        if True - assumes annotations are 0,1,..., where 0 is bg. otherwise assumes 0 is not annotated,
-         and 0 is background, 1 is first class, etc. Default True
-        add_grad : bool
-            if True, add gradient features: gradient in x, gradient in y. Triples feature number. Default False.
-        add_rot : bool
-            if True, add rotor features: convolve grad features with corresponding "edge detector" and sum.
-            Default False.
-        add_neg : bool
-            if True, add all features also for `-image`
-            Default True.
-    order : int, optional
-        Interpolation order for low scale resizing, by default 0
-    use_min_features : bool, optional
-        Use minimal number of features, by default True
-
-    Returns
-    -------
-    features : list of pandas DataFrame
-        Extracted features (rows are pixel, columns are features), per sample
-    targets : list of pandas Series
-        Target values, per sample
-    feature_info : dict
-        feature_info[idx] = [idx, name=f'{layer_name}_{scale}_{idx:04d}', scale, layer_name, ch_idx,
-         type='gradx'|'grady'|'rot'|'orig', useful:bool]
-
-    """
-
-    # get indices of first dimension of non-empty annotation. Gives t/z indices
-    if annotations.ndim == 2:
-        assert images.ndim == 2, 'images must be 2D (HW) in case of 2D annotations'
-        annotations = np.expand_dims(annotations, axis=0)
-        images = np.expand_dims(images, axis=0)
-
-    if annotations.ndim == 3:
-        max_annot_idx = np.max(annotations, axis=(1, 2))
-        non_empty = np.argwhere(max_annot_idx > 0)[:, 0]
-        if len(non_empty) == 0:
-            warnings.warn('No annotations found')
-            return None, None, None
-    else:
-        raise Exception('Annotations must be 2D or 3D')
-
-    features_all_samples = []
-    targets_all_samples = []
-
-    feature_info = {}
-    for t in non_empty:
-        current_image = images[t]
-        current_annot = annotations[t]
-
-        features, targets, feature_info = get_features_single_img_rich(model, current_image, current_annot,
-                                                                       scalings=scalings,
-                                                                       full_annotation=full_annotation,
-                                                                       add_grad=add_grad,
-                                                                       add_rot=add_rot,
-                                                                       add_neg=add_neg,
-                                                                       order=order
-                                                                       )
-        features_all_samples.append(features)
-        targets_all_samples.append(targets)
-
-    fill_useless(features_all_samples, feature_info)
-
-    return features_all_samples, targets_all_samples, feature_info
-
-
-def train_classifier(features, targets):
-    """Train a random forest classifier given a set of features and targets."""
-
-    # train a random forest classififer
-    random_forest = RandomForestClassifier(n_estimators=100, n_jobs=-1)
-    random_forest.fit(features, targets)
-    
-    #random_forest = xgb.XGBClassifier(tree_method="hist", n_estimators=100, n_jobs=8)
-    #random_forest.fit(features, targets-1)
-
-    return random_forest

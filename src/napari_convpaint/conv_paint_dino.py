@@ -26,6 +26,19 @@ class DinoFeatures(FeatureExtractor):
             self.device = 'cpu'
         self.model.eval()
 
+    def get_default_param(self):
+        param = super().get_default_param()
+        param.fe_name = self.model_name
+        param.fe_scalings = [1]
+        param.fe_order = 0
+        param.fe_use_cuda = self.use_cuda
+        param.fe_padding = self.padding
+        # param.image_downsample = 1
+        param.tile_image = False
+        param.tile_annotations = False
+        # param.normalize = 1
+        return param
+
     def _preprocess_image(self, image):
         '''Normalizes input image to image net stats, return to 1x3xHxW tensor.
         Expects image to be 3xHxW'''
@@ -43,7 +56,10 @@ class DinoFeatures(FeatureExtractor):
         # else just min max normalize to 0-1.
         else:
             image = image.astype(np.float32)
-            image = (image - np.min(image)) / (np.max(image) - np.min(image))
+            divisor = np.max(image) - np.min(image)
+            if divisor == 0:
+                divisor = 1e-6
+            image = (image - np.min(image)) / divisor
 
         # normalize to imagenet stats
         mean = np.array([0.485, 0.456, 0.406])
@@ -101,10 +117,8 @@ class DinoFeatures(FeatureExtractor):
             features = np.concatenate(features, axis=-1)
         return features
 
-    def get_padding(self):
-        return self.padding
     
-    def get_features_scaled(self, image, order=0, image_downsample=1, return_patches = False, **kwargs):
+    def get_features_scaled(self, image, param, return_patches = False, **kwargs):
         """
         Overwrite the get_features_scaled function, as we don't want to extract features at different scales for DINO.
 
@@ -127,10 +141,10 @@ class DinoFeatures(FeatureExtractor):
         if image.ndim == 2:
             image = np.expand_dims(image, axis=0)
 
-        if image_downsample > 1:
-            image = image[:, ::image_downsample, ::image_downsample]
+        if param.image_downsample > 1:
+            image = image[:, ::param.image_downsample, ::param.image_downsample]
         
-        features = self.get_features(image, order=order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
+        features = self.get_features(image, order=param.fe_order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
         nb_features = features.shape[0]
 
         if not return_patches:
@@ -138,36 +152,9 @@ class DinoFeatures(FeatureExtractor):
                                 image=features,
                                 output_shape=(nb_features, image.shape[-2], image.shape[-1]),
                                 preserve_range=True,
-                                order=order)            
+                                order=param.fe_order)            
         return features
     
-    def predict_image(self, image, classifier, scalings = [1], order=0, image_downsample=1, **kwargs):
-        features = self.get_features_scaled(image=image,
-                                            scalings=scalings,
-                                            order=order,
-                                            image_downsample=image_downsample,
-                                            return_patches=True)
-        nb_features = features.shape[0] #[nb_features, width, height]
-
-        #move features to last dimension
-        features = np.moveaxis(features, 0, -1)
-        features = np.reshape(features, (-1, nb_features))
-
-        rows = np.ceil(image.shape[-2] / image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / image_downsample).astype(int)
-
-        all_pixels = pd.DataFrame(features)
-        predictions = classifier.predict(all_pixels)
-
-        predicted_image = np.reshape(predictions, [rows, cols])
-        if image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=order).astype(np.uint8)
-        predicted_image = predicted_image +1#for XGBoost
-        return predicted_image
-
     def get_features(self, image, return_patches=False, **kwargs):
         '''Given an CxWxH image, extract features.
         Returns features with dimensions nb_features x H x W'''
@@ -209,21 +196,21 @@ class DinoFeatures(FeatureExtractor):
             return features
 
 
-    def predict_image(self, image, classifier, image_downsample=1, order=0, **kwargs):
+    def predict_image(self, image, classifier, param, **kwargs):
         '''Special predict function for feature extraction models that output patchwise features.
         1. Extract patch wise features
         2. Predict each patch with classifier
         3. Scale up the predictions'''
 
         #add padding
-        padding = self.get_padding()
+        padding = param.fe_padding
         if image.ndim == 2:
             image = np.expand_dims(image, axis=0)
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
-        features = self.get_features_scaled(image, return_patches=True, **kwargs)
-        w_patch = np.ceil(features.shape[-2] / image_downsample).astype(int)
-        h_path = np.ceil(features.shape[-1] / image_downsample).astype(int)
+        features = self.get_features_scaled(image, param, return_patches=True, **kwargs)
+        w_patch = np.ceil(features.shape[-2] / param.image_downsample).astype(int)
+        h_path = np.ceil(features.shape[-1] / param.image_downsample).astype(int)
 
         nb_features = features.shape[0] #[nb_features, width, height]
 
@@ -239,9 +226,9 @@ class DinoFeatures(FeatureExtractor):
         predicted_image = skimage.transform.resize(
             image=predicted_image,
             output_shape=(image.shape[-2], image.shape[-1]),
-            preserve_range=True, order=order).astype(np.uint8)
+            preserve_range=True, order=param.fe_order).astype(np.uint8)
         
-        #remove padding
-        predicted_image = predicted_image[padding:-padding, padding:-padding]
+        if padding > 0:
+            predicted_image = predicted_image[padding:-padding, padding:-padding]
         
         return predicted_image

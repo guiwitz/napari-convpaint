@@ -4,14 +4,14 @@ from joblib import dump, load
 import zarr
 import numpy as np
 
-from .conv_parameters import Param
+from .conv_paint_param import Param
 from .conv_paint_nnlayers import Hookmodel
 from .conv_paint_utils import compute_image_stats, normalize_image
 
 
 def load_trained_classifier(model_path):
     model_path = Path(model_path)
-    random_forest = load(model_path)
+    classifier = load(model_path)
 
     param = Param()
     with open(model_path.parent.joinpath('convpaint_params.yml')) as file:
@@ -19,7 +19,7 @@ def load_trained_classifier(model_path):
     for k in documents.keys():
         setattr(param, k, documents[k])
 
-    return random_forest, param
+    return classifier, param
 
 
 class Classifier():
@@ -36,20 +36,20 @@ class Classifier():
     
     Attributes
     ----------
-    random_forest : sklearn RF classifier
+    classifier : CatBoost classifier
         Classifier to predict the class of each pixel
     param : Param
         Parameters for model
-    model : Hookmodel
+    fe_model : Hookmodel
         Model to extract features from the image
 
     """
 
     def __init__(self, model_path=None):
 
-        self.random_forest = None
+        self.classifier = None
         self.param = None
-        self.model = None
+        self.fe_model = None
 
         if model_path is not None:
             self.load_model(model_path)
@@ -61,23 +61,16 @@ class Classifier():
         """Load a pretrained model by loading the joblib model
         and recreating the NN from the param file."""
         
-        self.random_forest, self.param = load_trained_classifier(model_path)
+        self.classifier, self.param = load_trained_classifier(model_path)
         
-        self.model = Hookmodel(param=self.param)
+        self.fe_model = Hookmodel(param=self.param)
 
     def default_model(self):
         """Set default model to single_layer_vgg16."""
             
-        self.model = Hookmodel(model_name='single_layer_vgg16')
-        self.random_forest = None
-        self.param = Param(
-            model_name='single_layer_vgg16',
-            model_layers=list(self.model.module_dict.keys()),
-            scalings=[1,2],
-            order=1,
-            use_min_features=False,
-            normalize=True,
-        )
+        self.fe_model = Hookmodel(model_name='single_layer_vgg16')
+        self.classifier = None
+        self.param = self.fe_model.get_default_param()
 
     def save_classifier(self, save_path):
         """Save the classifier to a joblib file and the parameters to a yaml file.
@@ -88,8 +81,8 @@ class Classifier():
             Path to save files to
         """
 
-        dump(self.random_forest, save_path)
-        self.param.random_forest = save_path
+        dump(self.classifier, save_path)
+        self.param.classifier = save_path
         self.param.save_parameters(Path(save_path).parent.joinpath('convpaint_params.yml'))
 
 
@@ -130,13 +123,10 @@ class Classifier():
             image = normalize_image(image, image_mean, image_std)
 
         for i in range(image.shape[0]):
-            im_out[i] = self.model.predict_image(
+            im_out[i] = self.fe_model.predict_image(
                 image=image[i],
-                classifier=self.random_forest,
-                scalings=self.param.scalings,
-                order=self.param.order,
-                use_min_features=self.param.use_min_features,
-                image_downsample=self.param.image_downsample)
+                classifier=self.classifier,
+                param=self.param)
 
         if save_path is None:
             if single_image:

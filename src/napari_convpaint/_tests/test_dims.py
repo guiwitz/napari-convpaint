@@ -1,4 +1,4 @@
-from napari_convpaint.conv_paint import ConvPaintWidget
+from napari_convpaint.conv_paint_widget import ConvPaintWidget
 from napari_convpaint.utils import generate_synthetic_square, generate_synthetic_circle_annotation
 import numpy as np
 import os
@@ -11,18 +11,19 @@ def test_3d_single_channel(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_3d)
 
-    my_widget.add_annotation_layer()
+    my_widget._on_add_annot_seg_layers()
 
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
 
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget.radio_normalize_over_stack.setChecked(True)
+    my_widget._get_image_stats()
 
     # check that mean is single number ~127
     assert my_widget.image_mean.shape == ()
     assert 250 < my_widget.image_mean < 260
 
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
 
     # check that normalized image has correct dims
     assert normalized.shape == (3,100,100)
@@ -35,10 +36,10 @@ def test_3d_single_channel(make_napari_viewer, capsys):
     # switch to by channel normalization
     my_widget.radio_normalize_by_image.setChecked(True)
     assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
     assert my_widget.image_mean.shape == (3,1,1)
 
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
 
@@ -51,15 +52,15 @@ def test_3d_multi_channel(make_napari_viewer, capsys):
     viewer.add_image(multid_3d)
 
     my_widget.radio_multi_channel.setChecked(True)
-    my_widget.add_annotation_layer()
+    my_widget._on_add_annot_seg_layers()
 
     # check that stack normalization is off
-    assert my_widget.radio_normalized_over_stack.isEnabled() == False
+    assert my_widget.radio_normalize_over_stack.isEnabled() == False
 
     assert viewer.layers['annotations'].data.ndim == 2, "Annotation layer should be 2D"
 
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     # check that mean is single number ~127
     assert my_widget.image_mean.shape == (3,1,1)
@@ -69,7 +70,7 @@ def test_3d_multi_channel(make_napari_viewer, capsys):
     assert 3*127-10 < my_widget.image_mean.flatten()[2] < 3*127+10
 
     # check that normalization per channel gives 0
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
 
@@ -81,15 +82,15 @@ def test_RGB(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_rgb)
 
-    my_widget.add_annotation_layer()
+    my_widget._on_add_annot_seg_layers()
 
     # check that stack normalization is off
-    assert my_widget.radio_normalized_over_stack.isEnabled() == False
+    assert my_widget.radio_normalize_over_stack.isEnabled() == False
 
     assert viewer.layers['annotations'].data.ndim == 2, "Annotation layer should be 2D"
 
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     # check that mean is single number ~127
     assert my_widget.image_mean.shape == (3,1,1)
@@ -99,7 +100,7 @@ def test_RGB(make_napari_viewer, capsys):
     assert 3*127-10 < my_widget.image_mean.flatten()[2] < 3*127+10
 
     # check that normalization per channel gives 0
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
 
@@ -112,12 +113,13 @@ def test_4d_image(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_c_t)
-    my_widget.add_annotation_layer()
+    my_widget._on_add_annot_seg_layers()
 
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
     
     # get stats and check dimensions and values
-    my_widget.get_image_stats()
+    my_widget.radio_normalize_over_stack.setChecked(True)
+    my_widget._get_image_stats()
     assert my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
 
@@ -129,8 +131,8 @@ def test_4d_image(make_napari_viewer, capsys):
     for i in range(10):
         viewer.layers['multid_c_t'].data[:,i] = multid_c_t[:,i] *np.exp(-i)
     # update stats and normalize
-    my_widget.get_image_stats()
-    normalized = my_widget.get_selectedlayer_data()
+    my_widget._get_image_stats()
+    normalized = my_widget._get_data_channel_first_norm()
 
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
@@ -144,11 +146,11 @@ def test_4d_image(make_napari_viewer, capsys):
     # check that dims are correct
     my_widget.radio_normalize_by_image.setChecked(True)
     assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
     assert my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,10,1,1), f"Wrong number of values, expected (3,10,1,1) got {my_widget.image_mean.shape}"
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
 
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
@@ -166,18 +168,20 @@ def test_RGBT_image(make_napari_viewer):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_rgb_t)
-    my_widget.add_annotation_layer()
+    my_widget._on_add_annot_seg_layers()
 
     # check that for a time lapse RGB, annotations are 3D
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
 
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
-    # check that default stack normalization generates one mean per RGB channel
+    # check that stack normalization generates one mean per RGB channel
+    my_widget.radio_normalize_over_stack.setChecked(True)
+    my_widget._get_image_stats()
     my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
 
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
 
     # check that mean of per channel normalized stacks is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
@@ -189,9 +193,9 @@ def test_RGBT_image(make_napari_viewer):
     # switch to by image normalization
     my_widget.radio_normalize_by_image.setChecked(True)
     assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget.get_image_stats()
+    my_widget._get_image_stats()
 
-    normalized = my_widget.get_selectedlayer_data()
+    normalized = my_widget._get_data_channel_first_norm()
 
     # check that mean over each full channel is 0
     np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
