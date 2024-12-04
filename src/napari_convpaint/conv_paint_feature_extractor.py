@@ -34,6 +34,7 @@ class FeatureExtractor:
         param.fe_padding : int = 0
         # General settings (NOTE: only set if shall be enforced by FE !)
         param.multi_channel_img: bool = None # use multichannel if image dimensions allow
+        param.rgb_img: bool = None # use RGB image (note: should not be set, as the input defines this mode)
         param.normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
         param.image_downsample: int = None
         param.tile_annotations: bool = None
