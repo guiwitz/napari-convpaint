@@ -51,6 +51,7 @@ class Param:
     classifier: str = None
     # Image processing parameters
     multi_channel_img: bool = None
+    rgb_img: bool = None
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
     # Acceleration parameters
     image_downsample: int = None

@@ -18,15 +18,11 @@ class ConvpaintModel:
 
     def __init__(self, model_path=None):
         self.init_models_dict()
-        self.classifier = None
-        self.param = None
-        self.fe_model = None
-        self.fe_model_state = None
-        # self.total_pad = None # Parameter to keep track of the overall padding needed (considering all scalings and padding)
         if model_path is not None:
-            self.load_model(model_path)
+            self.load(model_path)
         else:
-            self.set_default_model()
+            self.param = self.get_default_param()
+            self.set()
 
     def init_models_dict(self):
         # Initialize the MODELS TO TYPES dictionary with the models that are always available
@@ -45,26 +41,16 @@ class ConvpaintModel:
             print("Info: Cellpose is not installed and is not available as feature extractor.\n"
                 "Run 'pip install napari-convpaint[cellpose]' to install it.")
             
-    def set_default_model(self):
-        self.param = Param()
-        self.param.fe_name = 'vgg16'
-
-        # ToDo: DEFINE DEFAULT CONVPAINT MODEL HERE
-
-        self.set_fe_model()
-
-    def load_model(self, model_path):
+    def load(self, model_path):
         with open(model_path, 'rb') as f:
             data = pickle.load(f)
         self.param = data['param']
-        self.set_fe_model(self.param) # Resets classifier and model_state
+        self.set() # Resets classifier and model_state
         self.classifier = data['classifier']
         if 'model_state' in data:
             self.fe_model_state = data['model_state']
-        # else:
-        #     self.fe_model_state = None
 
-    def save_model(self, model_path):
+    def save(self, model_path):
         with open(model_path, 'wb') as f:
             data = {
                 'classifier': self.classifier,
@@ -73,31 +59,9 @@ class ConvpaintModel:
             }
             pickle.dump(data, f)
 
-    def set_fe_model(self):
+    def set(self, **kwargs):
         """Set the model based on the given parameters."""
-
-        # USE THESE AS ARGUMENTS:
-        # # Image processing parameters
-        # multi_channel_img: bool = None
-        # normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
-        # # Acceleration parameters
-        # image_downsample: int = None
-        # tile_annotations: bool = False
-        # tile_image: bool = False
-        # # Model parameters
-        # fe_name: str = None
-        # fe_layers: list[str] = None
-        # fe_padding : int = 0
-        # fe_scalings: list[int] = None
-        # fe_order: int = None
-        # fe_use_min_features: bool = None
-        # fe_use_cuda: bool = None
-        # # Classifier parameters
-        # clf_iterations: int = None
-        # clf_learning_rate: float = None
-        # clf_depth: int = None
-
-
+        self.set_param(**kwargs)
         # Reset the model and classifier; create a new FE model
         self.fe_model_state = None
         self.classifier = None
@@ -112,6 +76,79 @@ class ConvpaintModel:
                 self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
             elif len(self.fe_model.named_modules) == 1:
                 self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
+
+    def set_param(self,
+                  multi_channel_img: bool = None,
+                  normalize: int = None, # 1: no normalization, 2: normalize stack, 3: normalize each image
+                  image_downsample: int = None,
+                  tile_annotations: bool = False,
+                  tile_image: bool = False,
+                  fe_name: str = None,
+                  fe_layers: list[str] = None,
+                  fe_padding : int = 0,
+                  fe_scalings: list[int] = None,
+                  fe_order: int = None,
+                  fe_use_min_features: bool = None,
+                  fe_use_cuda: bool = None,
+                  clf_iterations: int = None,
+                  clf_learning_rate: float = None,
+                  clf_depth: int = None):
+        """Set the values of the param objects in the model."""
+        for attr, val in {
+            'multi_channel_img': multi_channel_img,
+            'normalize': normalize,
+            'image_downsample': image_downsample,
+            'tile_annotations': tile_annotations,
+            'tile_image': tile_image,
+            'fe_name': fe_name,
+            'fe_layers': fe_layers,
+            'fe_padding': fe_padding,
+            'fe_scalings': fe_scalings,
+            'fe_order': fe_order,
+            'fe_use_min_features': fe_use_min_features,
+            'fe_use_cuda': fe_use_cuda,
+            'clf_iterations': clf_iterations,
+            'clf_learning_rate': clf_learning_rate,
+            'clf_depth': clf_depth
+        }.items():
+            if val is not None:
+                setattr(self.param, attr, val)
+
+    def load_param(self, param: Param):
+        """Load the given param object into the model and reset the model."""
+        self.param = param
+        self.set()
+
+    def get_default_param(self):
+        """Return a default param object, which defines the default model."""
+
+        def_param = Param()
+
+        # Image processing parameters
+        def_param.multi_channel_img = False
+        def_param.rgb_img = False
+        def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
+
+        # Acceleration parameters
+        def_param.image_downsample = 1
+        def_param.tile_annotations = True
+        def_param.tile_image = False
+
+        # Model parameters
+        def_param.fe_name = "vgg16"
+        def_param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
+        def_param.fe_padding = 0
+        def_param.fe_scalings = [1, 2, 4]
+        def_param.fe_order = 0
+        def_param.fe_use_min_features = False
+        def_param.fe_use_cuda = False
+
+        # Classifier parameters
+        def_param.clf_iterations = 50
+        def_param.clf_learning_rate = 0.1
+        def_param.clf_depth = 5
+
+        return def_param
 
     def run_model_checks(self):
         """Run checks on the model to ensure that it is ready to be used."""
