@@ -26,8 +26,8 @@ class DinoFeatures(FeatureExtractor):
             self.device = 'cpu'
         self.model.eval()
 
-    def get_default_param(self):
-        param = super().get_default_param()
+    def get_default_param(self, param=None):
+        param = super().get_default_param(param=param)
         param.fe_name = self.model_name
         param.fe_scalings = [1]
         param.fe_order = 0
@@ -152,7 +152,7 @@ class DinoFeatures(FeatureExtractor):
                                 image=features,
                                 output_shape=(nb_features, image.shape[-2], image.shape[-1]),
                                 preserve_range=True,
-                                order=param.fe_order)            
+                                order=param.fe_order)
         return features
     
     def get_features(self, image, return_patches=False, **kwargs):
