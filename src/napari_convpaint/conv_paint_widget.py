@@ -488,7 +488,7 @@ class ConvPaintWidget(QWidget):
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
         if self.image_layer_selection_widget.value is not None:
-            if self._check_annotation_layer_shape() is False:
+            if not self._approve_annotation_layer_shape():
                 warnings.warn('Annotation layer has wrong shape for the selected data')
 
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
@@ -506,7 +506,7 @@ class ConvPaintWidget(QWidget):
         if len(unique_labels) < 2:
             raise Exception('You need annotations for at least foreground and background')
         # Check if annotations layer has correct shape for the chosen data type
-        if self._check_annotation_layer_shape() is False:
+        if not self._approve_annotation_layer_shape():
             raise Exception('Annotation layer has wrong shape for the chosen data')
         # Check if model is loaded
         if self.fe_model is None:
@@ -1382,12 +1382,12 @@ class ConvPaintWidget(QWidget):
         if num_dims == 4:
             return '4D'
         
-    def _check_annotation_layer_shape(self):
+    def _approve_annotation_layer_shape(self):
         """Check if the annotation layer has the same shape as the image layer."""
-        if self.annotation_layer_selection_widget.value is None:
+        if ((self.annotation_layer_selection_widget.value is None) or
+            (self.image_layer_selection_widget.value is None) or
+            (self.annotation_layer_selection_widget.value.data.shape != self._get_annot_shape())
+            ):
             return False
-        if self.image_layer_selection_widget.value is None:
-            return False
-        if self.annotation_layer_selection_widget.value.data.shape != self._get_annot_shape():
-            return False
+        
         return True
