@@ -57,7 +57,7 @@ class Param:
     image_downsample: int = None
     tile_annotations: bool = False
     tile_image: bool = False
-    # Model parameters
+    # Feature Extractor parameters
     fe_name: str = None
     fe_layers: list[str] = None
     fe_padding : int = 0
