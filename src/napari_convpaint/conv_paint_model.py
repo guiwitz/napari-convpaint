@@ -4,6 +4,8 @@ from catboost import CatBoostClassifier
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 import warnings
+import pandas as pd
+import skimage
 
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
@@ -17,14 +19,14 @@ from . import conv_paint_utils
 class ConvpaintModel:
 
     def __init__(self, model_path=None):
-        self.init_models_dict()
+        self._init_models_dict()
         if model_path is not None:
             self.load(model_path)
         else:
             self.param = self.get_default_param()
             self.set()
 
-    def init_models_dict(self):
+    def _init_models_dict(self):
         # Initialize the MODELS TO TYPES dictionary with the models that are always available
         self.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
         self.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
@@ -76,6 +78,9 @@ class ConvpaintModel:
                 self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
             elif len(self.fe_model.named_modules) == 1:
                 self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
+        
+        # SET ENFORCED/DEFAULT PARAMS ???
+
 
     def set_param(self,
                   multi_channel_img: bool = None,
@@ -115,40 +120,192 @@ class ConvpaintModel:
                 setattr(self.param, attr, val)
 
     def load_param(self, param: Param):
-        """Load the given param object into the model and reset the model."""
+        """Load the given param object into the model and set the model accordingly."""
         self.param = param
         self.set()
 
-    def get_default_param(self):
+    def get_default_param(self, param=None):
         """Return a default param object, which defines the default model."""
 
-        def_param = Param()
+        if param is None:
+            param = Param()
 
         # Image processing parameters
-        def_param.multi_channel_img = False
-        def_param.rgb_img = False
-        def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
+        param.multi_channel_img = False
+        param.rgb_img = False
+        param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Acceleration parameters
-        def_param.image_downsample = 1
-        def_param.tile_annotations = True
-        def_param.tile_image = False
+        param.image_downsample = 1
+        param.tile_annotations = True
+        param.tile_image = False
 
         # Model parameters
-        def_param.fe_name = "vgg16"
-        def_param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
-        def_param.fe_padding = 0
-        def_param.fe_scalings = [1, 2, 4]
-        def_param.fe_order = 0
-        def_param.fe_use_min_features = False
-        def_param.fe_use_cuda = False
+        param.fe_name = "vgg16"
+        param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
+        param.fe_padding = 0
+        param.fe_scalings = [1, 2, 4]
+        param.fe_order = 0
+        param.fe_use_min_features = False
+        param.fe_use_cuda = False
 
         # Classifier parameters
-        def_param.clf_iterations = 50
-        def_param.clf_learning_rate = 0.1
-        def_param.clf_depth = 5
+        param.clf_iterations = 50
+        param.clf_learning_rate = 0.1
+        param.clf_depth = 5
 
-        return def_param
+        return param
+    
+    ### OLD FE and Classifier methods
+
+    def predict_image(self, image):                    # FROM FEATURE EXTRACTOR CLASS
+        features = self.fe_model.get_features_scaled(image=image,param=self.param)
+        nb_features = features.shape[0] #[nb_features, width, height]
+
+        # Move features to last dimension
+        features = np.moveaxis(features, 0, -1)
+        features = np.reshape(features, (-1, nb_features))
+
+        rows = np.ceil(image.shape[-2] / self.param.image_downsample).astype(int)
+        cols = np.ceil(image.shape[-1] / self.param.image_downsample).astype(int)
+
+        all_pixels = pd.DataFrame(features)
+        predictions = self.classifier.predict(all_pixels)
+
+        predicted_image = np.reshape(predictions, [rows, cols])
+        if self.param.image_downsample > 1:
+            predicted_image = skimage.transform.resize(
+                image=predicted_image,
+                output_shape=(image.shape[-2], image.shape[-1]),
+                preserve_range=True, order=self.param.fe_order).astype(np.uint8)
+        return predicted_image
+
+    def get_features_current_layers(self, image, annotations):        # FROM CONV_PAINT SCRIPT
+        """Given a potentially multidimensional image and a set of annotations,
+        extract multiscale features from multiple layers of a model.
+        Parameters
+        ----------
+        image : np.ndarray
+            2D or 3D Image to extract features from. If 3D but annotations are 2D,
+            image is treated as multichannel and not image series
+        annotations : np.ndarray
+            2D, 3D Annotations (1,2) to extract features from
+
+        Given inside the ConvPaint class:    
+            self.fe_model : feature extraction model
+                Model to extract features from the image
+            self.param.scalings : list of ints
+                Downsampling factors
+            self.param.order : int, optional
+                Interpolation order for low scale resizing, by default 0
+            self.param.use_min_features : bool, optional
+                Use minimal number of features, by default True
+            self.param.image_downsample : int, optional
+                Downsample image by this factor before extracting features, by default 1
+        Returns
+        -------
+        features : pandas DataFrame
+            Extracted features (rows are pixel, columns are features)
+        targets : pandas Series
+            Target values
+        """
+
+        if self.fe_model is None:
+            raise ValueError('Model must be provided')
+
+        # get indices of first dimension of non-empty annotations. Gives t/z indices
+        if annotations.ndim == 3:
+            non_empty = np.unique(np.where(annotations > 0)[0])
+            if len(non_empty) == 0:
+                warnings.warn('No annotations found')
+                return None, None
+        elif annotations.ndim == 2:
+            non_empty = [0]
+        else:
+            raise Exception('Annotations must be 2D or 3D')
+
+        all_values = []
+        all_targets = []
+
+        # find maximal padding necessary
+        padding = self.param.fe_padding * np.max(self.param.fe_scalings)
+
+        # iterating over non_empty iteraties of t/z for 3D data
+        for ind, t in enumerate(non_empty):
+
+            # PADDING
+            if annotations.ndim == 2:
+                if image.ndim == 3:
+                    current_image = np.pad(image, ((0,0), (padding,padding), (padding,padding)), mode='reflect')
+                else:
+                    current_image = np.pad(image, padding, mode='reflect')
+                current_annot = np.pad(annotations, padding, mode='constant')
+            else:
+                if image.ndim == 3:
+                    current_image = np.pad(image[t], padding, mode='reflect')
+                    current_annot = np.pad(annotations[t], padding, mode='constant')
+                elif image.ndim == 4:
+                    current_image = np.pad(image[:, t], ((0,0),(padding, padding),(padding, padding)), mode='reflect')
+                    current_annot = np.pad(annotations[t], padding, mode='constant')
+
+            annot_regions = skimage.morphology.label(current_annot > 0)
+
+            # TILE ANNOTATIONS (applying the padding to each annotations part)
+            if self.param.tile_annotations:
+                boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+            else:
+                boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
+            for i in range(len(boxes['label'])):
+                # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
+                pad_size = self.param.fe_padding # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
+                x_min = boxes['bbox-0'][i]-pad_size
+                x_max = boxes['bbox-2'][i]+pad_size
+                y_min = boxes['bbox-1'][i]-pad_size
+                y_max = boxes['bbox-3'][i]+pad_size
+
+                # temporary check that bounds are not out of image
+                x_min = max(0, x_min)
+                x_max = min(current_image.shape[-2], x_max)
+                y_min = max(0, y_min)
+                y_max = min(current_image.shape[-1], y_max)
+
+                im_crop = current_image[...,
+                    x_min:x_max,
+                    y_min:y_max
+                ]
+                annot_crop = current_annot[
+                    x_min:x_max,
+                    y_min:y_max
+                ]
+                extracted_features = self.fe_model.get_features_scaled(image=im_crop,param=self.param)
+
+                if self.param.image_downsample > 1:
+                    annot_crop = annot_crop[::self.param.image_downsample, :: self.param.image_downsample]
+
+                # EXTRACT TARGETED FEATURES
+                #from the [features, w, h] make a list of [features] with len nb_annotations
+                mask = annot_crop > 0
+                nb_features = extracted_features.shape[0]
+
+                extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
+
+                extracted_features = extracted_features[mask]
+                all_values.append(extracted_features)
+
+                targets = annot_crop[annot_crop > 0]
+                targets = targets.flatten()
+                all_targets.append(targets)
+
+        # CONCATENATE FROM DIFFERENT TILES
+        all_values = np.concatenate(all_values, axis=0)
+        features = pd.DataFrame(all_values) # [pixels, features]
+
+        all_targets = np.concatenate(all_targets, axis=0)
+        targets = pd.Series(all_targets)
+
+        return features, targets
+    
+    ### NEW Feature extraction methods
 
     def run_model_checks(self):
         """Run checks on the model to ensure that it is ready to be used."""
@@ -189,6 +346,8 @@ class ConvpaintModel:
         # Return processed stacks
         return processed_data_stack
 
+    # Specific for training
+
     def get_annot_img_list(self, img_stack, annot_stack):
         effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
         effective_patch_size = self.fe_model.get_effective_patch_size()
@@ -219,30 +378,16 @@ class ConvpaintModel:
                                                                 effective_patch_size)
         return annot_img_list
 
-    def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
-        """Train a classifier given a set of features and targets."""
-        if not use_rf:
-            self.classifier = CatBoostClassifier(iterations=iterations, learning_rate=learning_rate,depth=depth)
-            self.classifier.fit(features, targets)
-        else:
-                # train a random forest classififer
-                classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
-                classifier.fit(features, targets)
-
-
-
-
-
     def get_features_targets_img_stack(self, img_stack, annots_stack):
         # Extract stacks with annotations
-        annot_stacks = np.unique(np.where(annots_stack > 0)[0])
-        if len(annot_stacks) == 0:
+        annotated_layers = np.unique(np.where(annots_stack > 0)[0])
+        if len(annotated_layers) == 0:
             warnings.warn('No annotations found')
             return None, None
         np.moveaxis(img_stack, -3, 0)
-        img_stack = img_stack[annot_stacks]
+        img_stack = img_stack[annotated_layers]
         np.moveaxis(img_stack, 0, -3)
-        annots_stack = annots_stack[annot_stacks]
+        annots_stack = annots_stack[annotated_layers]
         # Preprocess 
         output_img_stack, output_annots_stack = [], []
         for img, annots in zip(img_stack, annots_stack):
@@ -255,8 +400,21 @@ class ConvpaintModel:
         output_annots_stack = np.stack(output_annots_stack, axis=1)
         return output_img_stack, output_annots_stack
 
-
     def get_features_targets_multi_image(self, image_list, annots_list):
         all_features, all_targets = [], []
         for img, annots in zip(image_list, annots_list):
             features, targets = self.get_features_targets_img_stack(img, annots)
+
+    ### Classifier methods
+
+    def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
+        """Train a classifier given a set of features and targets."""
+        if not use_rf:
+            self.classifier = CatBoostClassifier(iterations=iterations, learning_rate=learning_rate,depth=depth)
+            self.classifier.fit(features, targets)
+        else:
+                # train a random forest classififer
+                self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+                self.classifier.fit(features, targets)
+
+
