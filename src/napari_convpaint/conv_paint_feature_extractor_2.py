@@ -51,11 +51,13 @@ class FeatureExtractor(ABC):
         # Otherwise, extract features for each channel and concatenate them
         return self.extract_features_from_channels(image, self.param, **kwargs)
 
-    def get_default_param(self):
+    def get_default_param(self, param=None):
         """
         Get the defaul parameters that the FE shall set/enforce when the FE model is set.
         """
-        param = Param()
+        if param is None:
+            param = Param()
+
         # FE params (encouraged to set)
         param.fe_name: str = self.model_name
         param.fe_layers: list[str] = None
@@ -63,6 +65,7 @@ class FeatureExtractor(ABC):
         param.fe_order: int = 0
         param.fe_use_min_features: bool = False
         param.fe_use_cuda: bool = False
+
         # General settings (NOTE: only set if shall be enforced by FE !)
         param.multi_channel_img: bool = None # use multichannel if image dimensions allow
         param.rgb_img: bool = None # use RGB image (note: should not be set, as the input defines this mode)
@@ -79,10 +82,12 @@ class FeatureExtractor(ABC):
 
         return param
     
-    def get_enforced_param(self, param):
+    def get_enforced_param(self, param=None):
         """
         Define which parameters need to be absolutley enforced for this feature extractor.
         """
+        if param is None:
+            param = Param()
         return param
 
     def get_effective_kernel_padding(self):

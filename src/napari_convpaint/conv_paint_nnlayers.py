@@ -90,9 +90,9 @@ class Hookmodel(FeatureExtractor):
         self.outputs.append(output)
         assert False
 
-    def get_default_param(self):
-        param = super().get_default_param()
-        # param.fe_name = "vgg16"
+    def get_default_param(self, param=None):
+        param = super().get_default_param(param=param)
+        # param.fe_name = "vgg16" # NOTE: This need overthinking !
         param.fe_layers = self.selectable_layer_keys[0] # default is the first layer
         param.fe_scalings = [1,2,4]
         param.fe_padding = self.get_max_kernel_size() // 2
