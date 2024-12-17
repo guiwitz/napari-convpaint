@@ -12,7 +12,7 @@ from .conv_paint_feature_extractor import FeatureExtractor
 from .conv_paint_param import Param
 
 
-AVAILABLE_MODELS = ['vgg16', 'efficient_netb0', 'single_layer_vgg16']
+AVAILABLE_MODELS = ['vgg16', 'efficient_netb0']
 
 class Hookmodel(FeatureExtractor):
     """Class to extract features from a pytorch model using hooks on chosen layers.
@@ -20,14 +20,13 @@ class Hookmodel(FeatureExtractor):
     Parameters
     ----------
     model_name : str
-        Name of model to use. Currently only 'vgg16' and 'single_layer_vgg16',
-         'single_layer_vgg16_rgb' are supported.
+        Name of model to use. Currently only 'vgg16' and 'efficient_netb0' are supported.
     model : torch model, optional
         Model to extract features from, by default None
     use_cuda : bool, optional
         Use cuda, by default False
-    param : Param, optional
-        Parameters for model, by default None
+    layers : list of str, optional
+        List of layers to extract features from, by default None
         
     Attributes
     ----------
@@ -41,7 +40,7 @@ class Hookmodel(FeatureExtractor):
         List of hooked layers, their names, and their indices in the model (if applicable)
     """
 
-    def __init__(self, model_name='vgg16', model=None, use_cuda=None, param=None):
+    def __init__(self, model_name='vgg16', model=None, use_cuda=None, layers=None):
 
         if model is not None:
             assert model_name is None, 'model_name must be None if model is not None'
@@ -52,32 +51,81 @@ class Hookmodel(FeatureExtractor):
                 # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
             elif model_name == 'efficient_netb0':
                 self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
-            elif model_name == 'single_layer_vgg16':
-                self.model = self.load_single_layer_vgg16(keep_rgb=False)
-            elif model_name == 'single_layer_vgg16_rgb':
-                self.model = self.load_single_layer_vgg16(keep_rgb=True)
-            elif model_name == 'dino_vits16':
-                self.model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
         self.model_name = model_name
         self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
+
+        self.update_layer_dict()
         self.outputs = []
-        self.features_per_layer = []
-        self.selectable_layer_dict = {}
-        self.selectable_layer_keys = []
-        self.selected_layers = []
+        if layers is not None:
+            self.register_hooks(layers)
+        else:
+            self.register_hooks(self.get_default_param().fe_layers)
 
-        if param is not None and param.fe_layers is not None:
-            self.selected_layers = param.fe_layers
+    def get_default_param(self, param=None):
+        
+        param = super().get_default_param(param=param)
+        
+        self.update_layer_dict()
+        
+        param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
+        if self.model_name == 'vgg16':
+            param.fe_scalings = [1,2,4]
+        elif self.model_name == 'efficient_netb0':
+            param.fe_scalings = [1,2]
 
-        self.get_layer_dict()
-        if model_name == 'single_layer_vgg16':
-            self.register_hooks(list(self.module_dict.keys()))
-            self.selected_layers = [list(self.module_dict.keys())[0]]
+        param.tile_annotations = True # Overwrite non-FE settings
 
-        if (param is not None) and (model_name != 'single_layer_vgg16'):
-            self.register_hooks(param.fe_layers)
-            self.selected_layers = param.fe_layers
+        return param
+
+    def update_layer_dict(self):
+        """Create a flat list of all modules as well as a dictionary of modules with 
+        keys describing the layers."""
+
+        named_modules = list(self.model.named_modules())
+        # Remove modules with submodules
+        self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
+        # Create dictionaries for easy access
+        self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
+        self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
+        
+        self.selectable_layer_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
+        self.selectable_layer_keys = list(self.selectable_layer_dict.keys())
+    
+    def get_max_kernel_size(self):
+        """
+        Given a hookmodel, find the maximum kernel size needed for the deepest layer.
+        
+        Parameters
+        ----------
+        
+        Returns
+        -------
+        max_kernel_size: int
+            maximum kernel size needed for the deepest layer
+        """
+        # Initialize variables
+        max_kernel_size = 1
+        current_total_pool = 1
+
+        if len(self.selected_layers) == 0:
+            # no layers selected yet
+            return 0
+        
+        # Find out which is the deepest layer
+        latest_layer = self.module_dict[self.selected_layers[-1]]
+        # Iterate over all layers to find the maximum kernel size
+        for curr_layer_key, curr_layer in self.module_dict.items():
+            # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
+            if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+                current_total_pool *= curr_layer.kernel_size
+            # For each convolution, multiply the kernel size with the current total pool
+            elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+                max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
+            # Only iterate until the latest selected layer
+            if curr_layer == latest_layer:
+                break
+        return max_kernel_size
 
     def __call__(self, tensor_image):
         tensor_image_dev = tensor_image.to(self.device)
@@ -89,15 +137,6 @@ class Hookmodel(FeatureExtractor):
     def hook_last(self, module, input, output):
         self.outputs.append(output)
         assert False
-
-    def get_default_param(self, param=None):
-        param = super().get_default_param(param=param)
-        # param.fe_name = "vgg16" # NOTE: This need overthinking !
-        param.fe_layers = self.selectable_layer_keys[0] # default is the first layer
-        param.fe_scalings = [1,2,4]
-        param.fe_padding = self.get_max_kernel_size() // 2
-        param.tile_annotations = True # Overwrite non-FE settings
-        return param
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
 
@@ -112,57 +151,9 @@ class Hookmodel(FeatureExtractor):
             else:
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
 
-    def get_layer_dict(self):
-        """Create a flat list of all modules as well as a dictionary of modules with 
-        keys describing the layers."""
-
-        named_modules = list(self.model.named_modules())
-        self.named_modules = [n for n in named_modules if len(list(n[1].named_modules())) == 1]
-        self.module_id_dict = dict([(x[0] + ' ' + x[1].__str__(), x[0]) for x in self.named_modules])
-        self.module_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules])
-        
-        self.selectable_layer_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
-        self.selectable_layer_keys = list(self.selectable_layer_dict.keys())
-
-    def load_single_layer_vgg16(self, keep_rgb=False):
-        """Load VGG16 model from torchvision, keep first layer only
-        
-        Parameters
-        ----------
-
-        Returns
-        -------
-        model: torch model
-            model for pixel feature extraction
-        keep_rgb: bool
-            if True, keep model with three input channels, otherwise convert to single channel
-        
-        """
-
-        vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-        pretrained_dict = vgg16.state_dict()
-        
-        if keep_rgb:
-            model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(3, 64, 3, 1, 1))]))
-        else:
-            model = nn.Sequential(OrderedDict([('conv1', nn.Conv2d(1, 64, 3, 1, 1))]))
-
-        reduced_dict = model.state_dict()
-
-        if keep_rgb:
-            reduced_dict['conv1.weight'] = pretrained_dict['features.0.weight']
-            reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
-        else:
-            reduced_dict['conv1.weight'][:, 0, :, :] = pretrained_dict['features.0.weight'][:, :, :, :].sum(axis=1)
-            reduced_dict['conv1.bias'] = pretrained_dict['features.0.bias']
-
-        model.load_state_dict(reduced_dict)
-
-        return model
-
     def get_features_scaled(self, image, param:Param):
         """Given an image and a set of annotations, extract multiscale features
-        
+
         Parameters
         ----------
         model : Hookmodel
@@ -335,39 +326,3 @@ class Hookmodel(FeatureExtractor):
                             out_np = out_np[:, :, padding:-padding, padding:-padding]
                         all_scales.append(out_np)
         return all_scales
-    
-
-    def get_max_kernel_size(self):
-        """
-        Given a hookmodel, find the maximum kernel size needed for the deepest layer.
-        
-        Parameters
-        ----------
-        
-        Returns
-        -------
-        max_kernel_size: int
-            maximum kernel size needed for the deepest layer
-        """
-        # Initialize variables
-        max_kernel_size = 1
-        current_total_pool = 1
-
-        if len(self.selected_layers) == 0:
-            # no layers selected yet
-            return 0
-        
-        # Find out which is the deepest layer
-        latest_layer = self.module_dict[self.selected_layers[-1]]
-        # Iterate over all layers to find the maximum kernel size
-        for curr_layer_key, curr_layer in self.module_dict.items():
-            # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
-            if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                current_total_pool *= curr_layer.kernel_size
-            # For each convolution, multiply the kernel size with the current total pool
-            elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
-            # Only iterate until the latest selected layer
-            if curr_layer == latest_layer:
-                break
-        return max_kernel_size

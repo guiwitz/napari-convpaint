@@ -49,14 +49,17 @@ class Param:
     """
 
     classifier: str = None
+
     # Image processing parameters
     multi_channel_img: bool = None
     rgb_img: bool = None
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
+
     # Acceleration parameters
     image_downsample: int = None
     tile_annotations: bool = False
     tile_image: bool = False
+
     # Feature Extractor parameters
     fe_name: str = None
     fe_layers: list[str] = None
@@ -65,14 +68,11 @@ class Param:
     fe_order: int = None
     fe_use_min_features: bool = None
     fe_use_cuda: bool = None
+    
     # Classifier parameters
     clf_iterations: int = None
     clf_learning_rate: float = None
     clf_depth: int = None
-
-
-    def __post_init__(self):
-        self.fe_scalings = [1, 2]
 
     def save_parameters(self, save_path):
         """Save parameters as yml file.
@@ -112,3 +112,14 @@ class Param:
                 dict[path] = dict[path].as_posix()
         
         return dict
+    
+    def copy(self):
+        """Copy the parameter object.
+
+        Returns
+        -------
+        Param: Param
+            copied parameter object.
+        """
+
+        return Param(**asdict(self))
