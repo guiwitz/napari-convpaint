@@ -18,13 +18,14 @@ from . import conv_paint_utils
 
 class ConvpaintModel:
 
-    def __init__(self, model_path=None):
+    def __init__(self, model_path=None, param=None):
         self._init_models_dict()
         if model_path is not None:
             self.load(model_path)
+        elif param is not None:
+            self.load_param(param)
         else:
-            self.param = self.get_default_param()
-            self.set()
+            self.set_default_param() # Set the default parameters
 
     def _init_models_dict(self):
         # Initialize the MODELS TO TYPES dictionary with the models that are always available
@@ -43,6 +44,10 @@ class ConvpaintModel:
             print("Info: Cellpose is not installed and is not available as feature extractor.\n"
                 "Run 'pip install napari-convpaint[cellpose]' to install it.")
             
+    def get_all_fe_models(self):
+        """Return a dictionary of all available models"""
+        return self.ALL_MODELS_TYPES_DICT
+
     def load(self, model_path):
         with open(model_path, 'rb') as f:
             data = pickle.load(f)
@@ -51,8 +56,12 @@ class ConvpaintModel:
         self.classifier = data['classifier']
         if 'model_state' in data:
             self.fe_model_state = data['model_state']
+            if hasattr(self.fe_model, 'load_state_dict'): # TODO: CHECK IF THIS MAKES SENSE
+                self.fe_model.load_state_dict(data['model_state'])
 
     def save(self, model_path):
+        if self.classifier is None:
+            raise Exception('No trained classifier found. Please train a model first.')
         with open(model_path, 'wb') as f:
             data = {
                 'classifier': self.classifier,
@@ -61,9 +70,10 @@ class ConvpaintModel:
             }
             pickle.dump(data, f)
 
-    def set(self, **kwargs):
+    def set(self, use_fe_defaults=False, **kwargs):
         """Set the model based on the given parameters."""
         self.set_param(**kwargs)
+
         # Reset the model and classifier; create a new FE model
         self.fe_model_state = None
         self.classifier = None
@@ -72,15 +82,17 @@ class ConvpaintModel:
             model_name=self.param.fe_name,
             use_cuda=self.param.fe_use_cuda
         )
+        
+        # Apply default parameters to the model
+        if use_fe_defaults:
+            self.param = self.fe_model.get_default_param(self.param)
+        
         # Register hooks if the model is a Hookmodel
         if isinstance(self.fe_model, Hookmodel):
             if self.param.fe_layers:
                 self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
             elif len(self.fe_model.named_modules) == 1:
                 self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
-        
-        # SET ENFORCED/DEFAULT PARAMS ???
-
 
     def set_param(self,
                   multi_channel_img: bool = None,
@@ -121,14 +133,18 @@ class ConvpaintModel:
 
     def load_param(self, param: Param):
         """Load the given param object into the model and set the model accordingly."""
-        self.param = param
+        self.param = param.copy()
         self.set()
 
-    def get_default_param(self, param=None):
-        """Return a default param object, which defines the default model."""
+    def get_param(self):
+        return self.param
 
-        if param is None:
-            param = Param()
+    def get_default_param(self):
+        """
+        Return a default param object, which defines the default model.
+        """
+
+        param = Param()
 
         # Image processing parameters
         param.multi_channel_img = False
@@ -140,7 +156,7 @@ class ConvpaintModel:
         param.tile_annotations = True
         param.tile_image = False
 
-        # Model parameters
+        # FE parameters
         param.fe_name = "vgg16"
         param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
         param.fe_padding = 0
@@ -155,6 +171,21 @@ class ConvpaintModel:
         param.clf_depth = 5
 
         return param
+    
+    def set_default_param(self):
+        """Set the default parameters for the model."""
+        def_param = self.get_default_param()
+        self.load_param(def_param)
+    
+    def get_fe_layer_keys(self):
+        """Return the selection of layer key for the feature extractor."""
+        if self.fe_model is None or not isinstance(self.fe_model, Hookmodel):
+            return None
+        return self.fe_model.selectable_layer_keys
+    
+    def get_fe_defaults(self):
+        """Return the default values for the feature extractor."""
+        return self.fe_model.get_default_param()
     
     ### OLD FE and Classifier methods
 
@@ -179,6 +210,130 @@ class ConvpaintModel:
                 output_shape=(image.shape[-2], image.shape[-1]),
                 preserve_range=True, order=self.param.fe_order).astype(np.uint8)
         return predicted_image
+    
+    def parallel_predict_image(self, image, use_dask=False):
+        """
+        Given a filter model and a classifier, predict the class of 
+        each pixel in an image.
+
+        Parameters
+        ----------
+        image: 2d array
+            image to segment
+
+        Given inside the ConvPaint class:    
+            self.model: Hookmodel
+                model to extract features from
+            self.classifier: CatBoostClassifier
+                classifier to use for prediction
+            self.param.scalings: list of ints
+                downsampling factors
+            self.param.order: int
+                interpolation order for low scale resizing
+            self.param.use_min_features: bool
+                if True, use the minimum number of features per layer
+            self.param.image_downsample: int, optional
+                downsample image by this factor before extracting features, by default 1
+        
+        use_dask: bool
+            if True, use dask for parallel processing
+
+        Returns
+        -------
+        predicted_image: 2d array
+            predicted image with classes
+
+        """
+        
+        maxblock = 1000
+        nblocks_rows = image.shape[-2] // maxblock
+        nblocks_cols = image.shape[-1] // maxblock
+        margin = 50
+
+        predicted_image_complete = np.zeros(image.shape[-2:], dtype=(np.uint8))
+        
+        if use_dask:
+            from dask.distributed import Client
+            import dask
+            dask.config.set({'distributed.worker.daemon': False})
+            client = Client()
+            processes = []
+
+        min_row_ind_collection = []
+        min_col_ind_collection = []
+        max_row_ind_collection = []
+        max_col_ind_collection = []
+        new_max_col_ind_collection = []
+        new_max_row_ind_collection = []
+        new_min_col_ind_collection = []
+        new_min_row_ind_collection = []
+
+        for row in range(nblocks_rows+1):
+            for col in range(nblocks_cols+1):
+                #print(f'row {row}/{nblocks_rows}, col {col}/{nblocks_cols}')
+                max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
+                max_col = np.min([image.shape[-1], (col+1)*maxblock+margin])
+                min_row = np.max([0, row*maxblock-margin])
+                min_col = np.max([0, col*maxblock-margin])
+
+                min_row_ind = 0
+                new_min_row_ind = 0
+                if min_row > 0:
+                    min_row_ind = min_row + margin
+                    new_min_row_ind = margin
+                min_col_ind = 0
+                new_min_col_ind = 0
+                if min_col > 0:
+                    min_col_ind = min_col + margin
+                    new_min_col_ind = margin
+
+                max_col = (col+1)*maxblock+margin
+                max_col_ind = np.min([min_col_ind+maxblock,image.shape[-1]])
+                new_max_col_ind = new_min_col_ind + (max_col_ind-min_col_ind)
+                if max_col > image.shape[-1]:
+                    max_col = image.shape[-1]
+
+                max_row = (row+1)*maxblock+margin
+                max_row_ind = np.min([min_row_ind+maxblock,image.shape[-2]])
+                new_max_row_ind = new_min_row_ind + (max_row_ind-min_row_ind)
+                if max_row > image.shape[-2]:
+                    max_row = image.shape[-2]
+
+                image_block = image[..., min_row:max_row, min_col:max_col]
+
+                if use_dask:
+                    processes.append(client.submit(
+                        self.predict_image, image=image_block))
+                    
+                    min_row_ind_collection.append(min_row_ind)
+                    min_col_ind_collection.append(min_col_ind)
+                    max_row_ind_collection.append(max_row_ind)
+                    max_col_ind_collection.append(max_col_ind)
+                    new_max_col_ind_collection.append(new_max_col_ind)
+                    new_max_row_ind_collection.append(new_max_row_ind)
+                    new_min_col_ind_collection.append(new_min_col_ind)
+                    new_min_row_ind_collection.append(new_min_row_ind)
+
+                else:
+                    predicted_image = self.predict_image(image_block)
+                    crop_pred = predicted_image[
+                        new_min_row_ind: new_max_row_ind,
+                        new_min_col_ind: new_max_col_ind]
+
+                    predicted_image_complete[min_row_ind:max_row_ind, min_col_ind:max_col_ind] = crop_pred.astype(np.uint8)
+
+        if use_dask:
+            for k in range(len(processes)):
+                future = processes[k]
+                out = future.result()
+                future.cancel()
+                del future
+                predicted_image_complete[
+                    min_row_ind_collection[k]:max_row_ind_collection[k],
+                    min_col_ind_collection[k]:max_col_ind_collection[k]] = out.astype(np.uint8)
+            client.close()
+        
+        return predicted_image_complete
 
     def get_features_current_layers(self, image, annotations):        # FROM CONV_PAINT SCRIPT
         """Given a potentially multidimensional image and a set of annotations,
@@ -211,7 +366,7 @@ class ConvpaintModel:
         """
 
         if self.fe_model is None:
-            raise ValueError('Model must be provided')
+            raise ValueError('Model must be provided. Define and set (or load) a model first.')
 
         # get indices of first dimension of non-empty annotations. Gives t/z indices
         if annotations.ndim == 3:
@@ -333,16 +488,15 @@ class ConvpaintModel:
 
         return output_data_stack_list
 
-    def pre_process_stack(self, data_stack): # TODO: REMOVE EXAMPLE VALUES...
-        input_scaling = 2 #self.param.image_downsample
-        effective_kernel_padding = (0, 12, 12) #self.fe_model.get_effective_kernel_padding()
-        effective_patch_size = None #self.fe_model.get_effective_patch_size()
+    def pre_process_stack(self, data_stack):
+        input_scaling = self.param.image_downsample
+        effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
+        effective_patch_size = self.fe_model.get_effective_patch_size()
         # Process input data stack
         processed_data_stack = conv_paint_utils.pre_process_stack(data_stack,
                                                                  input_scaling,
                                                                  effective_kernel_padding,
                                                                  effective_patch_size)
-        
         # Return processed stacks
         return processed_data_stack
 
@@ -407,10 +561,12 @@ class ConvpaintModel:
 
     ### Classifier methods
 
-    def train_classifier(self, features, targets, iterations = 50, learning_rate = 0.1, depth = 5, use_rf=False):
+    def train_classifier(self, features, targets, use_rf=False):
         """Train a classifier given a set of features and targets."""
         if not use_rf:
-            self.classifier = CatBoostClassifier(iterations=iterations, learning_rate=learning_rate,depth=depth)
+            self.classifier = CatBoostClassifier(iterations=self.param.clf_iterations,
+                                                 learning_rate=self.param.clf_learning_rate,
+                                                 depth=self.param.clf_depth)
             self.classifier.fit(features, targets)
         else:
                 # train a random forest classififer
