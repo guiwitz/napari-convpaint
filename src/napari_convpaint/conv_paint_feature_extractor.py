@@ -25,30 +25,39 @@ class FeatureExtractor:
         """
         if param is None:
             param = Param()
+            
         # FE params (encouraged to set)
         param.fe_name: str = self.model_name
-        param.fe_layers: list[str] = None
+        # param.fe_layers: list[str] = None
         param.fe_scalings: list[int] = [1]
         param.fe_order: int = 0
         param.fe_use_min_features: bool = False
         param.fe_use_cuda: bool = False
         param.fe_padding : int = 0
-        # General settings (NOTE: only set if shall be enforced by FE !)
-        param.multi_channel_img: bool = None # use multichannel if image dimensions allow
-        param.rgb_img: bool = None # use RGB image (note: should not be set, as the input defines this mode)
-        param.normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
-        param.image_downsample: int = None
-        param.tile_annotations: bool = None
-        param.tile_image: bool = None
-        # Classifier
-        param.classifier: str = None
-        # Classifier parameters
-        param.clf_iterations: int = None
-        param.clf_learning_rate: float = None
-        param.clf_depth: int = None
+
+        # # General settings (NOTE: only set if shall be enforced by FE !)
+        # param.multi_channel_img: bool = None # use multichannel if image dimensions allow
+        # param.rgb_img: bool = None # use RGB image (note: should not be set, as the input defines this mode)
+        # param.normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
+        # param.image_downsample: int = None
+        # param.tile_annotations: bool = None
+        # param.tile_image: bool = None
+        # # Classifier
+        # param.classifier: str = None
+        # # Classifier parameters
+        # param.clf_iterations: int = None
+        # param.clf_learning_rate: float = None
+        # param.clf_depth: int = None
 
         return param
-
+    
+    def get_enforced_param(self, param=None):
+        """
+        Define which parameters need to be absolutley enforced for this feature extractor.
+        """
+        if param is None:
+            param = Param()
+        return param
 
     def get_features_scaled(self, image, param, **kwargs):
         """
