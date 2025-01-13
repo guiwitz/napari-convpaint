@@ -145,7 +145,6 @@ class Hookmodel(FeatureExtractor):
         for ind in range(len(selected_layers)):
             self.features_per_layer.append(
                 self.module_dict[selected_layers[ind]].out_channels)
-
             if ind == len(selected_layers) - 1:
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_last)
             else:
@@ -221,7 +220,6 @@ class Hookmodel(FeatureExtractor):
         -------
         predicted_image: 2d array
             predicted image with classes
-
         """
 
         if param.fe_use_min_features:
@@ -277,7 +275,6 @@ class Hookmodel(FeatureExtractor):
         all_scales : list of np.ndarray
             List of filtered images. The number of images is C x Sum_i(F_i x S) where C is the number of channels,
             F_i is the number of filters of the ith layer and S the number of scaling factors.
-            
         """
         input_channels = self.named_modules[0][1].in_channels
         image = np.asarray(image, dtype=np.float32)

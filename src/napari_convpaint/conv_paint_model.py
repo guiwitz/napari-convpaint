@@ -432,7 +432,7 @@ class ConvpaintModel:
                     x_min:x_max,
                     y_min:y_max
                 ]
-                extracted_features = self.fe_model.get_features_scaled(image=im_crop,param=self.param)
+                extracted_features = self.fe_model.get_features_scaled(image=im_crop, param=self.param)
 
                 if self.param.image_downsample > 1:
                     annot_crop = annot_crop[::self.param.image_downsample, :: self.param.image_downsample]
