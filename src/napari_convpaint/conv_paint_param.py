@@ -62,12 +62,12 @@ class Param:
 
     # Feature Extractor parameters
     fe_name: str = None
+    fe_use_cuda: bool = None
     fe_layers: list[str] = None
     fe_padding : int = 0
     fe_scalings: list[int] = None
     fe_order: int = None
     fe_use_min_features: bool = None
-    fe_use_cuda: bool = None
     
     # Classifier parameters
     clf_iterations: int = None

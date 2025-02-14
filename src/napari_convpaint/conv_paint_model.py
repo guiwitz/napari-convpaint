@@ -18,128 +18,50 @@ from . import conv_paint_utils
 
 class ConvpaintModel:
 
-    def __init__(self, model_path=None, param=None):
-        self._init_models_dict()
-        if model_path is not None:
-            self.load(model_path)
-        elif param is not None:
-            self.load_param(param)
-        else:
-            self.set_default_param() # Set the default parameters
+    ALL_MODELS_TYPES_DICT = {}
 
-    def _init_models_dict(self):
+    def __init__(self, model_path=None, param=None):
+        self.param = Param()
+        # Initialize the dictionary of all available models
+        if not ConvpaintModel.ALL_MODELS_TYPES_DICT:
+            ConvpaintModel._init_models_dict()
+
+        # Initialize the model
+        if (model_path is not None) and (param is not None):
+            raise ValueError('Please provide either a model path or a param object, but not both.')
+        if model_path is not None:
+            self._load(model_path)
+        elif param is not None:
+            self._load_param(param)
+        else:
+            def_param = ConvpaintModel.get_default_param()
+            self._load_param(def_param)
+
+    @staticmethod
+    def _init_models_dict():
         # Initialize the MODELS TO TYPES dictionary with the models that are always available
-        self.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
-        self.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
-        self.ALL_MODELS_TYPES_DICT.update({x: DinoFeatures for x in DINO_MODELS})
+        ConvpaintModel.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
+        ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
+        ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: DinoFeatures for x in DINO_MODELS})
 
         # Try to import CellposeFeatures and update the MODELS TO TYPES  dictionary if successful
         # Cellpose is only installed with pip install napari-convpaint[cellpose]
         try:
             from napari_convpaint.conv_paint_cellpose import AVAILABLE_MODELS as CELLPOSE_MODELS
             from napari_convpaint.conv_paint_cellpose import CellposeFeatures
-            self.ALL_MODELS_TYPES_DICT.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
+            ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
         except ImportError:
             # Handle the case where CellposeFeatures or its dependencies are not available
             print("Info: Cellpose is not installed and is not available as feature extractor.\n"
                 "Run 'pip install napari-convpaint[cellpose]' to install it.")
-            
-    def get_all_fe_models(self):
+
+    @staticmethod
+    def get_all_fe_models():
         """Return a dictionary of all available models"""
-        return self.ALL_MODELS_TYPES_DICT
-
-    def load(self, model_path):
-        with open(model_path, 'rb') as f:
-            data = pickle.load(f)
-        self.param = data['param']
-        self.set() # Resets classifier and model_state
-        self.classifier = data['classifier']
-        if 'model_state' in data:
-            self.fe_model_state = data['model_state']
-            if hasattr(self.fe_model, 'load_state_dict'): # TODO: CHECK IF THIS MAKES SENSE
-                self.fe_model.load_state_dict(data['model_state'])
-
-    def save(self, model_path):
-        if self.classifier is None:
-            raise Exception('No trained classifier found. Please train a model first.')
-        with open(model_path, 'wb') as f:
-            data = {
-                'classifier': self.classifier,
-                'param': self.param,
-                'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
-            }
-            pickle.dump(data, f)
-
-    def set(self, use_fe_defaults=False, **kwargs):
-        """Set the model based on the given parameters."""
-        self.set_param(**kwargs)
-
-        # Reset the model and classifier; create a new FE model
-        self.fe_model_state = None
-        self.classifier = None
-        fe_model_class = self.ALL_MODELS_TYPES_DICT[self.param.fe_name]
-        self.fe_model = fe_model_class(
-            model_name=self.param.fe_name,
-            use_cuda=self.param.fe_use_cuda
-        )
-        
-        # Apply default parameters to the model
-        if use_fe_defaults:
-            self.param = self.fe_model.get_default_param(self.param)
-        
-        # Register hooks if the model is a Hookmodel
-        if isinstance(self.fe_model, Hookmodel):
-            if self.param.fe_layers:
-                self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
-            elif len(self.fe_model.named_modules) == 1:
-                self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
-
-    def set_param(self,
-                  multi_channel_img: bool = None,
-                  normalize: int = None, # 1: no normalization, 2: normalize stack, 3: normalize each image
-                  image_downsample: int = None,
-                  tile_annotations: bool = False,
-                  tile_image: bool = False,
-                  fe_name: str = None,
-                  fe_layers: list[str] = None,
-                  fe_padding : int = 0,
-                  fe_scalings: list[int] = None,
-                  fe_order: int = None,
-                  fe_use_min_features: bool = None,
-                  fe_use_cuda: bool = None,
-                  clf_iterations: int = None,
-                  clf_learning_rate: float = None,
-                  clf_depth: int = None):
-        """Set the values of the param objects in the model."""
-        for attr, val in {
-            'multi_channel_img': multi_channel_img,
-            'normalize': normalize,
-            'image_downsample': image_downsample,
-            'tile_annotations': tile_annotations,
-            'tile_image': tile_image,
-            'fe_name': fe_name,
-            'fe_layers': fe_layers,
-            'fe_padding': fe_padding,
-            'fe_scalings': fe_scalings,
-            'fe_order': fe_order,
-            'fe_use_min_features': fe_use_min_features,
-            'fe_use_cuda': fe_use_cuda,
-            'clf_iterations': clf_iterations,
-            'clf_learning_rate': clf_learning_rate,
-            'clf_depth': clf_depth
-        }.items():
-            if val is not None:
-                setattr(self.param, attr, val)
-
-    def load_param(self, param: Param):
-        """Load the given param object into the model and set the model accordingly."""
-        self.param = param.copy()
-        self.set()
-
-    def get_param(self):
-        return self.param
-
-    def get_default_param(self):
+        return ConvpaintModel.ALL_MODELS_TYPES_DICT
+    
+    @staticmethod
+    def get_default_param():
         """
         Return a default param object, which defines the default model.
         """
@@ -159,11 +81,11 @@ class ConvpaintModel:
         # FE parameters
         param.fe_name = "vgg16"
         param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
+        param.fe_use_cuda = False
         param.fe_padding = 0
         param.fe_scalings = [1, 2, 4]
         param.fe_order = 0
         param.fe_use_min_features = False
-        param.fe_use_cuda = False
 
         # Classifier parameters
         param.clf_iterations = 50
@@ -171,23 +93,112 @@ class ConvpaintModel:
         param.clf_depth = 5
 
         return param
+
+    def save(self, model_path):
+        if self.classifier is None:
+            warnings.warn('No trained classifier found.')
+        with open(model_path, 'wb') as f:
+            data = {
+                'classifier': self.classifier,
+                'param': self.param,
+                'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
+            }
+            pickle.dump(data, f)
+
+    def _load(self, model_path):
+        with open(model_path, 'rb') as f:
+            data = pickle.load(f)
+        new_param = data['param']
+        self._set(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self.param = new_param.copy()
+        self.classifier = data['classifier']
+        if 'model_state' in data:
+            self.fe_model_state = data['model_state']
+            if hasattr(self.fe_model, 'load_state_dict'): # TODO: CHECK IF THIS MAKES SENSE
+                self.fe_model.load_state_dict(data['model_state'])
+
+    def _load_param(self, param: Param):
+        """Load the given param object into the model and set the model accordingly."""
+        self._set(param.fe_name, param.fe_use_cuda, param.fe_layers)
+        self.param = param.copy()
+
+    def get_param(self):
+        """Return the param object with the current parameters of the model."""
+        return self.param.copy()
+
+    def _set(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
+        """Set the model based on the given FE parameters.
+        Creates new feature extracture, and resets the model state and classifier."""
+
+        # Reset the model and classifier
+        self.fe_model_state = None
+        self.classifier = None
+        
+        # Check if we need to create a new FE model
+        new_fe_name = fe_name is not None and fe_name != self.param.fe_name
+        new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self.param.fe_use_cuda
+        new_fe_layers = fe_layers is not None and fe_layers != self.param.fe_layers
+
+        # Create the feature extractor model
+        if new_fe_name or new_fe_use_cuda or new_fe_layers:
+            self.fe_model = ConvpaintModel.create_fe(
+                fe_name=fe_name,
+                use_cuda=fe_use_cuda,
+                layers=fe_layers
+            )
+        
+        # Set the parameters
+        for attr, val in {'fe_name': fe_name, 'fe_use_cuda': fe_use_cuda, 'fe_layers': fe_layers}.items():
+            if val is not None:
+                setattr(self.param, attr, val)
+
+    @staticmethod
+    def create_fe(fe_name, use_cuda, layers=None):
+        
+        # Check if fe_name is valid and create the feature extractor object
+        if not fe_name in ConvpaintModel.ALL_MODELS_TYPES_DICT:
+            raise ValueError(f'Feature extractor model {fe_name} not found.')
+        fe_model_class = ConvpaintModel.ALL_MODELS_TYPES_DICT.get(fe_name)
+        
+        # Initialize the feature extractor model
+        if isinstance(fe_model_class, Hookmodel):
+            fe_model = fe_model_class(
+                model_name=fe_name,
+                use_cuda=use_cuda,
+                selected_layers=layers
+        )
+        # elif len(self.fe_model.named_modules) == 1:
+        #     self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
+        else:
+            fe_model = fe_model_class(
+                model_name=fe_name,
+                use_cuda=use_cuda
+            )
+
+        return fe_model
+
+    # def set_params(self, **kwargs):
+    #     """Set the parameters if given. Note that the model is not reset and no FE model is created.
+    #     If fe_name, fe_use_cuda, and fe_layers changes, you should create a new ConvpaintModel."""
+    #     for attr, val in kwargs.items():
+    #         if val is not None:
+    #             setattr(self.param, attr, val)
+    #     if 'fe_name' in kwargs or 'fe_use_cuda' in kwargs or 'fe_layers' in kwargs:
+    #         warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+    #                       "You should create a new ConvpaintModel instead.")
     
-    def set_default_param(self):
-        """Set the default parameters for the model."""
-        def_param = self.get_default_param()
-        self.load_param(def_param)
+    # def get_fe_layer_keys(self):
+    #     """Return the selection of layer key for the feature extractor."""
+    #     if self.fe_model is None or not isinstance(self.fe_model, Hookmodel):
+    #         return None
+    #     return self.fe_model.selectable_layer_keys
     
-    def get_fe_layer_keys(self):
-        """Return the selection of layer key for the feature extractor."""
-        if self.fe_model is None or not isinstance(self.fe_model, Hookmodel):
-            return None
-        return self.fe_model.selectable_layer_keys
-    
-    def get_fe_defaults(self):
-        """Return the default values for the feature extractor."""
-        return self.fe_model.get_default_param()
-    
-    ### OLD FE and Classifier methods
+    # def get_fe_defaults(self):
+    #     """Return the default params for the feature extractor."""
+    #     return self.fe_model.get_default_param()
+
+
+    ### OLD FE METHODS
 
     def predict_image(self, image):                    # FROM FEATURE EXTRACTOR CLASS
         features = self.fe_model.get_features_scaled(image=image,param=self.param)
@@ -459,7 +470,8 @@ class ConvpaintModel:
         targets = pd.Series(all_targets)
 
         return features, targets
-    
+
+
     ### NEW Feature extraction methods
 
     def run_model_checks(self):
@@ -559,7 +571,8 @@ class ConvpaintModel:
         for img, annots in zip(image_list, annots_list):
             features, targets = self.get_features_targets_img_stack(img, annots)
 
-    ### Classifier methods
+
+    ### CLASSIFIER METHODS
 
     def train_classifier(self, features, targets, use_rf=False):
         """Train a classifier given a set of features and targets."""

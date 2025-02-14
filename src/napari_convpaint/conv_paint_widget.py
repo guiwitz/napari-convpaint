@@ -18,7 +18,7 @@ from .conv_paint_model import ConvpaintModel
 class ConvPaintWidget(QWidget):
     """
     Implementation of a napari widget for interactive segmentation performed
-    via a CatBoost Classifier trained on annotations. The filters used to 
+    via a CatBoost Classifier trained on annotations. The default filters used to 
     generate the model features are taken from the first layer of a VGG16 model
     as proposed here: https://github.com/hinderling/napari_pixel_classifier
 
@@ -40,7 +40,8 @@ class ConvPaintWidget(QWidget):
         self.viewer = napari_viewer
         self.cp_model = ConvpaintModel()
         self.default_cp_param = self.cp_model.get_param()
-        self.temp_cp_model = ConvpaintModel()
+        self.temp_fe_model = ConvpaintModel.create_fe(self.default_cp_param.fe_name,
+                                                      self.default_cp_param.fe_use_cuda)
         self.image_mean = None
         self.image_std = None
         self.trained = False
@@ -242,7 +243,7 @@ class ConvPaintWidget(QWidget):
 
         # Add "FE architecture" combo box to FE group
         self.qcombo_fe_type = QComboBox()
-        self.qcombo_fe_type.addItems(sorted(self.cp_model.get_all_fe_models().keys()))
+        self.qcombo_fe_type.addItems(sorted(ConvpaintModel.get_all_fe_models().keys()))
         self.qcombo_fe_type.setToolTip('Select architecture of feature extraction model.')
         self.fe_group.glayout.addWidget(self.qcombo_fe_type, 2, 0, 1, 2)
 
@@ -499,7 +500,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('Annotation layer has wrong shape for the chosen data')
 
         # Set the current model path to 'in training' and adjsut the model description
-        self.current_model_path= 'in training'
+        self.current_model_path = 'in training'
         self._set_model_description()
 
         # Start training
@@ -755,7 +756,7 @@ class ConvPaintWidget(QWidget):
             dialog = QFileDialog()
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
-        self.cp_model.load(save_file)
+        self.cp_model = ConvpaintModel(model_path=save_file)
 
         # Check if the loaded multichannel setting is compatible with data
         data_dims = self._get_data_dims()
@@ -824,11 +825,10 @@ class ConvPaintWidget(QWidget):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         # Create a temporary model to get the layers (to display) and default parameters
         fe_type = self.qcombo_fe_type.currentText()
-        self.temp_cp_model = ConvpaintModel()
-        self.temp_cp_model.set(use_fe_defaults=True, fe_name=fe_type, fe_use_cuda=self.cp_model.param.fe_use_cuda)
+        self.temp_fe_model = ConvpaintModel.create_fe(fe_type, self.cp_model.param.fe_use_cuda)
         
         # Get the default FE params for the temp model and update the GUI
-        fe_defaults = self.temp_cp_model.get_param()
+        fe_defaults = self.temp_fe_model.get_default_param()
         
         # Update the GUI to show the FE layers of the temp model
         self._update_gui_fe_layer_choice_from_temp_model()
@@ -849,7 +849,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_fe_layer_selection_changed(self):
         """Enable the set button based on the model type."""
-        if self.temp_cp_model.get_fe_layer_keys() is not None:
+        if self.temp_fe_model.get_layer_keys() is not None:
             selected_layers = self._get_selected_layer_names()
             if len(selected_layers) == 0:
                 self.set_fe_btn.setEnabled(False)
@@ -869,13 +869,13 @@ class ConvPaintWidget(QWidget):
         new_param = self.cp_model.param.copy()
         new_param.fe_name = self.qcombo_fe_type.currentText()
         new_param.fe_layers = self._get_selected_layer_names()
+        new_param.fe_use_cuda = self.check_use_cuda.isChecked()
         new_param.fe_scalings = self.fe_scaling_factors.currentData()
         new_param.fe_order = self.spin_interpolation_order.value()
         new_param.fe_use_min_features = self.check_use_min_features.isChecked()
-        new_param.fe_use_cuda = self.check_use_cuda.isChecked()
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
-        fe_defaults = self.temp_cp_model.get_param()
+        fe_defaults = self.temp_fe_model.get_default_param()
         enforced_params = [] # List of enforced parameters for raising a warning
         # Multichannel
         if ((fe_defaults.multi_channel_img is not None) and
@@ -939,8 +939,10 @@ class ConvPaintWidget(QWidget):
                 setter(val)
         if enforced_params: warnings.warn(f'The feature extractor enforced the parameters {enforced_params}')
 
-        # Set the model (also resets the classifier and model_state)
-        self.cp_model.load_param(new_param)
+        # Create a new model (with a new classifier and model_state)
+        # print("old param", self.cp_model.param)
+        # print("new param", new_param)
+        self.cp_model = ConvpaintModel(param=new_param)
         self._set_model_description()
 
     def _on_reset_default_fe(self, event=None):
@@ -1098,8 +1100,8 @@ class ConvPaintWidget(QWidget):
     def _update_gui_fe_layer_choice_from_temp_model(self):
         """Update GUI selectable FE layers based on the temporary model."""
         # Get selectable layers from the temp model and update the GUI
-        temp_fe_layer_keys = self.temp_cp_model.get_fe_layer_keys()
-        fe_default_layers = self.temp_cp_model.get_fe_defaults().fe_layers
+        temp_fe_layer_keys = self.temp_fe_model.get_layer_keys()
+        fe_default_layers = self.temp_fe_model.get_default_param().fe_layers
         if temp_fe_layer_keys is not None:
             self.fe_layer_selection.clear()
             self.fe_layer_selection.addItems(temp_fe_layer_keys)
