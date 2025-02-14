@@ -41,20 +41,15 @@ class Hookmodel(FeatureExtractor):
     """
 
     def __init__(self, model_name='vgg16', model=None, use_cuda=None, layers=None):
+        
+        super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
 
-        if model is not None:
-            assert model_name is None, 'model_name must be None if model is not None'
-            self.model = model
-        else:
-            if model_name == 'vgg16':
-                self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-                # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
-            elif model_name == 'efficient_netb0':
-                self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
-        self.model_name = model_name
-        self.device = get_device(use_cuda)
-        self.model = self.model.to(self.device)
+        # SET DEVICE
+        if use_cuda is not None:
+            self.device = get_device(use_cuda)
+            self.model = self.model.to(self.device)
 
+        # INITIALIZATION OF LAYER HOOKS
         self.update_layer_dict()
         self.outputs = []
         if layers is not None:
@@ -62,11 +57,23 @@ class Hookmodel(FeatureExtractor):
         else:
             self.register_hooks(self.get_default_param().fe_layers)
 
+    @staticmethod
+    def create_model(model_name):
+
+        # CREATE VGG16 MODEL
+        if model_name == 'vgg16':
+            return models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+            # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
+
+        # CREATE EFFICIENTNETB0 MODEL
+        elif model_name == 'efficient_netb0':
+            return models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+
     def get_default_param(self, param=None):
         
         param = super().get_default_param(param=param)
         
-        self.update_layer_dict()
+        # self.update_layer_dict() # Is done at initialization (and should not change later)
         
         param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
         if self.model_name == 'vgg16':
@@ -77,6 +84,9 @@ class Hookmodel(FeatureExtractor):
         param.tile_annotations = True # Overwrite non-FE settings
 
         return param
+
+    def get_layer_keys(self):
+        return self.selectable_layer_keys
 
     def update_layer_dict(self):
         """Create a flat list of all modules as well as a dictionary of modules with 

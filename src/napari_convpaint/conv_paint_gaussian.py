@@ -6,8 +6,8 @@ AVAILABLE_MODELS = ['gaussian_features']
 
 class GaussianFeatures(FeatureExtractor):
     def __init__(self, model_name='gaussian_features', use_cuda=False, sigma=3, **kwargs):
-        self.model_name = model_name
-        self.sigma = 3
+        super().__init__(model_name=model_name, use_cuda=use_cuda)
+        self.sigma = sigma
 
     def get_features(self, image, **kwargs):
         """Given an image extract features

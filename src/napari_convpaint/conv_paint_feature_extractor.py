@@ -4,8 +4,26 @@ import skimage
 from .conv_paint_param import Param
 
 class FeatureExtractor:
-    def __init__(self, model_name,**kwargs):
+    def __init__(self, model_name="vgg16", model=None, use_cuda=None, **kwargs):
+
         self.model_name = model_name
+        self.use_cuda = use_cuda
+
+        # USE PROVIDED MODEL IF AVAILABLE
+        if model is not None:
+            assert model_name is None, 'model_name must be None if model is not None'
+            self.model = model
+
+        # ELSE CREATE MODEL
+        else:
+            self.model = self.create_model(model_name)
+
+    @staticmethod
+    def create_model(model_name):
+        """
+        This method is intended to be overridden by subclasses to load the specific model.
+        """
+        return None
 
     def get_features(self, image):
         """
@@ -24,16 +42,18 @@ class FeatureExtractor:
         Get the defaul parameters that the FE shall set/enforce when chosen by the user.
         """
         if param is None:
-            param = Param()
+            def_param = Param()
+        else:
+            def_param = param.copy()
             
         # FE params (encouraged to set)
-        param.fe_name: str = self.model_name
+        def_param.fe_name= self.model_name
         # param.fe_layers: list[str] = None
-        param.fe_scalings: list[int] = [1]
-        param.fe_order: int = 0
-        param.fe_use_min_features: bool = False
-        param.fe_use_cuda: bool = False
-        param.fe_padding : int = 0
+        def_param.fe_scalings = [1]
+        def_param.fe_order = 0
+        def_param.fe_use_min_features = False
+        def_param.fe_use_cuda = False
+        def_param.fe_padding = 0
 
         # # General settings (NOTE: only set if shall be enforced by FE !)
         # param.multi_channel_img: bool = None # use multichannel if image dimensions allow
@@ -49,15 +69,21 @@ class FeatureExtractor:
         # param.clf_learning_rate: float = None
         # param.clf_depth: int = None
 
-        return param
+        return def_param
+    
+    def get_layer_keys(self):
+        return None
+
     
     def get_enforced_param(self, param=None):
         """
         Define which parameters need to be absolutley enforced for this feature extractor.
         """
         if param is None:
-            param = Param()
-        return param
+            enf_param = Param()
+        else:
+            enf_param = param.copy()
+        return enf_param
 
     def get_features_scaled(self, image, param, **kwargs):
         """

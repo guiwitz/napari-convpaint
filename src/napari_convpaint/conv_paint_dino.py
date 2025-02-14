@@ -9,22 +9,29 @@ AVAILABLE_MODELS = ['dinov2_vits14_reg']
 
 class DinoFeatures(FeatureExtractor):
     def __init__(self, model_name='dinov2_vits14_reg', use_cuda=False):
-        self.model_name = model_name
-        self.use_cuda = use_cuda
-        # prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
-        torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
-        try:
-            self.model = torch.hub.load('facebookresearch/dinov2', self.model_name, pretrained=True, verbose=False)
-        except(RuntimeError):
-            self.model = torch.hub.load('facebookresearch/dinov2', self.model_name, pretrained=True, verbose=False, force_reload=True)
+        
+        # Sets self.model_name and self.use_cuda and creates the model
+        super().__init__(model_name=model_name, use_cuda=use_cuda)
+        
         self.patchsize = 14
         self.padding = int(self.patchsize/2)
-        if self.use_cuda:
+
+        if use_cuda:
             self.device = get_device()
             self.model.to(self.device)
         else:
             self.device = 'cpu'
         self.model.eval()
+
+    @staticmethod
+    def create_model(model_name):
+        # prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
+        torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
+        try:
+            model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False)
+        except(RuntimeError):
+            model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False, force_reload=True)
+        return model
 
     def get_default_param(self, param=None):
         param = super().get_default_param(param=param)
@@ -171,7 +178,6 @@ class DinoFeatures(FeatureExtractor):
         if h_pad_top > 0 or w_pad_left > 0 or h_pad_bottom > 0 or w_pad_right > 0:
             image = image[:, h_pad_top:-h_pad_bottom if h_pad_bottom != 0 else None, 
                              w_pad_left:-w_pad_right if w_pad_right != 0 else None]
-#
 
         features = self._extract_features(image) #[H, W, nfeatures]
 

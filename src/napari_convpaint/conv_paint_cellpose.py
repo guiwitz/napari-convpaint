@@ -14,13 +14,13 @@ class CellposeFeatures(FeatureExtractor):
 
     def __init__(self, model_name='cellpose_backbone',use_cuda=False):
 
-        
-        self.model_name = model_name
-        self.use_cuda = use_cuda
+        super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
 
+    @staticmethod
+    def create_model(model_name):
         # Load the cellpose model
         model_cellpose = models.CellposeModel(model_type='tissuenet_cp3')
-        self.model = model_cellpose.net
+        return model_cellpose.net
 
 
     def get_features(self, img, **kwargs):
