@@ -876,6 +876,8 @@ class ConvPaintWidget(QWidget):
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
         fe_defaults = self.temp_fe_model.get_default_param()
+        print("new_param", new_param)
+        print("def_param", fe_defaults)
         enforced_params = [] # List of enforced parameters for raising a warning
         # Multichannel
         if ((fe_defaults.multi_channel_img is not None) and
@@ -921,6 +923,7 @@ class ConvPaintWidget(QWidget):
             else:
                 enforced_params.append('normalize')
                 self.button_group_normalize.button(fe_defaults.normalize).setChecked(True)
+                setattr(new_param, 'normalize', fe_defaults.normalize)
         # Other params
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
@@ -936,12 +939,11 @@ class ConvPaintWidget(QWidget):
                 enforced_params.append(attr)
                 if isinstance(val, list):
                     val = str(val)
-                setter(val)
+                setter(val) # Set the default value in the GUI
+                setattr(new_param, attr, val) # Set the default value in the param object
         if enforced_params: warnings.warn(f'The feature extractor enforced the parameters {enforced_params}')
 
         # Create a new model (with a new classifier and model_state)
-        # print("old param", self.cp_model.param)
-        # print("new param", new_param)
         self.cp_model = ConvpaintModel(param=new_param)
         self._set_model_description()
 
