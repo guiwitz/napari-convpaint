@@ -317,15 +317,15 @@ class Hookmodel(FeatureExtractor):
                     im_torch = torch.tensor(im_tot[np.newaxis, ::])
                     self.outputs = []
                     try:
-                        print("extracting features")
-                        layer_keys = self.get_layer_keys()
-                        for layer_name in layer_keys:
-                            hooked_layers = list(self.module_dict[layer_name]._forward_hooks.keys())  # Get all hook IDs
-                            if hooked_layers:
-                                print(f"Layer {layer_name} has been hooked with hook ID(s): {hooked_layers}")
+                        # print("extracting features")
+                        # layer_keys = self.get_layer_keys()
+                        # for layer_name in layer_keys:
+                        #     hooked_layers = list(self.module_dict[layer_name]._forward_hooks.keys())  # Get all hook IDs
+                        #     if hooked_layers:
+                        #         print(f"Layer {layer_name} has been hooked with hook ID(s): {hooked_layers}")
                         _ = self(im_torch)
                     except AssertionError as ea:
-                        print("outputs:", len(self.outputs[0][0]))
+                        # print("outputs:", len(self.outputs))
                         pass
                     except Exception as ex:
                         raise ex
