@@ -1066,7 +1066,7 @@ class ConvPaintWidget(QWidget):
             return
         
         data_dims = self._get_data_dims()
-        print("1", self.cp_model.classifier)
+        # print("1", self.cp_model.classifier)
         
         if data_dims in ['2D', '2D_RGB', '3D_multi']:
             self.radio_no_normalize.setEnabled(True)
@@ -1081,7 +1081,7 @@ class ConvPaintWidget(QWidget):
             self.radio_normalize_over_stack.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.button_group_normalize.button(self.cp_model.param.normalize).setChecked(True)
-        print("4", self.cp_model.classifier)
+        # print("4", self.cp_model.classifier)
 
     def _reset_predict_buttons(self):
         """Enable or disable predict buttons based on the current state."""
