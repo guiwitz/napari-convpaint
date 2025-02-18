@@ -10,6 +10,7 @@ from napari_guitils.gui_structures import VHGroup, TabSet
 from pathlib import Path
 import numpy as np
 import warnings
+import pickle
 
 from .conv_paint_utils import normalize_image, compute_image_stats
 from .conv_paint_model import ConvpaintModel
@@ -720,7 +721,7 @@ class ConvPaintWidget(QWidget):
             elif data_dims in ['3D_RGB', '4D']:
                 image = image_stack_norm[:, step]
 
-            # Predict the current step            
+            # Predict the current step
             if self.cp_model.param.tile_image: # NOTE: We could also move this condition to the cp model
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
@@ -743,20 +744,27 @@ class ConvPaintWidget(QWidget):
             dialog = QFileDialog()
             save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
         save_file = Path(save_file)
+
         # Save model
         self.cp_model.save(save_file)
+
         # Adjust the model description
         self.current_model_path = save_file.name
         self._set_model_description()
 
     def _on_load_model(self, event=None, save_file=None):
         """Select classifier file to load along with the model parameters."""
-        # Get file path
+        # Get file path and open the data
         if save_file is None:
             dialog = QFileDialog()
             save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
+        
         save_file = Path(save_file)
-        self.cp_model = ConvpaintModel(model_path=save_file)
+        with open(save_file, 'rb') as f:
+            data = pickle.load(f)
+        
+        # Load the model parameters
+        self.cp_model.param = data['param']
 
         # Check if the loaded multichannel setting is compatible with data
         data_dims = self._get_data_dims()
@@ -776,7 +784,11 @@ class ConvPaintWidget(QWidget):
 
         # Update GUI to show selectable layers of model chosen from drop-down
         self._update_gui_fe_layers_from_model()
-        
+
+        # Load the model (Note: done after updating GUI, since GUI updates might reset clf or change model)
+        self.cp_model = ConvpaintModel(model_path=save_file)
+        self.temp_fe_model = ConvpaintModel.create_fe(self.cp_model.param.fe_name, self.cp_model.param.fe_use_cuda)
+
         # Adjust trained flag, save button and predict buttons, and update model description
         self.trained = True
         self.save_model_btn.setEnabled(True)
@@ -943,7 +955,7 @@ class ConvPaintWidget(QWidget):
 
         # Create a new model (with a new classifier and model_state)
         self.cp_model = ConvpaintModel(param=new_param)
-        self._set_model_description()
+        self._reset_clf()
 
     def _on_reset_default_fe(self, event=None):
         """Reset the feature extraction model to the default model."""
@@ -1054,6 +1066,7 @@ class ConvPaintWidget(QWidget):
             return
         
         data_dims = self._get_data_dims()
+        print("1", self.cp_model.classifier)
         
         if data_dims in ['2D', '2D_RGB', '3D_multi']:
             self.radio_no_normalize.setEnabled(True)
@@ -1068,6 +1081,7 @@ class ConvPaintWidget(QWidget):
             self.radio_normalize_over_stack.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
             self.button_group_normalize.button(self.cp_model.param.normalize).setChecked(True)
+        print("4", self.cp_model.classifier)
 
     def _reset_predict_buttons(self):
         """Enable or disable predict buttons based on the current state."""
@@ -1083,7 +1097,7 @@ class ConvPaintWidget(QWidget):
 
     def _update_gui_fe_layers_from_model(self):
         """Update GUI FE layer selection based on the current (e.g. loaded) model."""
-        fe_layer_keys = self.cp_model.get_fe_layer_keys()        
+        fe_layer_keys = self.temp_fe_model.get_layer_keys()
         if fe_layer_keys is not None:
             self.fe_layer_selection.clear()
             self.fe_layer_selection.addItems(fe_layer_keys)
@@ -1130,7 +1144,6 @@ class ConvPaintWidget(QWidget):
 
     def _update_gui_from_param(self):
         """Update GUI from parameters."""
-
         self._reset_radio_data_dim_choices()
         # Set radio buttons depending on param (possibly enforcing a choice)
         if self.cp_model.param.multi_channel_img:
@@ -1145,7 +1158,9 @@ class ConvPaintWidget(QWidget):
             self.radio_single_channel.setChecked(True)
             self.radio_multi_channel.setChecked(False)
             self.radio_rgb.setChecked(False)
+        # print("1", self.cp_model.classifier)
         self._reset_radio_norm_choices()
+        # print("2", self.cp_model.classifier)
 
         self.button_group_normalize.button(self.cp_model.param.normalize).setChecked(True)
 

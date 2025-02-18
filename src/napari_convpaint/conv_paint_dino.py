@@ -202,39 +202,39 @@ class DinoFeatures(FeatureExtractor):
             return features
 
 
-    def predict_image(self, image, classifier, param, **kwargs):
-        '''Special predict function for feature extraction models that output patchwise features.
-        1. Extract patch wise features
-        2. Predict each patch with classifier
-        3. Scale up the predictions'''
+    # def predict_image(self, image, classifier, param, **kwargs):
+    #     '''Special predict function for feature extraction models that output patchwise features.
+    #     1. Extract patch wise features
+    #     2. Predict each patch with classifier
+    #     3. Scale up the predictions'''
 
-        #add padding
-        padding = param.fe_padding
-        if image.ndim == 2:
-            image = np.expand_dims(image, axis=0)
-        image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+    #     #add padding
+    #     padding = param.fe_padding
+    #     if image.ndim == 2:
+    #         image = np.expand_dims(image, axis=0)
+    #     image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
-        features = self.get_features_scaled(image, param, return_patches=True, **kwargs)
-        w_patch = np.ceil(features.shape[-2] / param.image_downsample).astype(int)
-        h_path = np.ceil(features.shape[-1] / param.image_downsample).astype(int)
+    #     features = self.get_features_scaled(image, param, return_patches=True, **kwargs)
+    #     w_patch = np.ceil(features.shape[-2] / param.image_downsample).astype(int)
+    #     h_path = np.ceil(features.shape[-1] / param.image_downsample).astype(int)
 
-        nb_features = features.shape[0] #[nb_features, width, height]
+    #     nb_features = features.shape[0] #[nb_features, width, height]
 
-        #move features to last dimension
-        features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
-        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features] (1d-array for RF)
+    #     #move features to last dimension
+    #     features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
+    #     features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features] (1d-array for RF)
 
 
-        all_pixels = pd.DataFrame(features)
-        predictions = classifier.predict(all_pixels)
+    #     all_pixels = pd.DataFrame(features)
+    #     predictions = classifier.predict(all_pixels)
 
-        predicted_image = np.reshape(predictions, [w_patch, h_path])
-        predicted_image = skimage.transform.resize(
-            image=predicted_image,
-            output_shape=(image.shape[-2], image.shape[-1]),
-            preserve_range=True, order=param.fe_order).astype(np.uint8)
+    #     predicted_image = np.reshape(predictions, [w_patch, h_path])
+    #     predicted_image = skimage.transform.resize(
+    #         image=predicted_image,
+    #         output_shape=(image.shape[-2], image.shape[-1]),
+    #         preserve_range=True, order=param.fe_order).astype(np.uint8)
         
-        if padding > 0:
-            predicted_image = predicted_image[padding:-padding, padding:-padding]
+    #     if padding > 0:
+    #         predicted_image = predicted_image[padding:-padding, padding:-padding]
         
-        return predicted_image
+    #     return predicted_image

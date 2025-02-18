@@ -152,18 +152,19 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
     assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     
-    my_widget.param.fe_scalings = [1]
-    my_widget.param.fe_order = 0  # Set interpolation order to 0
-    my_widget.param.fe_name = 'dinov2_vits14_reg'
-    my_widget.param.fe_use_cuda = False
-    my_widget.param.fe_use_min_features = False
-    my_widget.param.tile_annotations = False
-    my_widget.param.image_downsample = 1
-    my_widget.param.normalize = 1 #no normalization (button id)
+    cp_model = my_widget.cp_model
+    cp_model.param.fe_scalings = [1]
+    cp_model.param.fe_order = 0  # Set interpolation order to 0
+    cp_model.param.fe_name = 'dinov2_vits14_reg'
+    cp_model.param.fe_use_cuda = False
+    cp_model.param.fe_use_min_features = False
+    cp_model.param.tile_annotations = False
+    cp_model.param.image_downsample = 1
+    cp_model.param.normalize = 1 #no normalization (button id)
     my_widget._update_gui_from_param()
     my_widget.set_fe_btn.click()  # Load the model
-    assert my_widget.param.fe_scalings == [1]
-    assert my_widget.param.fe_name == 'dinov2_vits14_reg'
+    assert cp_model.param.fe_scalings == [1]
+    assert cp_model.param.fe_name == 'dinov2_vits14_reg'
 
     my_widget._on_train()  # Update the classifier with the new parameters
     my_widget._on_predict()
@@ -214,7 +215,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.fe_scaling_factors.setCurrentText('[1]')
     my_widget.set_fe_btn.setEnabled(True)
     my_widget.set_fe_btn.click()
-    assert my_widget.param.fe_scalings == [1]
+    assert my_widget.cp_model.param.fe_scalings == [1]
     my_widget._on_train()
     my_widget._on_predict()
     model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
@@ -224,10 +225,10 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     # Create and save the second model with scales [1, 2, 3, 4]. Change in the UI:
     my_widget.fe_scaling_factors.setCurrentText('[1,2,4,8]')
     my_widget.set_fe_btn.click()
-    assert my_widget.param.fe_scalings == [1, 2, 4, 8]
+    assert my_widget.cp_model.param.fe_scalings == [1, 2, 4, 8]
 
     my_widget.set_fe_btn.click()
-    assert my_widget.param.fe_scalings == [1, 2, 4, 8]
+    assert my_widget.cp_model.param.fe_scalings == [1, 2, 4, 8]
     my_widget._on_train()
     my_widget._on_predict()
     model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
@@ -236,14 +237,14 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
 
     # Load the second model and predict
     my_widget._on_load_model(save_file=model_path_2)
-    assert my_widget.param.fe_scalings == [1, 2, 4, 8]
+    assert my_widget.cp_model.param.fe_scalings == [1, 2, 4, 8]
     my_widget._on_predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
 
     # Load the first model and predict
     my_widget._on_load_model(save_file=model_path_1)
-    assert my_widget.param.fe_scalings == [1]
+    assert my_widget.cp_model.param.fe_scalings == [1]
     my_widget._on_predict()
     recovered = viewer.layers['segmentation'].data[ground_truth == 1]
     assert np.any(recovered)  # Check if there is any prediction
