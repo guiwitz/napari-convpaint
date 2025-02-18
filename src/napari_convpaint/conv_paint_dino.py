@@ -32,6 +32,9 @@ class DinoFeatures(FeatureExtractor):
         except(RuntimeError):
             model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False, force_reload=True)
         return model
+    
+    def get_description(self):
+        return "Foundational ViT model. Use to extract long range and semantic features from images."
 
     def get_default_param(self, param=None):
         param = super().get_default_param(param=param)

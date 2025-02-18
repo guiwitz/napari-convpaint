@@ -24,6 +24,12 @@ class FeatureExtractor:
         This method is intended to be overridden by subclasses to load the specific model.
         """
         return None
+    
+    def get_description(self):
+        """
+        Returns a description of the feature extractor.
+        """
+        return "This is a generic feature extractor. Subclasses should override this method."
 
     def get_features(self, image):
         """

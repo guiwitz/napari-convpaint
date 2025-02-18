@@ -9,6 +9,9 @@ class GaussianFeatures(FeatureExtractor):
         super().__init__(model_name=model_name, use_cuda=use_cuda)
         self.sigma = sigma
 
+    def get_description(self):
+        return "Minimal model to easily and rapidly extract basic image features."
+
     def get_features(self, image, **kwargs):
         """Given an image extract features
 

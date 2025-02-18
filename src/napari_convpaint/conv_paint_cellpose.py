@@ -21,6 +21,9 @@ class CellposeFeatures(FeatureExtractor):
         # Load the cellpose model
         model_cellpose = models.CellposeModel(model_type='tissuenet_cp3')
         return model_cellpose.net
+    
+    def get_description(self):
+        return "Model specialized in cell segmentation."
 
 
     def get_features(self, img, **kwargs):

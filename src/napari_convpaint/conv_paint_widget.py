@@ -238,7 +238,7 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model options', self.classifier_params_group.gbox, [10, 0, 3, 2])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model options'), True)
         
-        # Current model and update button
+        # Current model
         self.model_description2 = QLabel('None')
         self.current_model_group.glayout.addWidget(self.model_description2, 0, 0, 1, 2)
 
@@ -246,7 +246,11 @@ class ConvPaintWidget(QWidget):
         self.qcombo_fe_type = QComboBox()
         self.qcombo_fe_type.addItems(sorted(ConvpaintModel.get_all_fe_models().keys()))
         self.qcombo_fe_type.setToolTip('Select architecture of feature extraction model.')
-        self.fe_group.glayout.addWidget(self.qcombo_fe_type, 2, 0, 1, 2)
+        self.fe_group.glayout.addWidget(self.qcombo_fe_type, 1, 0, 1, 2)
+
+        self.FE_description = QLabel(self.temp_fe_model.get_description())
+        self.FE_description.setWordWrap(True)
+        self.fe_group.glayout.addWidget(self.FE_description, 2, 0, 1, 2)
 
         # Add "FE layers" list to FE group
         self.fe_layer_selection = QListWidget()
@@ -858,6 +862,7 @@ class ConvPaintWidget(QWidget):
             if val is not None:
                 if isinstance(val, list): val = str(val)
                 setter(val)
+        self.FE_description.setText(self.temp_fe_model.get_description())
 
     def _on_fe_layer_selection_changed(self):
         """Enable the set button based on the model type."""

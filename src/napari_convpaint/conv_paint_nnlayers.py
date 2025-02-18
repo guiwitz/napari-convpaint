@@ -67,6 +67,12 @@ class Hookmodel(FeatureExtractor):
         # CREATE EFFICIENTNETB0 MODEL
         elif model_name == 'efficient_netb0':
             return models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+        
+    def get_description(self):
+        if self.model_name == 'vgg16':
+            return "CNN model trained on ImageNet data. Use first layers to extract low-level features. Add pyramid scalings to include broader context."
+        elif self.model_name == 'efficient_netb0':
+            return "EfficientNet model trained on ImageNet data."
 
     def get_default_param(self, param=None):
         
