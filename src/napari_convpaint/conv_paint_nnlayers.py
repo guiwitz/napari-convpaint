@@ -45,9 +45,8 @@ class Hookmodel(FeatureExtractor):
         super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
 
         # SET DEVICE
-        if use_cuda is not None:
-            self.device = get_device(use_cuda)
-            self.model = self.model.to(self.device)
+        self.device = get_device(use_cuda)
+        self.model = self.model.to(self.device)
 
         # INITIALIZATION OF LAYER HOOKS
         self.update_layer_dict()
@@ -142,9 +141,11 @@ class Hookmodel(FeatureExtractor):
         return self.model(tensor_image_dev)
 
     def hook_normal(self, module, input, output):
+        # print("extracting with normal layer")
         self.outputs.append(output)
 
     def hook_last(self, module, input, output):
+        # print("extracting with last layer")
         self.outputs.append(output)
         assert False
 
@@ -156,8 +157,10 @@ class Hookmodel(FeatureExtractor):
             self.features_per_layer.append(
                 self.module_dict[selected_layers[ind]].out_channels)
             if ind == len(selected_layers) - 1:
+                # print(f"registering LAST hook for layer {selected_layers[ind]}")
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_last)
             else:
+                # print(f"registering hook for layer {selected_layers[ind]}")
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
 
     def get_features_scaled(self, image, param:Param):
@@ -191,8 +194,8 @@ class Hookmodel(FeatureExtractor):
         else:
             max_features = np.max(self.features_per_layer)
         # test with minimal number of features i.e. taking only n first features
-        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
+        # rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
+        # cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
 
         all_scales = self.filter_image_multichannels(image, param)
         if param.fe_use_min_features:
@@ -314,8 +317,15 @@ class Hookmodel(FeatureExtractor):
                     im_torch = torch.tensor(im_tot[np.newaxis, ::])
                     self.outputs = []
                     try:
+                        print("extracting features")
+                        layer_keys = self.get_layer_keys()
+                        for layer_name in layer_keys:
+                            hooked_layers = list(self.module_dict[layer_name]._forward_hooks.keys())  # Get all hook IDs
+                            if hooked_layers:
+                                print(f"Layer {layer_name} has been hooked with hook ID(s): {hooked_layers}")
                         _ = self(im_torch)
                     except AssertionError as ea:
+                        print("outputs:", len(self.outputs[0][0]))
                         pass
                     except Exception as ex:
                         raise ex

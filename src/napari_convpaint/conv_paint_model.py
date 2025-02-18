@@ -20,7 +20,7 @@ class ConvpaintModel:
 
     ALL_MODELS_TYPES_DICT = {}
 
-    def __init__(self, model_path=None, param=None):
+    def __init__(self, model_path=None, param=None, fe_name=None, fe_use_cuda=None, fe_layers=None):
         self.param = Param()
         # Initialize the dictionary of all available models
         if not ConvpaintModel.ALL_MODELS_TYPES_DICT:
@@ -33,6 +33,9 @@ class ConvpaintModel:
             self._load(model_path)
         elif param is not None:
             self._load_param(param)
+        elif fe_name is not None:
+            self._set(fe_name, fe_use_cuda, fe_layers)
+            self.param = self.fe_model.get_default_param()
         else:
             def_param = ConvpaintModel.get_default_param()
             self._load_param(def_param)
@@ -161,11 +164,11 @@ class ConvpaintModel:
         fe_model_class = ConvpaintModel.ALL_MODELS_TYPES_DICT.get(fe_name)
         
         # Initialize the feature extractor model
-        if isinstance(fe_model_class, Hookmodel):
+        if fe_model_class is Hookmodel:
             fe_model = fe_model_class(
                 model_name=fe_name,
                 use_cuda=use_cuda,
-                selected_layers=layers
+                layers=layers
         )
         # elif len(self.fe_model.named_modules) == 1:
         #     self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])

@@ -876,8 +876,6 @@ class ConvPaintWidget(QWidget):
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
         fe_defaults = self.temp_fe_model.get_default_param()
-        print("new_param", new_param)
-        print("def_param", fe_defaults)
         enforced_params = [] # List of enforced parameters for raising a warning
         # Multichannel
         if ((fe_defaults.multi_channel_img is not None) and
