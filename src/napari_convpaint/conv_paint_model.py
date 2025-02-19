@@ -57,7 +57,7 @@ class ConvpaintModel:
         elif param is not None:
             self._load_param(param)
         elif fe_name is not None:
-            self._set(fe_name, fe_use_cuda, fe_layers)
+            self._set_fe(fe_name, fe_use_cuda, fe_layers)
             self.param = self.fe_model.get_default_param()
         else:
             def_param = ConvpaintModel.get_default_param()
@@ -97,32 +97,32 @@ class ConvpaintModel:
         Returns a param object, which defines the default Convpaint model.
         """
 
-        param = Param()
+        def_param = Param()
 
         # Image processing parameters
-        param.multi_channel_img = False
-        param.rgb_img = False
-        param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
+        def_param.multi_channel_img = False
+        def_param.rgb_img = False
+        def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Acceleration parameters
-        param.image_downsample = 1
-        param.tile_annotations = True
-        param.tile_image = False
+        def_param.image_downsample = 1
+        def_param.tile_annotations = True
+        def_param.tile_image = False
 
         # FE parameters
-        param.fe_name = "vgg16"
-        param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
-        param.fe_use_cuda = False
-        param.fe_scalings = [1, 2, 4]
-        param.fe_order = 0
-        param.fe_use_min_features = False
+        def_param.fe_name = "vgg16"
+        def_param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
+        def_param.fe_use_cuda = False
+        def_param.fe_scalings = [1, 2, 4]
+        def_param.fe_order = 0
+        def_param.fe_use_min_features = False
 
         # Classifier parameters
-        param.clf_iterations = 50
-        param.clf_learning_rate = 0.1
-        param.clf_depth = 5
+        def_param.clf_iterations = 50
+        def_param.clf_learning_rate = 0.1
+        def_param.clf_depth = 5
 
-        return param
+        return def_param
 
     def save(self, model_path):
         """
@@ -152,7 +152,7 @@ class ConvpaintModel:
         with open(model_path, 'rb') as f:
             data = pickle.load(f)
         new_param = data['param']
-        self._set(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
         self.param = new_param.copy()
         self.classifier = data['classifier']
         if 'model_state' in data:
@@ -165,7 +165,7 @@ class ConvpaintModel:
         Loads the given param object into the model and set the model accordingly.
         Only intended for internal use at model initiation.
         """
-        self._set(param.fe_name, param.fe_use_cuda, param.fe_layers)
+        self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
         self.param = param.copy()
 
     def get_param(self):
@@ -174,7 +174,7 @@ class ConvpaintModel:
         """
         return self.param.copy()
 
-    def _set(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
+    def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
         """
         Sets the model based on the given FE parameters.
         Creates new feature extracture, and resets the model state and classifier.
@@ -302,8 +302,8 @@ class ConvpaintModel:
         image: 2d array
             image to segment
 
-        Given inside the ConvPaint class:    
-            self.model: Hookmodel
+        Given inside the ConvpaintModel class:    
+            self.model: FeatureExtractor model
                 model to extract features from
             self.classifier: CatBoostClassifier
                 classifier to use for prediction
@@ -419,6 +419,7 @@ class ConvpaintModel:
     def get_features_current_layers(self, image, annotations):        # FROM CONV_PAINT SCRIPT
         """Given a potentially multidimensional image and a set of annotations,
         extract multiscale features from multiple layers of a model.
+        
         Parameters
         ----------
         image : np.ndarray
@@ -438,6 +439,7 @@ class ConvpaintModel:
                 Use minimal number of features, by default True
             self.param.image_downsample : int, optional
                 Downsample image by this factor before extracting features, by default 1
+
         Returns
         -------
         features : pandas DataFrame
