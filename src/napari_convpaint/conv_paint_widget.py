@@ -19,8 +19,9 @@ from .conv_paint_model import ConvpaintModel
 class ConvPaintWidget(QWidget):
     """
     Implementation of a napari widget for interactive segmentation performed
-    via a CatBoost Classifier trained on annotations. The default filters used to 
-    generate the model features are taken from the first layer of a VGG16 model
+    via multiple means of feature extraction combined with a CatBoost Classifier
+    trained on annotations. The default filters used to generate 
+    the features are taken from the first layer of a VGG16 model
     as proposed here: https://github.com/hinderling/napari_pixel_classifier
 
     Parameters
@@ -431,7 +432,7 @@ class ConvPaintWidget(QWidget):
 ### Visibility toggles for key bindings
 
     def toggle_annotation(self, event=None):
-        """Hide annotation layer."""
+        """Hide/unhide annotation layer."""
 
         if self.viewer.layers['annotations'].visible == False:
             self.viewer.layers['annotations'].visible = True
@@ -439,7 +440,7 @@ class ConvPaintWidget(QWidget):
             self.viewer.layers['annotations'].visible = False
 
     def toggle_prediction(self, event=None):
-        """Hide prediction layer."""
+        """Hide/unhide prediction layer."""
 
         if self.viewer.layers['segmentation'].visible == False:
             self.viewer.layers['segmentation'].visible = True
@@ -604,7 +605,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_predict(self):
         """Predict the segmentation of the currently viewed frame based 
-        on a RF model trained with annotations"""
+        on a classifier trained with annotations"""
         # Perform checks as preparation for prediction
 
         # NOTE: Do this in cp_model instead
@@ -692,7 +693,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
-        on a RF model trained with annotations"""
+        on a classifier model trained with annotations"""
         
         data_dims = self._get_data_dims()
         if data_dims not in ['3D_single', '3D_RGB', '4D']:

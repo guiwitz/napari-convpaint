@@ -8,6 +8,8 @@ class FeatureExtractor:
 
         self.model_name = model_name
         self.use_cuda = use_cuda
+        self.padding = 0
+        self.patch_size = 1
 
         # USE PROVIDED MODEL IF AVAILABLE
         if model is not None:
@@ -55,11 +57,10 @@ class FeatureExtractor:
         # FE params (encouraged to set)
         def_param.fe_name= self.model_name
         # param.fe_layers: list[str] = None
+        def_param.fe_use_cuda = False
         def_param.fe_scalings = [1]
         def_param.fe_order = 0
         def_param.fe_use_min_features = False
-        def_param.fe_use_cuda = False
-        def_param.fe_padding = 0
 
         # # General settings (NOTE: only set if shall be enforced by FE !)
         # param.multi_channel_img: bool = None # use multichannel if image dimensions allow
@@ -78,18 +79,33 @@ class FeatureExtractor:
         return def_param
     
     def get_layer_keys(self):
+        """
+        If the model has layers, return the keys of the layers.
+        """
         return None
-
     
     def get_enforced_param(self, param=None):
         """
-        Define which parameters need to be absolutley enforced for this feature extractor.
+        Define which parameters need to be absolutley enforced for feature extraction.
         """
         if param is None:
             enf_param = Param()
         else:
             enf_param = param.copy()
         return enf_param
+    
+    def get_padding(self):
+        """
+        Get the padding that shall be applied around the image before feature extraction.
+        Important: For some FEs this might have to be calculated based on certain parameters (e.g. layers).
+        """
+        return self.padding
+    
+    def get_patch_size(self):
+        """
+        Get the patch size that shall be used for feature extraction (images will be padded to multiples of patch-size).
+        """
+        return self.patch_size
 
     def get_features_scaled(self, image, param, **kwargs):
         """
@@ -115,7 +131,7 @@ class FeatureExtractor:
         if param.image_downsample > 1:
             image = image[:, ::param.image_downsample, ::param.image_downsample]
 
-        padding = param.fe_padding
+        padding = self.get_padding()
         image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
         features_all_scales = []
@@ -135,24 +151,24 @@ class FeatureExtractor:
             features_all_scales = features_all_scales[:, padding:-padding, padding:-padding]
         return features_all_scales
     
-    def predict_image(self, image, classifier, param, **kwargs):
-        features = self.get_features_scaled(image=image,param=param)
-        nb_features = features.shape[0] #[nb_features, width, height]
+    # def predict_image(self, image, classifier, param, **kwargs):
+    #     features = self.get_features_scaled(image=image,param=param)
+    #     nb_features = features.shape[0] #[nb_features, width, height]
 
-        #move features to last dimension
-        features = np.moveaxis(features, 0, -1)
-        features = np.reshape(features, (-1, nb_features))
+    #     #move features to last dimension
+    #     features = np.moveaxis(features, 0, -1)
+    #     features = np.reshape(features, (-1, nb_features))
 
-        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
+    #     rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
+    #     cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
 
-        all_pixels = pd.DataFrame(features)
-        predictions = classifier.predict(all_pixels)
+    #     all_pixels = pd.DataFrame(features)
+    #     predictions = classifier.predict(all_pixels)
 
-        predicted_image = np.reshape(predictions, [rows, cols])
-        if param.image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=param.fe_order).astype(np.uint8)
-        return predicted_image
+    #     predicted_image = np.reshape(predictions, [rows, cols])
+    #     if param.image_downsample > 1:
+    #         predicted_image = skimage.transform.resize(
+    #             image=predicted_image,
+    #             output_shape=(image.shape[-2], image.shape[-1]),
+    #             preserve_range=True, order=param.fe_order).astype(np.uint8)
+    #     return predicted_image

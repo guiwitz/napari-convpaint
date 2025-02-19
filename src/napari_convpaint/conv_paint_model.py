@@ -17,6 +17,29 @@ from .conv_paint_param import Param
 from . import conv_paint_utils
 
 class ConvpaintModel:
+    """
+    Base Convpaint model class that combines a feature extraction and a classifier.
+    Consists of a feature extractor model, a feature extractor model and a Param object,
+    which defines the details of the model procedures.
+    Model can be initialized with a model path, a param object, or a feature extractor name.
+    If initialized by name, also the cuda usage and the layers to extract features from can be set,
+    while the defaults of the feature extractor model are used for other parameters.
+    If neither a model path, a param object, nor a feature extractor name is given,
+    a default Conpaint model is created (defined in the get_default_param() method).
+
+    Parameters
+    ----------
+    model_path : str, optional
+        Path to a saved model, by default None
+    param : Param, optional
+        Param object with the model parameters, by default None
+    fe_name : str, optional
+        Name of the feature extractor model, by default None
+    fe_use_cuda : bool, optional
+        Whether to use CUDA for the feature extractor (if initialized by name), by default None
+    fe_layers : list[str], optional
+        List of layer names to extract features from (if initialized by name), by default None
+    """
 
     ALL_MODELS_TYPES_DICT = {}
 
@@ -27,8 +50,8 @@ class ConvpaintModel:
             ConvpaintModel._init_models_dict()
 
         # Initialize the model
-        if (model_path is not None) and (param is not None):
-            raise ValueError('Please provide either a model path or a param object, but not both.')
+        if (model_path is not None) + (param is not None) + (fe_name is not None) > 1:
+            raise ValueError('Please provide a model path, a param object, or a model name but not multiples.')
         if model_path is not None:
             self._load(model_path)
         elif param is not None:
@@ -42,6 +65,9 @@ class ConvpaintModel:
 
     @staticmethod
     def _init_models_dict():
+        """
+        Initializes the dictionary of all available feature extractor models.
+        """
         # Initialize the MODELS TO TYPES dictionary with the models that are always available
         ConvpaintModel.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
         ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
@@ -60,13 +86,15 @@ class ConvpaintModel:
 
     @staticmethod
     def get_all_fe_models():
-        """Return a dictionary of all available models"""
+        """
+        Returns a dictionary of all available feature extractor models
+        """
         return ConvpaintModel.ALL_MODELS_TYPES_DICT
     
     @staticmethod
     def get_default_param():
         """
-        Return a default param object, which defines the default model.
+        Returns a param object, which defines the default Convpaint model.
         """
 
         param = Param()
@@ -85,7 +113,6 @@ class ConvpaintModel:
         param.fe_name = "vgg16"
         param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
         param.fe_use_cuda = False
-        param.fe_padding = 0
         param.fe_scalings = [1, 2, 4]
         param.fe_order = 0
         param.fe_use_min_features = False
@@ -98,6 +125,15 @@ class ConvpaintModel:
         return param
 
     def save(self, model_path):
+        """
+        Saves the model to a file. Includes the classifier, the param object, and the
+        state of the feature extractor model in a pickle file.
+
+        Parameters
+        ----------
+        model_path : str
+            Path to save the model to.
+        """
         if self.classifier is None:
             warnings.warn('No trained classifier found.')
         with open(model_path, 'wb') as f:
@@ -109,6 +145,10 @@ class ConvpaintModel:
             pickle.dump(data, f)
 
     def _load(self, model_path):
+        """
+        Loads the model from a file.
+        Only intended for internal use at model initiation.
+        """
         with open(model_path, 'rb') as f:
             data = pickle.load(f)
         new_param = data['param']
@@ -121,17 +161,25 @@ class ConvpaintModel:
                 self.fe_model.load_state_dict(data['model_state'])
 
     def _load_param(self, param: Param):
-        """Load the given param object into the model and set the model accordingly."""
+        """
+        Loads the given param object into the model and set the model accordingly.
+        Only intended for internal use at model initiation.
+        """
         self._set(param.fe_name, param.fe_use_cuda, param.fe_layers)
         self.param = param.copy()
 
     def get_param(self):
-        """Return the param object with the current parameters of the model."""
+        """
+        Returns the param object with the current parameters of the model.
+        """
         return self.param.copy()
 
     def _set(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
-        """Set the model based on the given FE parameters.
-        Creates new feature extracture, and resets the model state and classifier."""
+        """
+        Sets the model based on the given FE parameters.
+        Creates new feature extracture, and resets the model state and classifier.
+        Only intended for internal use at model initiation.
+        """
 
         # Reset the model and classifier
         self.fe_model_state = None
@@ -156,7 +204,26 @@ class ConvpaintModel:
                 setattr(self.param, attr, val)
 
     @staticmethod
-    def create_fe(fe_name, use_cuda, layers=None):
+    def create_fe(fe_name, use_cuda=None, layers=None):
+        """
+        Creates a feature extractor model based on the given parameters.
+        Distinguishes between different types of feature extractors such as Hookmodels
+        and initializes them accordingly.
+
+        Parameters
+        ----------
+        fe_name : str
+            Name of the feature extractor model
+        use_cuda : bool, optional
+            Whether to use CUDA for the feature extractor
+        layers : list[str], optional
+            List of layer names to extract features from, by default None
+
+        Returns
+        -------
+        FeatureExtractor
+            The created feature extractor model
+        """
         
         # Check if fe_name is valid and create the feature extractor object
         if not fe_name in ConvpaintModel.ALL_MODELS_TYPES_DICT:
@@ -397,7 +464,7 @@ class ConvpaintModel:
         all_targets = []
 
         # find maximal padding necessary
-        padding = self.param.fe_padding * np.max(self.param.fe_scalings)
+        padding = self.fe_model.get_padding() * np.max(self.param.fe_scalings)
 
         # iterating over non_empty iteraties of t/z for 3D data
         for ind, t in enumerate(non_empty):
@@ -426,7 +493,7 @@ class ConvpaintModel:
                 boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
             for i in range(len(boxes['label'])):
                 # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-                pad_size = self.param.fe_padding # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
+                pad_size = self.fe_model.get_padding() # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
                 x_min = boxes['bbox-0'][i]-pad_size
                 x_max = boxes['bbox-2'][i]+pad_size
                 y_min = boxes['bbox-1'][i]-pad_size

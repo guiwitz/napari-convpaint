@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 class FeatureExtractor(ABC):
     def __init__(self, model_name, **kwargs):
         self.model_name = model_name
-        self.kernel_size = None;
-        self.patch_size = None;
+        self.kernel_size = 1
+        self.patch_size = 1
 
     @abstractmethod
     def extract_features_single_channel(self, image, param, **kwargs):

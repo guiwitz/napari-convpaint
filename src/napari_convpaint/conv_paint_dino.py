@@ -13,8 +13,8 @@ class DinoFeatures(FeatureExtractor):
         # Sets self.model_name and self.use_cuda and creates the model
         super().__init__(model_name=model_name, use_cuda=use_cuda)
         
-        self.patchsize = 14
-        self.padding = int(self.patchsize/2)
+        self.patch_size = 14
+        self.padding = int(self.patch_size/2)
 
         if use_cuda:
             self.device = get_device()
@@ -39,10 +39,9 @@ class DinoFeatures(FeatureExtractor):
     def get_default_param(self, param=None):
         param = super().get_default_param(param=param)
         param.fe_name = self.model_name
+        param.fe_use_cuda = self.use_cuda
         param.fe_scalings = [1]
         param.fe_order = 0
-        param.fe_use_cuda = self.use_cuda
-        param.fe_padding = self.padding
         # param.image_downsample = 1
         param.tile_image = False
         param.tile_annotations = False
@@ -78,8 +77,8 @@ class DinoFeatures(FeatureExtractor):
 
 #       # make sure image is divisible by patch size
         h, w = image.shape[-2:]
-        new_h = h - (h % self.patchsize)
-        new_w = w - (w % self.patchsize)
+        new_h = h - (h % self.patch_size)
+        new_w = w - (w % self.patch_size)
         if new_h != h or new_w != w:
             image = image[:, :new_h, :new_w]
 
@@ -93,8 +92,8 @@ class DinoFeatures(FeatureExtractor):
     def _extract_features_rgb(self, image):
         '''Extract features from image, return features as np.array with dimensions  H x W x nfeatures.
         Input image has to be multiple of patch size'''
-        assert image.shape[-2] % self.patchsize == 0
-        assert image.shape[-1] % self.patchsize == 0
+        assert image.shape[-2] % self.patch_size == 0
+        assert image.shape[-1] % self.patch_size == 0
         assert image.shape[0] == 3
 
         image_tensor = self._preprocess_image(image)
@@ -104,11 +103,11 @@ class DinoFeatures(FeatureExtractor):
         if self.use_cuda:
             features = features.cpu()
         features = features.numpy()[0]
-        features_shape = (int(image.shape[-2] / self.patchsize), int(image.shape[-1] / self.patchsize), features.shape[-1])
+        features_shape = (int(image.shape[-2] / self.patch_size), int(image.shape[-1] / self.patch_size), features.shape[-1])
         features = np.reshape(features, features_shape)
 
-        assert features.shape[0] == image.shape[-2] / self.patchsize
-        assert features.shape[1] == image.shape[-1] / self.patchsize
+        assert features.shape[0] == image.shape[-2] / self.patch_size
+        assert features.shape[1] == image.shape[-1] / self.patch_size
         return features
     
     def _extract_features(self, image):
@@ -171,8 +170,8 @@ class DinoFeatures(FeatureExtractor):
 
         #make sure image is divisible by patch size
         h, w = image.shape[-2:]
-        new_h = (h // self.patchsize) * self.patchsize
-        new_w = (w // self.patchsize) * self.patchsize
+        new_h = (h // self.patch_size) * self.patch_size
+        new_w = (w // self.patch_size) * self.patch_size
         h_pad_top = (h - new_h)//2
         w_pad_left = (w - new_w)//2
         h_pad_bottom = h - new_h - h_pad_top
@@ -186,8 +185,8 @@ class DinoFeatures(FeatureExtractor):
 
         if not return_patches:
             #upsample features to original size
-            features = np.repeat(features, self.patchsize, axis=0)
-            features = np.repeat(features, self.patchsize, axis=1)
+            features = np.repeat(features, self.patch_size, axis=0)
+            features = np.repeat(features, self.patch_size, axis=1)
 
             #replace with padding where there are no annotations
             pad_width = ((h_pad_top, h_pad_bottom), (w_pad_left, w_pad_right), (0,0))
@@ -201,7 +200,7 @@ class DinoFeatures(FeatureExtractor):
         else:
             #return patches
             features = np.moveaxis(features, -1, 0) #[nb_features, H, W]
-            assert features.shape[1] == (h // self.patchsize) and features.shape[2] == (w // self.patchsize)
+            assert features.shape[1] == (h // self.patch_size) and features.shape[2] == (w // self.patch_size)
             return features
 
 

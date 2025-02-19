@@ -29,8 +29,6 @@ class Param:
             name of the feature extractor model
         fe_layers: list[str]
             list of layers (names) to extract features from
-        fe_padding : int
-            padding for the feature extractor NOTE: Needs overthinking
         fe_scalings: list[int]
             list of scaling factors for the feature extractor, creating a pyramid of features
             (features are upscaled accordingly before input to classifier)
@@ -64,7 +62,6 @@ class Param:
     fe_name: str = None
     fe_use_cuda: bool = None
     fe_layers: list[str] = None
-    fe_padding : int = 0
     fe_scalings: list[int] = None
     fe_order: int = None
     fe_use_min_features: bool = None
