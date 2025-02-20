@@ -58,10 +58,13 @@ class ConvpaintModel:
             self._load_param(param)
         elif fe_name is not None:
             self._set_fe(fe_name, fe_use_cuda, fe_layers)
-            self.param = self.fe_model.get_default_param()
+            cpm_defaults = ConvpaintModel.get_default_param() # Get ConvPaint defaults
+            self.param = self.fe_model.get_default_param(cpm_defaults) # Overwrite defaults defined in the FE model
+            self.param.fe_layers = fe_layers # Overwrite the layers with the given layers
+            self.param.fe_use_cuda = fe_use_cuda # Overwrite the cuda usage with the given cuda usage
         else:
-            def_param = ConvpaintModel.get_default_param()
-            self._load_param(def_param)
+            cpm_defaults = ConvpaintModel.get_default_param()
+            self._load_param(cpm_defaults)
 
     @staticmethod
     def _init_models_dict():
@@ -123,8 +126,41 @@ class ConvpaintModel:
         def_param.clf_depth = 5
 
         return def_param
+    
+    def get_param(self, key):
+        """
+        Returns the value of the given parameter key.
+        """
+        return getattr(self.param, key)
+    
+    def get_params(self):
+        """
+        Returns all parameters of the model (= a copy of the Param object).
+        """
+        return self.param.copy()
+    
+    def set_param(self, key, val):
+        """
+        Sets the value of the given parameter key.
+        """
+        if key in self.param.get_keys():
+            setattr(self.param, key, val)
+        else:
+            warnings.warn(f'Parameter "{key}" not found in the model parameters.')
 
-    def save(self, model_path):
+    def set_params(self, **kwargs):
+        """
+        Sets the parameters if given. Note that the model is not reset and no FE model is created.
+        If fe_name, fe_use_cuda, and fe_layers changes, you should create a new ConvpaintModel.
+        """
+        for key, val in kwargs.items():
+            if val is not None:
+                self.set_param(key, val)
+        if 'fe_name' in kwargs or 'fe_use_cuda' in kwargs or 'fe_layers' in kwargs:
+            warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+                          "You should create a new ConvpaintModel instead.")
+
+    def save(self, model_path, add_param_description=True):
         """
         Saves the model to a file. Includes the classifier, the param object, and the
         state of the feature extractor model in a pickle file.
@@ -134,6 +170,8 @@ class ConvpaintModel:
         model_path : str
             Path to save the model to.
         """
+        if not model_path[-4:] == ".pkl":
+            model_path += ".pkl"
         if self.classifier is None:
             warnings.warn('No trained classifier found.')
         with open(model_path, 'wb') as f:
@@ -144,11 +182,16 @@ class ConvpaintModel:
             }
             pickle.dump(data, f)
 
+        if add_param_description:
+            self.param.save_parameters(".".join(model_path.split(".")[:-1]) + '.yml')
+
     def _load(self, model_path):
         """
         Loads the model from a file.
         Only intended for internal use at model initiation.
         """
+        if not model_path[-4:] == ".pkl":
+            model_path += ".pkl"
         with open(model_path, 'rb') as f:
             data = pickle.load(f)
         new_param = data['param']
@@ -167,12 +210,6 @@ class ConvpaintModel:
         """
         self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
         self.param = param.copy()
-
-    def get_param(self):
-        """
-        Returns the param object with the current parameters of the model.
-        """
-        return self.param.copy()
 
     def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
         """
@@ -270,7 +307,7 @@ class ConvpaintModel:
 
     ### OLD FE METHODS
 
-    def predict_image(self, image):                    # FROM FEATURE EXTRACTOR CLASS
+    def predict_image(self, image, return_proba=False):                    # FROM FEATURE EXTRACTOR CLASS
         features = self.fe_model.get_features_scaled(image=image,param=self.param)
         nb_features = features.shape[0] #[nb_features, width, height]
 
@@ -282,15 +319,24 @@ class ConvpaintModel:
         cols = np.ceil(image.shape[-1] / self.param.image_downsample).astype(int)
 
         all_pixels = pd.DataFrame(features)
-        predictions = self.classifier.predict(all_pixels)
+        if return_proba:
+            predictions = self.classifier.predict_proba(all_pixels)
+            predicted_image = np.reshape(predictions, [rows, cols, -1])
 
-        predicted_image = np.reshape(predictions, [rows, cols])
+        else:
+            predictions = self.classifier.predict(all_pixels)
+            predicted_image = np.reshape(predictions, [rows, cols])
+
         if self.param.image_downsample > 1:
             predicted_image = skimage.transform.resize(
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=self.param.fe_order).astype(np.uint8)
-        return predicted_image
+                preserve_range=True, order=self.param.fe_order)
+        
+        if return_proba:
+            return predicted_image
+        else:
+            return predicted_image.astype(np.uint8)
     
     def parallel_predict_image(self, image, use_dask=False):
         """
@@ -647,15 +693,37 @@ class ConvpaintModel:
     ### CLASSIFIER METHODS
 
     def train_classifier(self, features, targets, use_rf=False):
-        """Train a classifier given a set of features and targets."""
+        """
+        Trains a classifier given a set of features and targets.
+        If use_rf is False, a CatBoostClassifier is trained, otherwise a RandomForestClassifier.
+        The trained classifier is saved in the model, but also returned.
+
+        Parameters
+        ----------
+        features : np.ndarray
+            Features to train the classifier on
+        targets : np.ndarray
+            Targets to train the classifier on
+        use_rf : bool, optional
+            Whether to use a RandomForestClassifier, by default False
+
+        Returns
+        -------
+        CatBoostClassifier or RandomForestClassifier
+            Trained classifier
+        """
         if not use_rf:
             self.classifier = CatBoostClassifier(iterations=self.param.clf_iterations,
                                                  learning_rate=self.param.clf_learning_rate,
                                                  depth=self.param.clf_depth)
             self.classifier.fit(features, targets)
+            self.param.classifier = 'CatBoost'
         else:
                 # train a random forest classififer
                 self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
                 self.classifier.fit(features, targets)
+                self.param.classifier = 'RandomForest'
+
+        return self.classifier
 
 

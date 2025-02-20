@@ -41,7 +41,7 @@ class ConvPaintWidget(QWidget):
         super().__init__(parent=parent)
         self.viewer = napari_viewer
         self.cp_model = ConvpaintModel()
-        self.default_cp_param = self.cp_model.get_param()
+        self.default_cp_param = self.cp_model.get_params()
         self.temp_fe_model = ConvpaintModel.create_fe(self.default_cp_param.fe_name,
                                                       self.default_cp_param.fe_use_cuda)
         self.image_mean = None

@@ -15,6 +15,8 @@ class Param:
             path to the classifier model
         multi_channel_img: bool = None
             if the image dimensions allow, use multichannel NOTE: Needs overthinking
+        rgb_img: bool
+            if True, RGB images are used
         normalize: int
             normalization mode
             1: no normalization, 2: normalize stack, 3: normalize each image
@@ -84,31 +86,31 @@ class Param:
     
         with open(save_path, "w") as file:
             dict_to_save = dataclasses.asdict(self)
-            dict_to_save = self.convert_path(dict_to_save, 'classifier')
+            # dict_to_save = self.convert_path(dict_to_save, 'classifier')
             
             yaml.dump(dict_to_save, file)
 
-    def convert_path(self, dict, path):
-        """Convert a path to a str.
+    # def convert_path(self, dict, path):
+    #     """Convert a path to a str.
 
-        Parameters
-        ----------
-        dict : dict
-            dictionary containing the path.
-        path : str
-            path to convert.
+    #     Parameters
+    #     ----------
+    #     dict : dict
+    #         dictionary containing the path.
+    #     path : str
+    #         path to convert.
 
-        Returns
-        -------
-        dict: dict
-            dict with converted path.
-        """
+    #     Returns
+    #     -------
+    #     dict: dict
+    #         dict with converted path.
+    #     """
 
-        if dict[path] is not None:
-            if not isinstance(dict[path], str):
-                dict[path] = dict[path].as_posix()
+    #     if dict[path] is not None:
+    #         if not isinstance(dict[path], str):
+    #             dict[path] = dict[path].as_posix()
         
-        return dict
+    #     return dict
     
     def copy(self):
         """Copy the parameter object.
@@ -120,3 +122,15 @@ class Param:
         """
 
         return Param(**asdict(self))
+
+    @staticmethod
+    def get_keys():
+        """Get the keys of the parameters.
+
+        Returns
+        -------
+        list[str]: list
+            list of keys.
+        """
+
+        return list(asdict(Param()).keys())
