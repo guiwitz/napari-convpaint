@@ -197,7 +197,6 @@ class ConvpaintModel:
         if model_path[-4:] == ".pkl":
             self._load_pkl(model_path)
         elif model_path[-4:] == ".yml":
-            print("Loading model from yml file")
             self._load_yml(model_path)
         else:
             raise ValueError('Model path must end with ".pkl" or ".yml".')
@@ -250,7 +249,6 @@ class ConvpaintModel:
         new_fe_name = fe_name is not None and fe_name != self.param.fe_name
         new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self.param.fe_use_cuda
         new_fe_layers = fe_layers is not None and fe_layers != self.param.fe_layers
-        print("new_fe_name", new_fe_name, "new_fe_use_cuda", new_fe_use_cuda, "new_fe_layers", new_fe_layers)
 
         # Create the feature extractor model
         if new_fe_name or new_fe_use_cuda or new_fe_layers:
