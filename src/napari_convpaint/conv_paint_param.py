@@ -73,7 +73,7 @@ class Param:
     clf_learning_rate: float = None
     clf_depth: int = None
 
-    def save_parameters(self, save_path):
+    def save(self, save_path):
         """Save parameters as yml file.
 
         Parameters
@@ -111,6 +111,28 @@ class Param:
     #             dict[path] = dict[path].as_posix()
         
     #     return dict
+
+    @staticmethod
+    def load(load_path):
+        """Load parameters from yml file.
+
+        Parameters
+        ----------
+        load_path : str or Path
+            place where to load the parameters file.
+
+        Returns
+        -------
+        Param: Param
+            loaded parameter object.
+        """
+
+        load_path = Path(load_path)
+
+        with open(load_path, "r") as file:
+            dict_loaded = yaml.safe_load(file)
+
+        return Param(**dict_loaded)
     
     def copy(self):
         """Copy the parameter object.
@@ -122,6 +144,22 @@ class Param:
         """
 
         return Param(**asdict(self))
+    
+    def get(self, key):
+        """Get the value of a parameter.
+
+        Parameters
+        ----------
+        key : str
+            key of the parameter.
+
+        Returns
+        -------
+        any: any
+            value of the parameter.
+        """
+
+        return asdict(self)[key]
 
     @staticmethod
     def get_keys():

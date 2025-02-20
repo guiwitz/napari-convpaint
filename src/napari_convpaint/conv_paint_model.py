@@ -25,7 +25,7 @@ class ConvpaintModel:
     If initialized by name, also the cuda usage and the layers to extract features from can be set,
     while the defaults of the feature extractor model are used for other parameters.
     If neither a model path, a param object, nor a feature extractor name is given,
-    a default Conpaint model is created (defined in the get_default_param() method).
+    a default Conpaint model is created (defined in the get_default_params() method).
 
     Parameters
     ----------
@@ -58,12 +58,12 @@ class ConvpaintModel:
             self._load_param(param)
         elif fe_name is not None:
             self._set_fe(fe_name, fe_use_cuda, fe_layers)
-            cpm_defaults = ConvpaintModel.get_default_param() # Get ConvPaint defaults
-            self.param = self.fe_model.get_default_param(cpm_defaults) # Overwrite defaults defined in the FE model
+            cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
+            self.param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
             self.param.fe_layers = fe_layers # Overwrite the layers with the given layers
             self.param.fe_use_cuda = fe_use_cuda # Overwrite the cuda usage with the given cuda usage
         else:
-            cpm_defaults = ConvpaintModel.get_default_param()
+            cpm_defaults = ConvpaintModel.get_default_params()
             self._load_param(cpm_defaults)
 
     @staticmethod
@@ -95,7 +95,7 @@ class ConvpaintModel:
         return ConvpaintModel.ALL_MODELS_TYPES_DICT
     
     @staticmethod
-    def get_default_param():
+    def get_default_params():
         """
         Returns a param object, which defines the default Convpaint model.
         """
@@ -121,6 +121,7 @@ class ConvpaintModel:
         def_param.fe_use_min_features = False
 
         # Classifier parameters
+        def_param.classifier = None
         def_param.clf_iterations = 50
         def_param.clf_learning_rate = 0.1
         def_param.clf_depth = 5
@@ -160,7 +161,7 @@ class ConvpaintModel:
             warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
                           "You should create a new ConvpaintModel instead.")
 
-    def save(self, model_path, add_param_description=True):
+    def save(self, model_path, create_pkl=True, create_yml=True):
         """
         Saves the model to a file. Includes the classifier, the param object, and the
         state of the feature extractor model in a pickle file.
@@ -170,29 +171,43 @@ class ConvpaintModel:
         model_path : str
             Path to save the model to.
         """
-        if not model_path[-4:] == ".pkl":
-            model_path += ".pkl"
-        if self.classifier is None:
-            warnings.warn('No trained classifier found.')
-        with open(model_path, 'wb') as f:
-            data = {
-                'classifier': self.classifier,
-                'param': self.param,
-                'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
-            }
-            pickle.dump(data, f)
+        if model_path[-4:] == ".pkl" or model_path[-4:] == ".yml":
+            model_path = model_path[:-4]
+        if create_pkl:
+            pkl_path = model_path + ".pkl"
+            if self.classifier is None:
+                warnings.warn('No trained classifier found.')
+            with open(pkl_path, 'wb') as f:
+                data = {
+                    'classifier': self.classifier,
+                    'param': self.param,
+                    'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
+                }
+                pickle.dump(data, f)
 
-        if add_param_description:
-            self.param.save_parameters(".".join(model_path.split(".")[:-1]) + '.yml')
+        if create_yml:
+            yml_path = model_path + ".yml"
+            self.param.save(yml_path)
 
     def _load(self, model_path):
         """
-        Loads the model from a file.
+        Loads the model from a file. Guesses the file type based on the file ending.
         Only intended for internal use at model initiation.
         """
-        if not model_path[-4:] == ".pkl":
-            model_path += ".pkl"
-        with open(model_path, 'rb') as f:
+        if model_path[-4:] == ".pkl":
+            self._load_pkl(model_path)
+        elif model_path[-4:] == ".yml":
+            print("Loading model from yml file")
+            self._load_yml(model_path)
+        else:
+            raise ValueError('Model path must end with ".pkl" or ".yml".')
+
+    def _load_pkl(self, pkl_path):
+        """
+        Loads the model from a pickle file.
+        Only intended for internal use at model initiation.
+        """
+        with open(pkl_path, 'rb') as f:
             data = pickle.load(f)
         new_param = data['param']
         self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
@@ -202,6 +217,15 @@ class ConvpaintModel:
             self.fe_model_state = data['model_state']
             if hasattr(self.fe_model, 'load_state_dict'): # TODO: CHECK IF THIS MAKES SENSE
                 self.fe_model.load_state_dict(data['model_state'])
+    
+    def _load_yml(self, yml_path):
+        """
+        Loads the model from a yml file.
+        Only intended for internal use at model initiation.
+        """
+        new_param = Param.load(yml_path)
+        self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self.param = new_param
 
     def _load_param(self, param: Param):
         """
@@ -226,6 +250,7 @@ class ConvpaintModel:
         new_fe_name = fe_name is not None and fe_name != self.param.fe_name
         new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self.param.fe_use_cuda
         new_fe_layers = fe_layers is not None and fe_layers != self.param.fe_layers
+        print("new_fe_name", new_fe_name, "new_fe_use_cuda", new_fe_use_cuda, "new_fe_layers", new_fe_layers)
 
         # Create the feature extractor model
         if new_fe_name or new_fe_use_cuda or new_fe_layers:
@@ -302,7 +327,7 @@ class ConvpaintModel:
     
     # def get_fe_defaults(self):
     #     """Return the default params for the feature extractor."""
-    #     return self.fe_model.get_default_param()
+    #     return self.fe_model.get_default_params()
 
 
     ### OLD FE METHODS

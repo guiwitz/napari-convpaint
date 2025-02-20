@@ -54,7 +54,7 @@ class Hookmodel(FeatureExtractor):
         if layers is not None:
             self.register_hooks(layers)
         else:
-            self.register_hooks(self.get_default_param().fe_layers)
+            self.register_hooks(self.get_default_params().fe_layers)
 
     @staticmethod
     def create_model(model_name):
@@ -74,9 +74,9 @@ class Hookmodel(FeatureExtractor):
         elif self.model_name == 'efficient_netb0':
             return "EfficientNet model trained on ImageNet data."
 
-    def get_default_param(self, param=None):
+    def get_default_params(self, param=None):
         
-        param = super().get_default_param(param=param)
+        param = super().get_default_params(param=param)
         
         # self.update_layer_dict() # Is done at initialization (and should not change later)
         

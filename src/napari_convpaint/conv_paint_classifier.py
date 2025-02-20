@@ -70,7 +70,7 @@ class Classifier():
             
         self.fe_model = Hookmodel(model_name='single_layer_vgg16')
         self.classifier = None
-        self.param = self.fe_model.get_default_param()
+        self.param = self.fe_model.get_default_params()
 
     def save_classifier(self, save_path):
         """Save the classifier to a joblib file and the parameters to a yaml file.
@@ -83,7 +83,7 @@ class Classifier():
 
         dump(self.classifier, save_path)
         self.param.classifier = save_path
-        self.param.save_parameters(Path(save_path).parent.joinpath('convpaint_params.yml'))
+        self.param.save(Path(save_path).parent.joinpath('convpaint_params.yml'))
 
 
     def segment_image_stack(self, image, save_path=None):

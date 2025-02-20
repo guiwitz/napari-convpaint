@@ -36,8 +36,8 @@ class DinoFeatures(FeatureExtractor):
     def get_description(self):
         return "Foundational ViT model. Use to extract long range and semantic features from images."
 
-    def get_default_param(self, param=None):
-        param = super().get_default_param(param=param)
+    def get_default_params(self, param=None):
+        param = super().get_default_params(param=param)
         param.fe_name = self.model_name
         param.fe_use_cuda = self.use_cuda
         param.fe_scalings = [1]

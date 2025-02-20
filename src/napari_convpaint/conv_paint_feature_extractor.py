@@ -45,7 +45,7 @@ class FeatureExtractor:
         """
         raise NotImplementedError("Subclasses must implement get_features method.")
 
-    def get_default_param(self, param=None):
+    def get_default_params(self, param=None):
         """
         Get the defaul parameters that the FE shall set/enforce when chosen by the user.
         """

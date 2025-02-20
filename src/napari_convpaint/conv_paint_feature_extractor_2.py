@@ -51,7 +51,7 @@ class FeatureExtractor(ABC):
         # Otherwise, extract features for each channel and concatenate them
         return self.extract_features_from_channels(image, self.param, **kwargs)
 
-    def get_default_param(self, param=None):
+    def get_default_params(self, param=None):
         """
         Get the defaul parameters that the FE shall set/enforce when the FE model is set.
         """
