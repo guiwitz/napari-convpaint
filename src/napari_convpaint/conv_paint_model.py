@@ -243,7 +243,7 @@ class ConvpaintModel:
 
         # Reset the model and classifier
         self.fe_model_state = None
-        self.classifier = None
+        self.reset_classifier()
         
         # Check if we need to create a new FE model
         new_fe_name = fe_name is not None and fe_name != self.param.fe_name
@@ -749,4 +749,9 @@ class ConvpaintModel:
 
         return self.classifier
 
-
+    def reset_classifier(self):
+        """
+        Resets the classifier of the model.
+        """
+        self.classifier = None
+        self.param.classifier = None

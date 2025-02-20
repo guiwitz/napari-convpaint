@@ -161,7 +161,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     cp_model.param.tile_annotations = False
     cp_model.param.image_downsample = 1
     cp_model.param.normalize = 1 #no normalization (button id)
-    my_widget._update_gui_from_param()
+    my_widget._update_gui_from_params()
     my_widget.set_fe_btn.click()  # Load the model
     assert cp_model.param.fe_scalings == [1]
     assert cp_model.param.fe_name == 'dinov2_vits14_reg'
