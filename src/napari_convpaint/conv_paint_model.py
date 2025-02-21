@@ -43,25 +43,53 @@ class ConvpaintModel:
 
     ALL_MODELS_TYPES_DICT = {}
 
-    def __init__(self, model_path=None, param=None, fe_name=None, fe_use_cuda=None, fe_layers=None):
+    std_models = {"vgg-s": Param(fe_name="vgg16",
+                                 fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
+                                 fe_scalings=[1, 2]),
+                  "vgg-m": Param(fe_name="vgg16",
+                                 fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
+                                 fe_scalings=[1, 2, 4]),
+                    "vgg-l": Param(fe_name="vgg16",
+                                   fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                              'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                              'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                              'features.7 Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                              'features.10 Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
+                                    fe_scalings=[1, 2, 4, 8]),
+                    "dino": Param(fe_name="dinov2_vits14_reg"),
+                    "gaussian": Param(fe_name="gaussian_features"),
+                    "cellpose": Param(fe_name="cellpose_backbone")
+                    }
+
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_use_cuda=None, fe_layers=None, **kwargs):
         self.param = Param()
         # Initialize the dictionary of all available models
         if not ConvpaintModel.ALL_MODELS_TYPES_DICT:
             ConvpaintModel._init_models_dict()
 
-        # Initialize the model
-        if (model_path is not None) + (param is not None) + (fe_name is not None) > 1:
+        if (alias is not None) + (model_path is not None) + (param is not None) + (fe_name is not None) > 1:
             raise ValueError('Please provide a model path, a param object, or a model name but not multiples.')
+
+        # If an alias is given, create an according model
+        if alias is not None:
+            if alias in ConvpaintModel.std_models:
+                param = ConvpaintModel.std_models[alias]
+            else:
+                raise ValueError(f'Alias "{alias}" not found in the standard models.')
+
+        # Initialize the model
         if model_path is not None:
             self._load(model_path)
         elif param is not None:
             self._load_param(param)
         elif fe_name is not None:
             self._set_fe(fe_name, fe_use_cuda, fe_layers)
-            cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
-            self.param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
-            self.param.fe_layers = fe_layers # Overwrite the layers with the given layers
-            self.param.fe_use_cuda = fe_use_cuda # Overwrite the cuda usage with the given cuda usage
+            self.param = self.get_fe_defaults()
+            self.param.set(fe_layers = fe_layers, # Overwrite the layers with the given layers
+                           fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
+                            **kwargs) # Overwrite the parameters with the given parameters
         else:
             cpm_defaults = ConvpaintModel.get_default_params()
             self._load_param(cpm_defaults)
@@ -132,7 +160,7 @@ class ConvpaintModel:
         """
         Returns the value of the given parameter key.
         """
-        return getattr(self.param, key)
+        return self.param.get(key)
     
     def get_params(self):
         """
@@ -140,26 +168,28 @@ class ConvpaintModel:
         """
         return self.param.copy()
     
-    def set_param(self, key, val):
+    def set_param(self, key, val, no_warning=False):
         """
         Sets the value of the given parameter key.
         """
-        if key in self.param.get_keys():
-            setattr(self.param, key, val)
+        if key in Param.get_keys():
+            self.param.set_single(key, val)
+            if (key == 'fe_name' or key == 'fe_use_cuda' or key == 'fe_layers') and not no_warning:
+                warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+                    "You should create a new ConvpaintModel instead.")
         else:
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
 
-    def set_params(self, **kwargs):
+    def set_params(self, param=None, no_warning=False, **kwargs):
         """
         Sets the parameters if given. Note that the model is not reset and no FE model is created.
         If fe_name, fe_use_cuda, and fe_layers changes, you should create a new ConvpaintModel.
         """
+        if param is not None:
+            kwargs = param.__dict__
         for key, val in kwargs.items():
             if val is not None:
-                self.set_param(key, val)
-        if 'fe_name' in kwargs or 'fe_use_cuda' in kwargs or 'fe_layers' in kwargs:
-            warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
-                          "You should create a new ConvpaintModel instead.")
+                self.set_param(key, val, no_warning=no_warning)
 
     def save(self, model_path, create_pkl=True, create_yml=True):
         """
@@ -228,11 +258,12 @@ class ConvpaintModel:
 
     def _load_param(self, param: Param):
         """
-        Loads the given param object into the model and set the model accordingly.
+        Loads the given param object into the model and sets the model accordingly.
         Only intended for internal use at model initiation.
         """
         self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
-        self.param = param.copy()
+        self.param = self.get_fe_defaults()
+        self.set_params(no_warning=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
     def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
         """
@@ -246,25 +277,23 @@ class ConvpaintModel:
         self.reset_classifier()
         
         # Check if we need to create a new FE model
-        new_fe_name = fe_name is not None and fe_name != self.param.fe_name
-        new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self.param.fe_use_cuda
-        new_fe_layers = fe_layers is not None and fe_layers != self.param.fe_layers
+        new_fe_name = fe_name is not None and fe_name != self.param.get("fe_name")
+        new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self.param.get("fe_use_cuda")
+        new_fe_layers = fe_layers is not None and fe_layers != self.param.get("fe_layers")
 
         # Create the feature extractor model
         if new_fe_name or new_fe_use_cuda or new_fe_layers:
             self.fe_model = ConvpaintModel.create_fe(
-                fe_name=fe_name,
+                name=fe_name,
                 use_cuda=fe_use_cuda,
                 layers=fe_layers
             )
-        
+
         # Set the parameters
-        for attr, val in {'fe_name': fe_name, 'fe_use_cuda': fe_use_cuda, 'fe_layers': fe_layers}.items():
-            if val is not None:
-                setattr(self.param, attr, val)
+        self.param.set(fe_name=fe_name, fe_use_cuda=fe_use_cuda, fe_layers=fe_layers)
 
     @staticmethod
-    def create_fe(fe_name, use_cuda=None, layers=None):
+    def create_fe(name, use_cuda=None, layers=None):
         """
         Creates a feature extractor model based on the given parameters.
         Distinguishes between different types of feature extractors such as Hookmodels
@@ -272,7 +301,7 @@ class ConvpaintModel:
 
         Parameters
         ----------
-        fe_name : str
+        name : str
             Name of the feature extractor model
         use_cuda : bool, optional
             Whether to use CUDA for the feature extractor
@@ -285,15 +314,15 @@ class ConvpaintModel:
             The created feature extractor model
         """
         
-        # Check if fe_name is valid and create the feature extractor object
-        if not fe_name in ConvpaintModel.ALL_MODELS_TYPES_DICT:
-            raise ValueError(f'Feature extractor model {fe_name} not found.')
-        fe_model_class = ConvpaintModel.ALL_MODELS_TYPES_DICT.get(fe_name)
+        # Check if name is valid and create the feature extractor object
+        if not name in ConvpaintModel.ALL_MODELS_TYPES_DICT:
+            raise ValueError(f'Feature extractor model {name} not found.')
+        fe_model_class = ConvpaintModel.ALL_MODELS_TYPES_DICT.get(name)
         
         # Initialize the feature extractor model
         if fe_model_class is Hookmodel:
             fe_model = fe_model_class(
-                model_name=fe_name,
+                model_name=name,
                 use_cuda=use_cuda,
                 layers=layers
         )
@@ -301,31 +330,20 @@ class ConvpaintModel:
         #     self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
         else:
             fe_model = fe_model_class(
-                model_name=fe_name,
+                model_name=name,
                 use_cuda=use_cuda
             )
 
         return fe_model
 
-    # def set_params(self, **kwargs):
-    #     """Set the parameters if given. Note that the model is not reset and no FE model is created.
-    #     If fe_name, fe_use_cuda, and fe_layers changes, you should create a new ConvpaintModel."""
-    #     for attr, val in kwargs.items():
-    #         if val is not None:
-    #             setattr(self.param, attr, val)
-    #     if 'fe_name' in kwargs or 'fe_use_cuda' in kwargs or 'fe_layers' in kwargs:
-    #         warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
-    #                       "You should create a new ConvpaintModel instead.")
-    
-    # def get_fe_layer_keys(self):
-    #     """Return the selection of layer key for the feature extractor."""
-    #     if self.fe_model is None or not isinstance(self.fe_model, Hookmodel):
-    #         return None
-    #     return self.fe_model.selectable_layer_keys
-    
-    # def get_fe_defaults(self):
-    #     """Return the default params for the feature extractor."""
-    #     return self.fe_model.get_default_params()
+    def get_fe_defaults(self):
+        """
+        Return the default params for the feature extractor.
+        Where they are not sepecified, the default Convpaint params are used.
+        """
+        cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
+        new_param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
+        return new_param
 
 
     ### OLD FE METHODS

@@ -47,7 +47,6 @@ class Param:
         clf_depth: int = None
             depth of the classifier
     """
-
     classifier: str = None
 
     # Image processing parameters
@@ -72,6 +71,68 @@ class Param:
     clf_iterations: int = None
     clf_learning_rate: float = None
     clf_depth: int = None
+    
+    def get(self, key):
+        """Get the value of a parameter.
+
+        Parameters
+        ----------
+        key : str
+            key of the parameter.
+
+        Returns
+        -------
+        any: any
+            value of the parameter.
+        """
+        return asdict(self)[key]
+
+    @staticmethod
+    def get_keys():
+        """Get the keys of the parameters.
+
+        Returns
+        -------
+        list[str]: list
+            list of keys.
+        """
+        return list(asdict(Param()).keys())
+    
+    def set_single(self, key, value):
+        """Set the value of a single parameter.
+
+        Parameters
+        ----------
+        key : str
+            key of the parameter.
+        value : any
+            value of the parameter.
+        """
+        if key in Param.get_keys():
+            setattr(self, key, value)
+        else:
+            raise ValueError(f"Parameter {key} not found in Param object.")
+
+    def set(self, **kwargs):
+        """Set the value of a parameter.
+
+        Parameters
+        ----------
+        kwargs : dict
+            dictionary containing the key and value of the parameter.
+        """
+        for key, value in kwargs.items():
+            self.set_single(key, value)
+    
+    def copy(self):
+        """Copy the parameter object.
+
+        Returns
+        -------
+        Param: Param
+            copied parameter object.
+        """
+        return Param(**asdict(self))
 
     def save(self, save_path):
         """Save parameters as yml file.
@@ -81,7 +142,6 @@ class Param:
         save_path : str or Path
             place where to save the parameters file.
         """
-
         save_path = Path(save_path)
     
         with open(save_path, "w") as file:
@@ -89,6 +149,27 @@ class Param:
             # dict_to_save = self.convert_path(dict_to_save, 'classifier')
             
             yaml.dump(dict_to_save, file)
+
+    @staticmethod
+    def load(load_path):
+        """Load parameters from yml file.
+
+        Parameters
+        ----------
+        load_path : str or Path
+            place where to load the parameters file.
+
+        Returns
+        -------
+        Param: Param
+            loaded parameter object.
+        """
+        load_path = Path(load_path)
+
+        with open(load_path, "r") as file:
+            dict_loaded = yaml.safe_load(file)
+
+        return Param(**dict_loaded)
 
     # def convert_path(self, dict, path):
     #     """Convert a path to a str.
@@ -111,64 +192,3 @@ class Param:
     #             dict[path] = dict[path].as_posix()
         
     #     return dict
-
-    @staticmethod
-    def load(load_path):
-        """Load parameters from yml file.
-
-        Parameters
-        ----------
-        load_path : str or Path
-            place where to load the parameters file.
-
-        Returns
-        -------
-        Param: Param
-            loaded parameter object.
-        """
-
-        load_path = Path(load_path)
-
-        with open(load_path, "r") as file:
-            dict_loaded = yaml.safe_load(file)
-
-        return Param(**dict_loaded)
-    
-    def copy(self):
-        """Copy the parameter object.
-
-        Returns
-        -------
-        Param: Param
-            copied parameter object.
-        """
-
-        return Param(**asdict(self))
-    
-    def get(self, key):
-        """Get the value of a parameter.
-
-        Parameters
-        ----------
-        key : str
-            key of the parameter.
-
-        Returns
-        -------
-        any: any
-            value of the parameter.
-        """
-
-        return asdict(self)[key]
-
-    @staticmethod
-    def get_keys():
-        """Get the keys of the parameters.
-
-        Returns
-        -------
-        list[str]: list
-            list of keys.
-        """
-
-        return list(asdict(Param()).keys())
