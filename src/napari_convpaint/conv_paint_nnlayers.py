@@ -15,9 +15,10 @@ from .conv_paint_param import Param
 AVAILABLE_MODELS = ['vgg16', 'efficient_netb0']
 
 class Hookmodel(FeatureExtractor):
-    """Class to extract features from a pytorch model using hooks on chosen layers.
+    """
+    Class to extract features from a pytorch model using hooks on chosen layers.
 
-    Parameters
+    Parameters:
     ----------
     model_name : str
         Name of model to use. Currently only 'vgg16' and 'efficient_netb0' are supported.
@@ -113,7 +114,7 @@ class Hookmodel(FeatureExtractor):
         """
         Given a hookmodel, find the maximum kernel size needed for the deepest layer.
         
-        Parameters
+        Parameters: None
         ----------
         
         Returns
@@ -174,7 +175,7 @@ class Hookmodel(FeatureExtractor):
     def get_features_scaled(self, image, param:Param):
         """Given an image and a set of annotations, extract multiscale features
 
-        Parameters
+        Parameters:
         ----------
         model : Hookmodel
             Model to extract features from
@@ -222,7 +223,7 @@ class Hookmodel(FeatureExtractor):
         Given a filter model and a classifier, predict the class of 
         each pixel in an image.
 
-        Parameters
+        Parameters:
         ----------
         image: 2d array
             image to segment
@@ -275,11 +276,12 @@ class Hookmodel(FeatureExtractor):
 
 
     def filter_image_multichannels(self, image, param):
-        """Recover the outputs of chosen layers of a pytorch model. Layers and model are
+        """
+        Recover the outputs of chosen layers of a pytorch model. Layers and model are
         specified in the hookmodel object. If image has multiple channels, each channel
         is processed separately.
         
-        Parameters
+        Parameters:
         ----------
         image : np.ndarray
             2d Image to filter

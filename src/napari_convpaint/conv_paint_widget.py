@@ -26,11 +26,11 @@ class ConvPaintWidget(QWidget):
 
     Parameters
     ----------
-    napari_viewer: napari.Viewer
+    napari_viewer : napari.Viewer
         main napari viewer
-    project: bool
+    project : bool
         use project widget for multi-image project management
-    third_party: bool
+    third_party : bool
         if True, widget is used as third party and will not add layers to the viewer
         by default.
     """

@@ -14,25 +14,11 @@ class GaussianFeatures(FeatureExtractor):
         return "Minimal model to easily and rapidly extract basic image features."
 
     def get_features(self, image, **kwargs):
-        """Given an image extract features
-
-        Parameters
-        ----------
-        image : np.ndarray
-            Image to extract features from (CxHxW)
-  
-        Returns
-        -------
-        extracted_features : np.ndarray
-            Extracted features. Dimensions npixels x [nfeatures * nbscales]
-        """
-
         im_filter = skimage.filters.gaussian(image, sigma=self.sigma, channel_axis=0)
         #print(im_filter.shape) for RGB image --> e.g (3, 134, 139)
         return im_filter
     
     def get_default_params(self, param=None):
-        """Overwrite any default parameters."""
         param = super().get_default_params(param=param)
         param.fe_layers = []
         return param

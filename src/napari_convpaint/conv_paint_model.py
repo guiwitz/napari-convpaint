@@ -19,16 +19,17 @@ from . import conv_paint_utils
 class ConvpaintModel:
     """
     Base Convpaint model class that combines a feature extraction and a classifier.
-    Consists of a feature extractor model, a feature extractor model and a Param object,
+    Consists of a feature extractor model, a classifier and a Param object,
     which defines the details of the model procedures.
-    Model can be initialized with a model path, a param object, or a feature extractor name.
-    If initialized by name, also the cuda usage and the layers to extract features from can be set,
-    while the defaults of the feature extractor model are used for other parameters.
-    If neither a model path, a param object, nor a feature extractor name is given,
+    Model can be initialized with an alias, a model path, a param object, or a feature extractor name.
+    If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
+    If neither an alias, a model path, a param object, nor a feature extractor name is given,
     a default Conpaint model is created (defined in the get_default_params() method).
 
     Parameters
     ----------
+    alias : str, optional
+        Alias of a predefined model, by default None
     model_path : str, optional
         Path to a saved model, by default None
     param : Param, optional
@@ -39,6 +40,8 @@ class ConvpaintModel:
         Whether to use CUDA for the feature extractor (if initialized by name), by default None
     fe_layers : list[str], optional
         List of layer names to extract features from (if initialized by name), by default None
+    **kwargs : additional parameters
+        Additional parameters to override defaults for the model or feature extractor
     """
 
     ALL_MODELS_TYPES_DICT = {}
@@ -51,19 +54,54 @@ class ConvpaintModel:
                                             'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
                                             'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
                                  fe_scalings=[1, 2, 4]),
-                    "vgg-l": Param(fe_name="vgg16",
-                                   fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
-                                              'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
-                                              'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
-                                              'features.7 Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
-                                              'features.10 Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
-                                    fe_scalings=[1, 2, 4, 8]),
-                    "dino": Param(fe_name="dinov2_vits14_reg"),
-                    "gaussian": Param(fe_name="gaussian_features"),
-                    "cellpose": Param(fe_name="cellpose_backbone")
-                    }
+                  "vgg-l": Param(fe_name="vgg16",
+                                 fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.7 Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.10 Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
+                                 fe_scalings=[1, 2, 4, 8]),
+                  "dino": Param(fe_name="dinov2_vits14_reg"),
+                  "gaussian": Param(fe_name="gaussian_features"),
+                  "cellpose": Param(fe_name="cellpose_backbone")
+                  }
 
     def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_use_cuda=None, fe_layers=None, **kwargs):
+        """
+        Initializes the Convpaint model by loading the specified model, parameters, or feature extractor.
+
+        The constructor can be initialized in three ways:
+        1. By providing an alias (e.g., "vgg-s", "dino", "gaussian", etc.), in which case a corresponding model
+        configuration will be loaded.
+        2. By providing a saved model path (model_path) to load a pre-trained model.
+        3. By providing a Param object, which contains model parameters.
+        4. By providing the name of the feature extractor, CUDA usage, and feature extraction layers, in which case
+        the additional kwargs will be used to override the defaults of the feature extractor model.
+        
+        If none of the options are provided, a default Convpaint model will be created.
+
+        Parameters
+        ----------
+        alias : str, optional
+            The alias of a predefined model, by default None.
+        model_path : str, optional
+            Path to a saved model file, by default None.
+        param : Param, optional
+            Param object containing model parameters, by default None.
+        fe_name : str, optional
+            Name of the feature extractor model, by default None.
+        fe_use_cuda : bool, optional
+            Whether to use CUDA for the feature extractor, by default None.
+        fe_layers : list[str], optional
+            List of layers to extract features from, by default None.
+        **kwargs : additional parameters
+            Additional parameters to override defaults for the model or feature extractor.
+
+        Raises
+        ------
+        ValueError
+            If more than one of alias, model_path, param, or fe_name is provided.
+        """
         self.param = Param()
         # Initialize the dictionary of all available models
         if not ConvpaintModel.ALL_MODELS_TYPES_DICT:

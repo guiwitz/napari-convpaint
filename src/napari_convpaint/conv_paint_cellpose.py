@@ -35,16 +35,6 @@ class CellposeFeatures(FeatureExtractor):
         return param
 
     def get_features(self, img, **kwargs):
-        """
-        Gets the features of an image.
-
-        Parameters:
-        - image: The input image. Dimensions are [nb_channels, width, height]
-
-        Returns:
-        - features: The extracted features of the image. [nb_features, width, height]
-        """
-
         if img.ndim == 2:
             img_expanded = np.stack([img, img], axis=0)
         elif img.ndim == 3:
