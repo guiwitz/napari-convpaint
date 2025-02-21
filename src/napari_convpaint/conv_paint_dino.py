@@ -34,12 +34,16 @@ class DinoFeatures(FeatureExtractor):
         return model
     
     def get_description(self):
-        return "Foundational ViT model. Use to extract long range and semantic features from images."
+        desc = "Foundational ViT model. Extracts long range, semantic features."
+        desc += "\nGood for: natural images (living beings, objects), histology etc."
+        desc += "\n(The small version is used, with registers and patch size 14x14.)"
+        return desc
 
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
         param.fe_name = self.model_name
         param.fe_use_cuda = self.use_cuda
+        param.fe_layers = []
         param.fe_scalings = [1]
         param.fe_order = 0
         # param.image_downsample = 1

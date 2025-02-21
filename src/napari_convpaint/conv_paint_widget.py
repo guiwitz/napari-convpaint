@@ -870,7 +870,7 @@ class ConvPaintWidget(QWidget):
         new_fe_type = self.qcombo_fe_type.currentText()
         current_cuda = self.cp_model.get_param("fe_use_cuda")
         self.temp_fe_model = ConvpaintModel.create_fe(new_fe_type, current_cuda)
-        
+
         # Update the GUI to show the FE layers of the temp model
         self._update_gui_fe_layer_choice_from_temp_model()
         
