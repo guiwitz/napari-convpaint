@@ -382,6 +382,12 @@ class ConvpaintModel:
         cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
         new_param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
         return new_param
+    
+    def get_fe_layer_keys(self):
+        """
+        Returns the keys of the feature extractor layers.
+        """
+        return self.fe_model.get_layer_keys()
 
 
     ### OLD FE METHODS

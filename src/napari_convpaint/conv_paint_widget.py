@@ -822,7 +822,6 @@ class ConvPaintWidget(QWidget):
         save_string = str(save_file)
         new_model = ConvpaintModel(model_path=save_string)
         new_param = new_model.get_params()
-        self.temp_fe_model = ConvpaintModel.create_fe(new_param.fe_name, new_param.fe_use_cuda)
         
         # Check if the new multichannel setting is compatible with data
         data_dims = self._get_data_dims()
@@ -841,11 +840,12 @@ class ConvPaintWidget(QWidget):
         self._update_gui_from_params(new_param)
 
         # Update GUI to show selectable layers of model chosen from drop-down
-        self._update_gui_fe_layers_from_model()
+        self._update_gui_fe_layers_from_model(new_model)
 
         # Load the model (Note: done after updating GUI, since GUI updates might reset clf or change model)
         self.cp_model = new_model
         self.cp_model.param = new_param
+        self.temp_fe_model = ConvpaintModel.create_fe(new_param.fe_name, new_param.fe_use_cuda)
 
         # Adjust trained flag, save button and predict buttons, and update model description
         self.trained = save_file.suffix == '.pkl' and new_model.classifier is not None
@@ -1040,7 +1040,8 @@ class ConvPaintWidget(QWidget):
             self._create_annot_seg_copies()
 
         if self.image_layer_selection_widget.value is None:
-            raise Exception('Please select an image layer first')
+            warnings.warn('No image layer selected. No layers added.')
+            return
         
         layer_shape = self._get_annot_shape()
 
@@ -1067,7 +1068,7 @@ class ConvPaintWidget(QWidget):
                 )
         
         # Activate the annotation layer, select it in the dropdown and activate paint mode
-        if annotation_exists:
+        if 'annotations' in self.viewer.layers:
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
@@ -1155,16 +1156,18 @@ class ConvPaintWidget(QWidget):
             self.segment_btn.setEnabled(False)
             self.segment_all_btn.setEnabled(False)
 
-    def _update_gui_fe_layers_from_model(self):
+    def _update_gui_fe_layers_from_model(self, cp_model=None):
         """Update GUI FE layer selection based on the current (e.g. loaded) model."""
+        if cp_model is None:
+            cp_model = self.cp_model
         # Display layers based on the temp FE model
-        fe_layer_keys = self.temp_fe_model.get_layer_keys()
+        fe_layer_keys = cp_model.get_fe_layer_keys()
         if fe_layer_keys is not None:
             self.fe_layer_selection.clear()
             self.fe_layer_selection.addItems(fe_layer_keys)
             self.fe_layer_selection.setEnabled(len(fe_layer_keys) > 1) # Only need to enable if multiple layers available
             # Select layers that are in the param object
-            for layer in self.cp_model.get_param("fe_layers"):
+            for layer in cp_model.get_param("fe_layers"):
                 items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
                 for item in items:
                     item.setSelected(True)
