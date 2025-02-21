@@ -83,23 +83,55 @@ class ConvPaintWidget(QWidget):
 
         # === HOME TAB ===
 
-        # Create groups
+        # Create groups and separate labels
         self.layer_selection_group = VHGroup('Layer selection', orientation='G')
-        self.train_group = VHGroup('Train', orientation='G')
-        self.segment_group = VHGroup('Segment', orientation='G')
-        self.load_save_group = VHGroup('Load/Save', orientation='G')
+        self.train_group = VHGroup('Train/Segment', orientation='G')
+        # self.segment_group = VHGroup('Segment', orientation='G')
+        # self.load_save_group = VHGroup('Load/Save', orientation='G')
         self.image_processing_group = VHGroup('Image processing', orientation='G')
         self.acceleration_group = VHGroup('Acceleration', orientation='G')
         self.model_group = VHGroup('Model', orientation='G')
+        # Create the shortcuts info
+        shortcuts_text1 = 'Shift+a: Toggle annotations\nShift+s: Train\nShift+d: Predict\nShift+f: Toggle prediction'
+        shortcuts_text2 = 'Shift+q: Set annotation label 1\nShift+w: Set annotation label 2\nShift+e: Set annotation label 3\nShift+r: Set annotation label 4'
+        shortcuts_label1 = QLabel(shortcuts_text1)
+        shortcuts_label2 = QLabel(shortcuts_text2)
+        shortcuts_label1.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        shortcuts_label2.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        shortcuts_grid = QGridLayout()
+        shortcuts_grid.addWidget(shortcuts_label1, 0, 0)
+        shortcuts_grid.addWidget(shortcuts_label2, 0, 1)
+        shortcuts_widget = QWidget()
+        shortcuts_widget.setLayout(shortcuts_grid)
+        # self.shortcuts_label = QLabel(shortcuts_text)#"\n[Hover mouse to see shortcuts]")
+        # self.shortcuts_label.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        # self.shortcuts_label.setToolTip(shortcuts_text)
 
         # Add groups to the tab
+        self.tabs.add_named_tab('Home', self.model_group.gbox)
         self.tabs.add_named_tab('Home', self.layer_selection_group.gbox)
-        self.tabs.add_named_tab('Home', self.train_group.gbox)
-        self.tabs.add_named_tab('Home', self.segment_group.gbox)
-        self.tabs.add_named_tab('Home', self.load_save_group.gbox)
+        # self.tabs.add_named_tab('Home', self.segment_group.gbox)
+        # self.tabs.add_named_tab('Home', self.load_save_group.gbox)
         self.tabs.add_named_tab('Home', self.image_processing_group.gbox)
         self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
-        self.tabs.add_named_tab('Home', self.model_group.gbox)
+        self.tabs.add_named_tab('Home', self.train_group.gbox)
+        self.tabs.widget(self.tabs.tab_names.index('Home')).layout().addWidget(shortcuts_widget)
+
+        # Add buttons for "Model" group
+        # Current model description label
+        self.model_description1 = QLabel('None')
+        self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
+        # Reset model button
+        self._reset_model_btn = QPushButton('Reset to default model')
+        self._reset_model_btn.setToolTip('Discard current model, create new default model.')
+        self.model_group.glayout.addWidget(self._reset_model_btn, 1,0,1,2)
+        self.save_model_btn = QPushButton('Save Convpaint model')
+        self.save_model_btn.setToolTip('Save model as *.pkl or *.yml file')
+        self.save_model_btn.setEnabled(True)
+        self.model_group.glayout.addWidget(self.save_model_btn, 2,0,1,1)
+        self.load_model_btn = QPushButton('Load Convpaint model')
+        self.load_model_btn.setToolTip('Select *.pkl or *.yml file to load')
+        self.model_group.glayout.addWidget(self.load_model_btn, 2,1,1,1)
 
         # Add elements to "Layer selection" group
         # Image layer (widget for selecting the layer to segment)
@@ -123,7 +155,7 @@ class ConvPaintWidget(QWidget):
         self.check_keep_layers.setChecked(self.keep_layers)
         self.layer_selection_group.glayout.addWidget(self.check_keep_layers, 2,1,1,1)
 
-        # Add buttons for "Train" group
+        # Add buttons for "Train/Segment" group
         self.train_classifier_btn = QPushButton('Train')
         self.train_classifier_btn.setToolTip('Train model on annotations')
         self.train_group.glayout.addWidget(self.train_classifier_btn, 0,0,1,1)
@@ -142,25 +174,14 @@ class ConvPaintWidget(QWidget):
         # self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
         # if init_project is False:
         #     self.train_classifier_on_project_btn.setEnabled(False)
-
-        # Add buttons for "Segment" group
         self.segment_btn = QPushButton('Segment image')
         self.segment_btn.setEnabled(False)
         self.segment_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
-        self.segment_group.glayout.addWidget(self.segment_btn, 0,0,1,1)
+        self.train_group.glayout.addWidget(self.segment_btn, 1,0,1,1)
         self.segment_all_btn = QPushButton('Segment stack')
         self.segment_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
         self.segment_all_btn.setEnabled(False)
-        self.segment_group.glayout.addWidget(self.segment_all_btn, 0,1,1,1)
-
-        # Add buttons for "Load/Save" group
-        self.save_model_btn = QPushButton('Save Convpaint model')
-        self.save_model_btn.setToolTip('Save model as *.pkl file')
-        self.save_model_btn.setEnabled(True)
-        self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
-        self.load_model_btn = QPushButton('Load Convpaint model')
-        self.load_model_btn.setToolTip('Select *.pkl file to load as trained model')
-        self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
+        self.train_group.glayout.addWidget(self.segment_all_btn, 1,1,1,1)
 
         # Add buttons for "Image Processing" group
         # Radio buttons for "Data Dimensions"
@@ -201,15 +222,6 @@ class ConvPaintWidget(QWidget):
         self.image_processing_group.glayout.addWidget(self.radio_no_normalize, 0,2,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,2,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,2,1,1)
-
-        # Add buttons for "Model" group
-        # Current model description label
-        self.model_description1 = QLabel('None')
-        self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
-        # Reset model button
-        self._reset_model_btn = QPushButton('Reset to default model')
-        self._reset_model_btn.setToolTip('Discard current model, create new default model.')
-        self.model_group.glayout.addWidget(self._reset_model_btn, 1,0,1,2)
 
         # Add elements to "Acceleration" group
         # "Downsample" spinbox
@@ -352,9 +364,43 @@ class ConvPaintWidget(QWidget):
         self._on_select_layer()
 
         # Add key bindings
-        self.viewer.bind_key('a', self.toggle_annotation, overwrite=True)
-        self.viewer.bind_key('d', self.toggle_prediction, overwrite=True)
-        self.viewer.bind_key('s', self._on_train, overwrite=True)
+        self.viewer.bind_key('Shift+a', self.toggle_annotation, overwrite=True)
+        self.viewer.bind_key('Shift+s', self._on_train, overwrite=True)
+        self.viewer.bind_key('Shift+d', self._on_predict, overwrite=True)
+        self.viewer.bind_key('Shift+f', self.toggle_prediction, overwrite=True)
+        self.viewer.bind_key('Shift+q', lambda event=None: self.set_annot_label_class(1, event), overwrite=True)
+        self.viewer.bind_key('Shift+w', lambda event=None: self.set_annot_label_class(2, event), overwrite=True)
+        self.viewer.bind_key('Shift+e', lambda event=None: self.set_annot_label_class(3, event), overwrite=True)
+        self.viewer.bind_key('Shift+r', lambda event=None: self.set_annot_label_class(4, event), overwrite=True)
+
+### Visibility toggles for key bindings
+
+    def toggle_annotation(self, event=None):
+        """Hide/unhide annotations layer."""
+
+        if self.viewer.layers['annotations'].visible == False:
+            self.viewer.layers['annotations'].visible = True
+            self.viewer.layers.selection.active = self.viewer.layers['annotations']
+        else:
+            self.viewer.layers['annotations'].visible = False
+
+    def toggle_prediction(self, event=None):
+        """Hide/unhide prediction layer."""
+
+        if self.viewer.layers['segmentation'].visible == False:
+            self.viewer.layers['segmentation'].visible = True
+        else:
+            self.viewer.layers['segmentation'].visible = False
+
+    def set_annot_label_class(self, x, event=None):
+        """Set the label class of the annotation layer."""
+        if 'annotations' in self.viewer.layers:
+            self.viewer.layers['annotations'].selected_label = x
+            self.viewer.layers['annotations'].visible = True
+            self.viewer.layers['annotations'].mode = 'paint'
+            self.viewer.layers.selection.active = self.viewer.layers['annotations']
+
+### Define the connections between the widget elements
 
     def add_connections(self):
 
@@ -437,25 +483,6 @@ class ConvPaintWidget(QWidget):
         self.spin_depth.valueChanged.connect(lambda:
             self.cp_model.set_param('clf_depth', self.spin_depth.value()))
         self.set_default_clf_btn.clicked.connect(self._on_reset_clf_params)
-
-### Visibility toggles for key bindings
-
-    def toggle_annotation(self, event=None):
-        """Hide/unhide annotations layer."""
-
-        if self.viewer.layers['annotations'].visible == False:
-            self.viewer.layers['annotations'].visible = True
-            self.viewer.layers.selection.active = self.viewer.layers['annotations']
-        else:
-            self.viewer.layers['annotations'].visible = False
-
-    def toggle_prediction(self, event=None):
-        """Hide/unhide prediction layer."""
-
-        if self.viewer.layers['segmentation'].visible == False:
-            self.viewer.layers['segmentation'].visible = True
-        else:
-            self.viewer.layers['segmentation'].visible = False
 
 ### Define the detailed behaviour of the widget
 
@@ -860,6 +887,7 @@ class ConvPaintWidget(QWidget):
         # self.save_model_btn.setEnabled(True)
         self._reset_clf_params()
         self._reset_fe_params()
+        self._reset_default_general_params()
         self._reset_clf()
 
     ### Model Tab
@@ -1375,6 +1403,9 @@ class ConvPaintWidget(QWidget):
 
     def _get_data_dims(self):
         """Get data dimensions. Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
+        if self.image_layer_selection_widget.value is None:
+            warnings.warn('No image selected')
+            return None
         num_dims = self.image_layer_selection_widget.value.ndim
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
