@@ -32,6 +32,8 @@ class Param:
             name of the feature extractor model
         fe_layers : list[str]
             list of layers (names) to extract features from
+        fe_use_cuda : bool
+            whether to use cuda (GPU) for feature extraction
         fe_scalings : list[int]
             list of scaling factors for the feature extractor, creating a pyramid of features
             (features are upscaled accordingly before input to classifier)
@@ -39,8 +41,6 @@ class Param:
             interpolation order used for the upscaling of features for the pyramid
         fe_use_min_features : bool
             if True, use the minimum number of features among all layers
-        fe_use_cuda : bool
-            whether to use cuda (GPU) for feature extraction
         clf_iterations : int
             number of iterations for the classifier
         clf_learning_rate : float

@@ -389,10 +389,110 @@ class ConvpaintModel:
         """
         return self.fe_model.get_layer_keys()
 
+    def get_features_img(self, image):
+        """
+        Extracts features from an image using the Convpaint model's Parameters and feature extractor model.
+        Returns the extracted features with the spatial dimensions identical to the input image.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to extract features from
+        
+        Returns
+        -------
+        f_img : np.ndarray
+            Extracted features [nb_features, height, width]
+        """
+        features = self.fe_model.get_features_scaled(image=image, param=self.param)
+        return features
+    
+    def train(self, image, annotations):
+        """
+        Trains the Convpaint model's classifier given an image and annotations.
+        Uses the Parameter and the FeatureExtractor model to extract features.
+        Then uses the features of annotated pixels to train the classifier.
+        Trains the internal classifier, which is also returned.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to train the classifier on
+        annotations : np.ndarray
+            Annotations to train the classifier on
+
+        Returns
+        -------
+        CatBoostClassifier or RandomForestClassifier
+            Trained classifier
+        """
+        features, targets = self.get_features_targets_img_stack(image, annotations)
+        self._train_classifier(features, targets)
+        return self.classifier
+
+    def segment(self, image, return_proba=False):
+        """
+        Segments an image by predicting its classes using the trained classifier.
+        Uses the feature extractor model to extract features from the image.
+        Predicts the classes of the pixels in the image using the trained classifier.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to segment
+        return_proba : bool, optional
+            Whether to return the class probabilities, by default False
+        """
+        self._predict_image(image, return_proba=return_proba)
+
+
+    ### CLASSIFIER METHODS
+
+    def _train_classifier(self, features, targets, use_rf=False):
+        """
+        Trains a classifier given a set of features and targets.
+        If use_rf is False, a CatBoostClassifier is trained, otherwise a RandomForestClassifier.
+        The trained classifier is saved in the model, but also returned.
+
+        Parameters
+        ----------
+        features : np.ndarray
+            Features to train the classifier on
+        targets : np.ndarray
+            Targets to train the classifier on
+        use_rf : bool, optional
+            Whether to use a RandomForestClassifier, by default False
+
+        Returns
+        -------
+        CatBoostClassifier or RandomForestClassifier
+            Trained classifier
+        """
+        if not use_rf:
+            self.classifier = CatBoostClassifier(iterations=self.param.clf_iterations,
+                                                 learning_rate=self.param.clf_learning_rate,
+                                                 depth=self.param.clf_depth)
+            self.classifier.fit(features, targets)
+            self.param.classifier = 'CatBoost'
+        else:
+                # train a random forest classififer
+                self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+                self.classifier.fit(features, targets)
+                self.param.classifier = 'RandomForest'
+
+        return self.classifier
+
+    def reset_classifier(self):
+        """
+        Resets the classifier of the model.
+        """
+        self.classifier = None
+        self.param.classifier = None
+
 
     ### OLD FE METHODS
 
-    def predict_image(self, image, return_proba=False):                    # FROM FEATURE EXTRACTOR CLASS
+    def _predict_image(self, image, return_proba=False):                    # FROM FEATURE EXTRACTOR CLASS
         features = self.fe_model.get_features_scaled(image=image,param=self.param)
         nb_features = features.shape[0] #[nb_features, width, height]
 
@@ -515,7 +615,7 @@ class ConvpaintModel:
 
                 if use_dask:
                     processes.append(client.submit(
-                        self.predict_image, image=image_block))
+                        self._predict_image, image=image_block))
                     
                     min_row_ind_collection.append(min_row_ind)
                     min_col_ind_collection.append(min_col_ind)
@@ -527,7 +627,7 @@ class ConvpaintModel:
                     new_min_row_ind_collection.append(new_min_row_ind)
 
                 else:
-                    predicted_image = self.predict_image(image_block)
+                    predicted_image = self._predict_image(image_block)
                     crop_pred = predicted_image[
                         new_min_row_ind: new_max_row_ind,
                         new_min_col_ind: new_max_col_ind]
@@ -774,46 +874,65 @@ class ConvpaintModel:
         for img, annots in zip(image_list, annots_list):
             features, targets = self.get_features_targets_img_stack(img, annots)
 
+######################################
 
-    ### CLASSIFIER METHODS
-
-    def train_classifier(self, features, targets, use_rf=False):
+    def train_new(self, img, annotations):
         """
-        Trains a classifier given a set of features and targets.
-        If use_rf is False, a CatBoostClassifier is trained, otherwise a RandomForestClassifier.
-        The trained classifier is saved in the model, but also returned.
-
-        Parameters
-        ----------
-        features : np.ndarray
-            Features to train the classifier on
-        targets : np.ndarray
-            Targets to train the classifier on
-        use_rf : bool, optional
-            Whether to use a RandomForestClassifier, by default False
-
-        Returns
-        -------
-        CatBoostClassifier or RandomForestClassifier
-            Trained classifier
+        Train the model on the given image and annotations.
         """
-        if not use_rf:
-            self.classifier = CatBoostClassifier(iterations=self.param.clf_iterations,
-                                                 learning_rate=self.param.clf_learning_rate,
-                                                 depth=self.param.clf_depth)
-            self.classifier.fit(features, targets)
-            self.param.classifier = 'CatBoost'
-        else:
-                # train a random forest classififer
-                self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
-                self.classifier.fit(features, targets)
-                self.param.classifier = 'RandomForest'
+        self.annots = annotations
+        self.patch_size = self.fe_model.get_patch_size()
+        self.padding = self.fe_model.get_padding()
+        tile_annots = self.param.get("tile_annotations")
+        self.run_checks()
+        prep_img = self.prepare_img_dims(img) # -> Z, C, H, W
+        prep_annots = self.prepare_annots_dims(annotations)
+        annotated_slices, non_empty_annots = self.extract_annotated_slices(prep_img, prep_annots)
+        features_lin = self.get_features_lin(annotated_slices, tile_annotations=tile_annots)
+        f, t = self.get_features_annots(features_lin) # For patch-based FE, create image, re-scale and re-linearize first
+        clf = self._train_classifier(f, t)
+        return clf
 
-        return self.classifier
+    def prepare_img_dims(self, img):
+        """
+        Prepare the dimensions of the image.
+        Makes sure the image is in Z,C,H,W format (if necessary with Z and/or C = 1).
+        """
+        ndim = img.ndim
+        if ndim == 2:
+            img = img[np.newaxis, np.newaxis, :, :]
 
-    def reset_classifier(self):
+        if ndim == 3 and self.param.get("rgb_img") and img.shape[2] == 3:
+            img = np.moveaxis(img, 2, 0) # -> C, H, W -> Can now be treated together with multi-channel images
+        if ndim == 3 and not self.param.get("multi_channel_img"):
+            img = img[:, np.newaxis, :, :] # non-multichannel have Z -> C = 1 is added
+        elif ndim == 3:
+            img = img[np.newaxis, :, :, :] # multichannel (and RGB) have C -> Z = 1 is added
+
+        return img
+        
+    def prepare_annots_dims(self, annotations):
         """
-        Resets the classifier of the model.
+        Prepare the dimensions of the annotations.
+        Makes sure the annotations are in Z,H,W format.
         """
-        self.classifier = None
-        self.param.classifier = None
+        if annotations is not None:
+            ndim = annotations.ndim
+            if ndim == 2:
+                annotations = annotations[np.newaxis, :, :] # add Z = 1
+            if ndim == 3:
+                annotations = annotations[:, :, :] # if 3D, it must already be Z, H, W
+        return annotations
+    
+    def get_features(self,  img_list, annots=None, do_pad=True, do_downsample=True, tile_annotations=False):
+        
+        for img in img_list:
+            self.run_img_checks(img)
+            img = self.prepare_img_dims(img)
+            img_scaled = self.downsample(img)
+            if annots is not None:
+                img, annots = self.extract_annotated_slices(img, annots)
+            annot_scaled = self.downsample(self.annots)
+            img_padded = self.pad_image(img_scaled)
+            annot_padded = self.pad_image(self.annots)
+        

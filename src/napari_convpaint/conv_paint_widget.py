@@ -556,8 +556,7 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            features, targets = self.cp_model.get_features_current_layers(image_stack_norm, annots)
-            self.cp_model.train_classifier(features, targets)
+            self.cp_model.train(image_stack_norm, annots)
     
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -624,7 +623,7 @@ class ConvPaintWidget(QWidget):
             all_features = np.concatenate(all_features, axis=0)
             all_targets = np.concatenate(all_targets, axis=0)
 
-            self.cp_model.train_classifier(all_features, all_targets)
+            self.cp_model._train_classifier(all_features, all_targets)
 
             self.current_model_path = 'trained, unsaved'
             self.trained = True
@@ -716,7 +715,7 @@ class ConvPaintWidget(QWidget):
             if self.cp_model.get_param("tile_image"):
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.predict_image(image)
+                predicted_image = self.cp_model.segment(image)
             
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -768,7 +767,7 @@ class ConvPaintWidget(QWidget):
             if self.cp_model.get_param("tile_image"): # NOTE: We could also move this condition to the cp model
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.predict_image(image)
+                predicted_image = self.cp_model.segment(image)
 
             # Update segmentation layer
             self.viewer.layers['segmentation'].data[step] = predicted_image
