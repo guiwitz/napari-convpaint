@@ -362,8 +362,6 @@ class ConvpaintModel:
                 use_cuda=use_cuda,
                 layers=layers
         )
-        # elif len(self.fe_model.named_modules) == 1:
-        #     self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
         else:
             fe_model = fe_model_class(
                 model_name=name,
@@ -675,7 +673,7 @@ class ConvpaintModel:
         
         return predicted_image_complete
 
-    def get_features_current_layers(self, image, annotations):        # FROM CONV_PAINT SCRIPT
+    def get_features_current_layers(self, image, annotations):        # ORIGINALLY FROM CONV_PAINT SCRIPT
         """Given a potentially multidimensional image and a set of annotations,
         extract multiscale features from multiple layers of a model.
         

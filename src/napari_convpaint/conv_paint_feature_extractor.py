@@ -146,9 +146,6 @@ class FeatureExtractor:
         if param.image_downsample > 1:
             image = image[:, ::param.image_downsample, ::param.image_downsample]
 
-        # padding = self.get_padding()
-        # image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
-
         features_all_scales = []
         for s in param.fe_scalings:
             image_scaled = image[:, ::s, ::s]
@@ -163,29 +160,4 @@ class FeatureExtractor:
             features_all_scales.append(features)
         features_all_scales = np.concatenate(features_all_scales, axis=0)
 
-        # if padding > 0:
-        #     features_all_scales = features_all_scales[:, padding:-padding, padding:-padding]
-
         return features_all_scales
-    
-    # def predict_image(self, image, classifier, param, **kwargs):
-    #     features = self.get_features_scaled(image=image,param=param)
-    #     nb_features = features.shape[0] #[nb_features, width, height]
-
-    #     #move features to last dimension
-    #     features = np.moveaxis(features, 0, -1)
-    #     features = np.reshape(features, (-1, nb_features))
-
-    #     rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-    #     cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
-
-    #     all_pixels = pd.DataFrame(features)
-    #     predictions = classifier.predict(all_pixels)
-
-    #     predicted_image = np.reshape(predictions, [rows, cols])
-    #     if param.image_downsample > 1:
-    #         predicted_image = skimage.transform.resize(
-    #             image=predicted_image,
-    #             output_shape=(image.shape[-2], image.shape[-1]),
-    #             preserve_range=True, order=param.fe_order).astype(np.uint8)
-    #     return predicted_image

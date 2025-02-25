@@ -15,7 +15,6 @@ class GaussianFeatures(FeatureExtractor):
 
     def get_features(self, image, **kwargs):
         im_filter = skimage.filters.gaussian(image, sigma=self.sigma, channel_axis=0)
-        #print(im_filter.shape) for RGB image --> e.g (3, 134, 139)
         return im_filter
     
     def get_default_params(self, param=None):

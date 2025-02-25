@@ -178,25 +178,3 @@ class Param:
             dict_loaded = yaml.safe_load(file)
 
         return Param(**dict_loaded)
-
-    # def convert_path(self, dict, path):
-    #     """Convert a path to a str.
-
-    #     Parameters:
-    #     ----------
-    #     dict : dict
-    #         dictionary containing the path.
-    #     path : str
-    #         path to convert.
-
-    #     Returns
-    #     -------
-    #     dict: dict
-    #         dict with converted path.
-    #     """
-
-    #     if dict[path] is not None:
-    #         if not isinstance(dict[path], str):
-    #             dict[path] = dict[path].as_posix()
-        
-    #     return dict

@@ -213,9 +213,6 @@ class Hookmodel(FeatureExtractor):
             max_features = np.min(self.features_per_layer)
         else:
             max_features = np.max(self.features_per_layer)
-        # test with minimal number of features i.e. taking only n first features
-        # rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        # cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
 
         all_scales = self.get_features(image, param)
         if param.fe_use_min_features:
@@ -228,63 +225,6 @@ class Hookmodel(FeatureExtractor):
             all_values_scales.append(extract)
         extracted_features = np.concatenate(all_values_scales, axis=0)
         return extracted_features
-    
-    def predict_image(self, image, classifier, param:Param):
-        """
-        Given a filter model and a classifier, predict the class of 
-        each pixel in an image.
-
-        Parameters:
-        ----------
-        image: 2d array
-            image to segment
-        classifier: CatBoost
-            classifier to use for prediction
-        scalings: list of ints
-            downsampling factors
-        order: int
-            interpolation order for low scale resizing
-        use_min_features: bool
-            if True, use the minimum number of features per layer
-        image_downsample: int, optional
-            downsample image by this factor before extracting features, by default 1
-
-        Returns
-        -------
-        predicted_image: 2d array
-            predicted image with classes
-        """
-
-        if param.fe_use_min_features:
-            max_features = np.min(self.features_per_layer)
-            all_scales = self.get_features(image, param)
-            all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
-            tot_filters = max_features * len(all_scales)
-
-        else:
-            # max_features = np.max(model.features_per_layer)
-            all_scales = self.get_features(image, param)
-            tot_filters = sum(a.shape[1] for a in all_scales)
-            #tot_filters = np.sum(a.shape[1] for a in all_scales)
-
-        
-        tot_filters = int(tot_filters)
-        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
-        all_pixels = pd.DataFrame(
-            np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, rows * cols)).T)
-
-        predictions = classifier.predict(all_pixels)
-
-        predicted_image = np.reshape(predictions, [rows, cols])
-        if param.image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=1).astype(np.uint8)
-
-        return predicted_image
-
 
     def get_features(self, image, param):
         """
