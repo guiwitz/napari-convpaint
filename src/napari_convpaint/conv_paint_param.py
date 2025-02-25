@@ -57,8 +57,8 @@ class Param:
 
     # Acceleration parameters
     image_downsample: int = None
-    tile_annotations: bool = False
-    tile_image: bool = False
+    tile_annotations: bool = None
+    tile_image: bool = None
 
     # Feature Extractor parameters
     fe_name: str = None

@@ -113,8 +113,8 @@ class ConvPaintWidget(QWidget):
         # self.tabs.add_named_tab('Home', self.segment_group.gbox)
         # self.tabs.add_named_tab('Home', self.load_save_group.gbox)
         self.tabs.add_named_tab('Home', self.image_processing_group.gbox)
-        self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
         self.tabs.add_named_tab('Home', self.train_group.gbox)
+        self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
         self.tabs.widget(self.tabs.tab_names.index('Home')).layout().addWidget(shortcuts_widget)
 
         # Add buttons for "Model" group
@@ -126,7 +126,7 @@ class ConvPaintWidget(QWidget):
         self._reset_model_btn.setToolTip('Discard current model, create new default model.')
         self.model_group.glayout.addWidget(self._reset_model_btn, 1,0,1,2)
         self.save_model_btn = QPushButton('Save Convpaint model')
-        self.save_model_btn.setToolTip('Save model as *.pkl or *.yml file')
+        self.save_model_btn.setToolTip('Save model as *.pkl (incl. classifier) or *.yml (parameters only) file')
         self.save_model_btn.setEnabled(True)
         self.model_group.glayout.addWidget(self.save_model_btn, 2,0,1,1)
         self.load_model_btn = QPushButton('Load Convpaint model')
@@ -843,7 +843,7 @@ class ConvPaintWidget(QWidget):
 
         # Load the model (Note: done after updating GUI, since GUI updates might reset clf or change model)
         self.cp_model = new_model
-        self.cp_model.param = new_param
+        self.cp_model._param = new_param
         self.temp_fe_model = ConvpaintModel.create_fe(new_param.fe_name, new_param.fe_use_cuda)
 
         # Adjust trained flag, save button and predict buttons, and update model description
@@ -939,12 +939,13 @@ class ConvPaintWidget(QWidget):
         reset the classifier."""
         # Read FE parameters from the GUI
         new_param = self.cp_model.get_params()
-        new_param.fe_name = self.qcombo_fe_type.currentText()
-        new_param.fe_layers = self._get_selected_layer_names()
-        new_param.fe_use_cuda = self.check_use_cuda.isChecked()
-        new_param.fe_scalings = self.fe_scaling_factors.currentData()
-        new_param.fe_order = self.spin_interpolation_order.value()
-        new_param.fe_use_min_features = self.check_use_min_features.isChecked()
+        new_layers = self._get_selected_layer_names() # includes re-writing to keys
+        new_param.set(fe_name = self.qcombo_fe_type.currentText(),
+                      fe_layers = new_layers,
+                      fe_use_cuda = self.check_use_cuda.isChecked(),
+                      fe_scalings = self.fe_scaling_factors.currentData(),
+                      fe_order = self.spin_interpolation_order.value(),
+                      fe_use_min_features = self.check_use_min_features.isChecked())
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
         fe_defaults = self.temp_fe_model.get_default_params()
@@ -1160,13 +1161,17 @@ class ConvPaintWidget(QWidget):
         if cp_model is None:
             cp_model = self.cp_model
         # Display layers based on the temp FE model
-        fe_layer_keys = cp_model.get_fe_layer_keys()
-        if fe_layer_keys is not None:
+        all_fe_layer_keys = cp_model.get_fe_layer_keys()
+        all_fe_layer_texts = self._layer_keys_to_texts(all_fe_layer_keys)
+        if all_fe_layer_texts is not None:
+            # Add layer index to layer names
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(fe_layer_keys)
-            self.fe_layer_selection.setEnabled(len(fe_layer_keys) > 1) # Only need to enable if multiple layers available
+            self.fe_layer_selection.addItems(all_fe_layer_texts)
+            self.fe_layer_selection.setEnabled(len(all_fe_layer_texts) > 1) # Only need to enable if multiple layers available
             # Select layers that are in the param object
-            for layer in cp_model.get_param("fe_layers"):
+            layer_keys = cp_model.get_param("fe_layers")
+            layer_texts = self._layer_keys_to_texts(layer_keys)
+            for layer in layer_texts:
                 items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
                 for item in items:
                     item.setSelected(True)
@@ -1180,11 +1185,13 @@ class ConvPaintWidget(QWidget):
         """Update GUI selectable FE layers based on the temporary model."""
         # Get selectable layers from the temp model and update the GUI
         temp_fe_layer_keys = self.temp_fe_model.get_layer_keys()
-        fe_default_layers = self.temp_fe_model.get_default_params().fe_layers
-        if temp_fe_layer_keys is not None:
+        temp_fe_layer_texts = self._layer_keys_to_texts(temp_fe_layer_keys)
+        fe_default_layers = self.temp_fe_model.get_default_params().get("fe_layers")
+        fe_default_layers = self._layer_keys_to_texts(fe_default_layers)
+        if temp_fe_layer_texts is not None:
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(temp_fe_layer_keys)
-            self.fe_layer_selection.setEnabled(len(temp_fe_layer_keys) > 1) # Only need to enable if multiple layers available
+            self.fe_layer_selection.addItems(temp_fe_layer_texts)
+            self.fe_layer_selection.setEnabled(len(temp_fe_layer_texts) > 1) # Only need to enable if multiple layers available
             for layer in fe_default_layers:
                 items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
                 for item in items:
@@ -1293,7 +1300,8 @@ class ConvPaintWidget(QWidget):
         # Reset the gui values for the FE, which will also trigger to adjust the param object
         self.qcombo_fe_type.setCurrentText(self.default_cp_param.fe_name)
         self.fe_layer_selection.clearSelection()
-        for layer in self.default_cp_param.fe_layers:
+        default_layers = self._layer_keys_to_texts(self.default_cp_param.fe_layers)
+        for layer in default_layers:
             items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
             for item in items:
                 item.setSelected(True)
@@ -1352,8 +1360,25 @@ class ConvPaintWidget(QWidget):
     def _get_selected_layer_names(self):
         """Get names of selected layers."""
         selected_rows = self.fe_layer_selection.selectedItems()
-        selected_layers = [x.text() for x in selected_rows]
+        selected_layers_texts = [x.text() for x in selected_rows]
+        selected_layers = self._layer_texts_to_keys(selected_layers_texts)
         return selected_layers
+
+    @staticmethod
+    def _layer_texts_to_keys(layer_texts):
+        """Convert layer texts to layer keys for use in the model."""
+        if layer_texts is None:
+            return None
+        layer_keys = [text.split(": ", 1)[1] for text in layer_texts]
+        return layer_keys
+    
+    @staticmethod
+    def _layer_keys_to_texts(layer_keys):
+        """Convert layer keys to layer texts for display."""
+        if layer_keys is None:
+            return None
+        layer_texts = [f'{i}: {layer}' for i, layer in enumerate(layer_keys)]
+        return layer_texts
 
     def _get_data_channel_first(self):
         """Get data from selected channel. If RGB, move channel axis to first position."""

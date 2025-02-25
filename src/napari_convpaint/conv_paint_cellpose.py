@@ -15,6 +15,8 @@ class CellposeFeatures(FeatureExtractor):
     def __init__(self, model_name='cellpose_backbone', model=None, use_cuda=False):
 
         super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
+        self.patch_size = 8
+        self.padding = self.patch_size
 
     @staticmethod
     def create_model(model_name):
@@ -32,9 +34,12 @@ class CellposeFeatures(FeatureExtractor):
         param.fe_layers = []
         param.fe_scalings = [1]
         param.fe_order = 0
+        param.tile_annotations = False
         return param
 
     def get_features(self, img, **kwargs):
+        print("get features")
+        print("patch_size:", self.patch_size)
         if img.ndim == 2:
             img_expanded = np.stack([img, img], axis=0)
         elif img.ndim == 3:
@@ -47,7 +52,24 @@ class CellposeFeatures(FeatureExtractor):
                 warnings.warn('Cellpose backbone expects < 3 channels. Using only the first two channels.') 
                 img_expanded = img[:2]
 
+        # make sure image is divisible by patch size
+        print("image shape", img_expanded.shape)
+        h, w = img_expanded.shape[-2:]
+        new_h = (h // self.patch_size) * self.patch_size
+        new_w = (w // self.patch_size) * self.patch_size
+        h_pad_top = (h - new_h)//2
+        w_pad_left = (w - new_w)//2
+        h_pad_bottom = h - new_h - h_pad_top
+        w_pad_right = w - new_w - w_pad_left
+
+        if h_pad_top > 0 or w_pad_left > 0 or h_pad_bottom > 0 or w_pad_right > 0:
+            img_expanded = img_expanded[:, h_pad_top:-h_pad_bottom if h_pad_bottom != 0 else None, 
+                                           w_pad_left:-w_pad_right if w_pad_right != 0 else None]
+        print("patch-multiple img shape", img_expanded.shape)
+
+        # convert to tensor
         img_expanded = np.expand_dims(img_expanded, axis=0)
+        print(img_expanded.shape)
         tensor = torch.from_numpy(img_expanded).float()   
 
         if self.model.mkldnn:

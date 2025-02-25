@@ -146,8 +146,8 @@ class FeatureExtractor:
         if param.image_downsample > 1:
             image = image[:, ::param.image_downsample, ::param.image_downsample]
 
-        padding = self.get_padding()
-        image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+        # padding = self.get_padding()
+        # image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
 
         features_all_scales = []
         for s in param.fe_scalings:
@@ -162,8 +162,10 @@ class FeatureExtractor:
             
             features_all_scales.append(features)
         features_all_scales = np.concatenate(features_all_scales, axis=0)
-        if padding > 0:
-            features_all_scales = features_all_scales[:, padding:-padding, padding:-padding]
+
+        # if padding > 0:
+        #     features_all_scales = features_all_scales[:, padding:-padding, padding:-padding]
+
         return features_all_scales
     
     # def predict_image(self, image, classifier, param, **kwargs):
