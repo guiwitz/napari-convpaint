@@ -38,8 +38,6 @@ class CellposeFeatures(FeatureExtractor):
         return param
 
     def get_features(self, img, **kwargs):
-        print("get features")
-        print("patch_size:", self.patch_size)
         if img.ndim == 2:
             img_expanded = np.stack([img, img], axis=0)
         elif img.ndim == 3:
@@ -53,7 +51,6 @@ class CellposeFeatures(FeatureExtractor):
                 img_expanded = img[:2]
 
         # make sure image is divisible by patch size
-        print("image shape", img_expanded.shape)
         h, w = img_expanded.shape[-2:]
         new_h = (h // self.patch_size) * self.patch_size
         new_w = (w // self.patch_size) * self.patch_size
@@ -65,11 +62,9 @@ class CellposeFeatures(FeatureExtractor):
         if h_pad_top > 0 or w_pad_left > 0 or h_pad_bottom > 0 or w_pad_right > 0:
             img_expanded = img_expanded[:, h_pad_top:-h_pad_bottom if h_pad_bottom != 0 else None, 
                                            w_pad_left:-w_pad_right if w_pad_right != 0 else None]
-        print("patch-multiple img shape", img_expanded.shape)
 
         # convert to tensor
         img_expanded = np.expand_dims(img_expanded, axis=0)
-        print(img_expanded.shape)
         tensor = torch.from_numpy(img_expanded).float()   
 
         if self.model.mkldnn:
