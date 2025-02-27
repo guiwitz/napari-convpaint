@@ -121,7 +121,7 @@ class ConvPaintWidget(QWidget):
         self.load_model_btn.setToolTip('Select *.pkl or *.yml file to load')
         self.model_group.glayout.addWidget(self.load_model_btn, 1,1,1,1)
         # Reset model button
-        self._reset_convpaint_btn = QPushButton('Reset model')
+        self._reset_convpaint_btn = QPushButton('Reset Convpaint')
         self._reset_convpaint_btn.setToolTip('Discard current model and create new default model.')
         self.model_group.glayout.addWidget(self._reset_convpaint_btn, 2,0,1,2)
 
@@ -491,6 +491,11 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
+        # If it is the same layer, do nothing
+        if self.selected_channel == self.image_layer_selection_widget.native.currentText():
+            return
+        # Otherwise, update the selected channel and reset the radio buttons
+        initial_add_layers_flag = self.add_layers_flag # Save initial state of add_layers_flag
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
             self.add_layers_flag = False # Turn off layer creation, since we do it below
@@ -508,8 +513,8 @@ class ConvPaintWidget(QWidget):
             self.add_layers_btn.setEnabled(True)
         else:
             self.add_layers_btn.setEnabled(False)
-        # Allow other methods again to add layers
-        self.add_layers_flag = True
+        # Allow other methods again to add layers if that was the case before
+        self.add_layers_flag = initial_add_layers_flag
 
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
@@ -876,15 +881,18 @@ class ConvPaintWidget(QWidget):
 
     def _on_reset_convpaint(self, event=None):
         """Reset model to default and update GUI."""
+        # Turn off layer creation for the model reset
+        self.add_layers_flag = False
         # Reset the model to default
-        self.add_layers_flag = False # Turn off layer creation for the model reset
         self._reset_model()
         # Reset the widget attributes and the according buttons
         self._reset_attributes()
-        self.check_auto_seg.setChecked(self.auto_seg)
-        self.check_keep_layers.setChecked(self.keep_layers)
+        self.check_auto_seg.setChecked(self.auto_seg) # Adjust the button in the widget
+        self.check_keep_layers.setChecked(self.keep_layers) # Adjust the button in the widget
         # Reset the model description
         self._set_model_description()
+        # Turn on layer creation again
+        self.add_layers_flag = True
 
     def _reset_model(self):
         """Reset the model to default."""
