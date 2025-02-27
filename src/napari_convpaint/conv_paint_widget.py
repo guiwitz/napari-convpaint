@@ -50,19 +50,10 @@ class ConvPaintWidget(QWidget):
         # Create a temporary FE model for display
         self.temp_fe_model = ConvpaintModel.create_fe(self.default_cp_param.fe_name,
                                                       self.default_cp_param.fe_use_cuda)
-        # Initialize widget-specific attributes
-        self.image_mean = None
-        self.image_std = None
-        self.trained = False
-        self.project_widget = None
-        self.selected_channel = None
+        
         self.third_party = third_party
-        # Plugin options and attributes
-        self.keep_layers = False # Keep old layers when adding new ones
-        self.auto_seg = True # Automatically segment after training
-        self.old_data_tag = "None" # Tag for the data before layers are added
-        self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
-        self.current_model_path = 'not trained' # Path to the current model (if saved)
+        self._reset_attributes()
+        self.selected_channel = None
 
         ### Build the widget
 
@@ -121,17 +112,18 @@ class ConvPaintWidget(QWidget):
         # Current model description label
         self.model_description1 = QLabel('None')
         self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
-        # Reset model button
-        self._reset_model_btn = QPushButton('Reset to default model')
-        self._reset_model_btn.setToolTip('Discard current model, create new default model.')
-        self.model_group.glayout.addWidget(self._reset_model_btn, 1,0,1,2)
-        self.save_model_btn = QPushButton('Save Convpaint model')
+        # Save and load model buttons
+        self.save_model_btn = QPushButton('Save model')
         self.save_model_btn.setToolTip('Save model as *.pkl (incl. classifier) or *.yml (parameters only) file')
         self.save_model_btn.setEnabled(True)
-        self.model_group.glayout.addWidget(self.save_model_btn, 2,0,1,1)
-        self.load_model_btn = QPushButton('Load Convpaint model')
+        self.model_group.glayout.addWidget(self.save_model_btn, 1,0,1,1)
+        self.load_model_btn = QPushButton('Load model')
         self.load_model_btn.setToolTip('Select *.pkl or *.yml file to load')
-        self.model_group.glayout.addWidget(self.load_model_btn, 2,1,1,1)
+        self.model_group.glayout.addWidget(self.load_model_btn, 1,1,1,1)
+        # Reset model button
+        self._reset_convpaint_btn = QPushButton('Reset model')
+        self._reset_convpaint_btn.setToolTip('Discard current model and create new default model.')
+        self.model_group.glayout.addWidget(self._reset_convpaint_btn, 2,0,1,2)
 
         # Add elements to "Layer selection" group
         # Image layer (widget for selecting the layer to segment)
@@ -357,11 +349,7 @@ class ConvPaintWidget(QWidget):
 
         # Add connections and initialize by setting default model and params
         self.add_connections()
-        self._reset_default_general_params()
-        self._reset_clf_params()
-        self._reset_fe_params()
-        self._update_gui_from_params()
-        self._on_select_layer()
+        self._reset_model()
 
         # Add key bindings
         self.viewer.bind_key('Shift+a', self.toggle_annotation, overwrite=True)
@@ -377,16 +365,19 @@ class ConvPaintWidget(QWidget):
 
     def toggle_annotation(self, event=None):
         """Hide/unhide annotations layer."""
-
-        if self.viewer.layers['annotations'].visible == False:
-            self.viewer.layers['annotations'].visible = True
-            self.viewer.layers.selection.active = self.viewer.layers['annotations']
+        annot_layer = self.annotation_layer_selection_widget.value
+        if annot_layer is None:
+            return
+        if annot_layer.visible == False:
+            annot_layer.visible = True
+            self.viewer.layers.selection.active = annot_layer
         else:
-            self.viewer.layers['annotations'].visible = False
+            annot_layer.visible = False
 
     def toggle_prediction(self, event=None):
         """Hide/unhide prediction layer."""
-
+        if not 'segmentation' in self.viewer.layers:
+            return
         if self.viewer.layers['segmentation'].visible == False:
             self.viewer.layers['segmentation'].visible = True
         else:
@@ -394,11 +385,13 @@ class ConvPaintWidget(QWidget):
 
     def set_annot_label_class(self, x, event=None):
         """Set the label class of the annotation layer."""
-        if 'annotations' in self.viewer.layers:
-            self.viewer.layers['annotations'].selected_label = x
-            self.viewer.layers['annotations'].visible = True
-            self.viewer.layers['annotations'].mode = 'paint'
-            self.viewer.layers.selection.active = self.viewer.layers['annotations']
+        annot_layer = self.annotation_layer_selection_widget.value
+        if annot_layer is None:
+            return
+        annot_layer.selected_label = x
+        annot_layer.visible = True
+        annot_layer.mode = 'paint'
+        self.viewer.layers.selection.active = annot_layer
 
 ### Define the connections between the widget elements
 
@@ -454,7 +447,7 @@ class ConvPaintWidget(QWidget):
             checked and self._on_norm_changed())
 
         # Model
-        self._reset_model_btn.clicked.connect(self._on_reset_model)
+        self._reset_convpaint_btn.clicked.connect(self._on_reset_convpaint)
 
         # Acceleration
         self.spin_downsample.valueChanged.connect(lambda:
@@ -604,7 +597,7 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
         
-        self.viewer.layers.events.removed.disconnect(self._on_reset_model)
+        self.viewer.layers.events.removed.disconnect(self._on_reset_convpaint)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             self.current_model_path = 'in training'
@@ -635,7 +628,7 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
-        self.viewer.layers.events.removed.connect(self._on_reset_model)
+        self.viewer.layers.events.removed.connect(self._on_reset_convpaint)
 
     # Predict
 
@@ -881,13 +874,43 @@ class ConvPaintWidget(QWidget):
 
     # Model
 
-    def _on_reset_model(self, event=None):
+    def _on_reset_convpaint(self, event=None):
         """Reset model to default and update GUI."""
+        # Reset the model to default
+        self.add_layers_flag = False # Turn off layer creation for the model reset
+        self._reset_model()
+        # Reset the widget attributes and the according buttons
+        self._reset_attributes()
+        self.check_auto_seg.setChecked(self.auto_seg)
+        self.check_keep_layers.setChecked(self.keep_layers)
+        # Reset the model description
+        self._set_model_description()
+
+    def _reset_model(self):
+        """Reset the model to default."""
         # self.save_model_btn.setEnabled(True)
+        self._reset_fe_params() # Also resets the FE model
         self._reset_clf_params()
-        self._reset_fe_params()
-        self._reset_default_general_params()
         self._reset_clf()
+        self._reset_default_general_params()
+        self._update_gui_from_params()
+        self._on_select_layer() # Adjusts image dim and norm
+
+    def _reset_attributes(self):
+        """Reset all attributes of the widget."""
+        # Set widget-specific attributes
+        self.image_mean = None
+        self.image_std = None
+        self.trained = False
+        self.project_widget = None
+        # self.selected_channel = None
+        # Plugin options and attributes
+        self.keep_layers = False # Keep old layers when adding new ones
+        self.auto_seg = True # Automatically segment after training
+        self.old_data_tag = "None" # Tag for the data before layers are added
+        self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
+        self.current_model_path = 'not trained' # Path to the current model (if saved)
+
 
     ### Model Tab
 
