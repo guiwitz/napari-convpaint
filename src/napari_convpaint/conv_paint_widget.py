@@ -499,13 +499,11 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
             self.add_layers_flag = False # Turn off layer creation, since we do it below
-            # If the image is RGB, this has to be enforced
-            self.cp_model.set_param("rgb_img", self.image_layer_selection_widget.value.rgb)
-            self._get_image_stats()
             # Set radio buttons depending on selected image type
             self._reset_radio_data_dim_choices()
             self._reset_radio_norm_choices()
             self._reset_predict_buttons()
+            self._get_image_stats()
             # Add empty layers and save old data tag for next addition
             self._add_empty_layers()
             self._set_old_data_tag()
@@ -902,7 +900,11 @@ class ConvPaintWidget(QWidget):
         self._reset_clf()
         self._reset_default_general_params()
         self._update_gui_from_params()
-        self._on_select_layer() # Adjusts image dim and norm
+        # Set radio buttons depending on selected image type
+        self._reset_radio_data_dim_choices()
+        self._reset_radio_norm_choices()
+        self._reset_predict_buttons()
+        self._get_image_stats()
 
     def _reset_attributes(self):
         """Reset all attributes of the widget."""
@@ -1124,7 +1126,7 @@ class ConvPaintWidget(QWidget):
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
             return
-        
+        self.cp_model.set_param("rgb_img", self.image_layer_selection_widget.value.rgb)
         if self.cp_model.get_param("rgb_img"): # If the image is RGB (2D or 3D makes no difference), this is the only option
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(False)
