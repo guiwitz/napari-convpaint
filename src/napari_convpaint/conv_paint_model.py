@@ -520,7 +520,7 @@ class ConvpaintModel:
 
     def _predict_image(self, image, return_proba=False):                    # FROM FEATURE EXTRACTOR CLASS
         # Pad Image
-        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings)
+        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
         if image.ndim == 2:
             image = np.pad(image, padding, mode='reflect')
         elif image.ndim == 3:
