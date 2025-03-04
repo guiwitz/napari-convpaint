@@ -10,9 +10,9 @@ import skimage
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
 from napari_convpaint.conv_paint_dino import AVAILABLE_MODELS as DINO_MODELS
+from .conv_paint_nnlayers import Hookmodel
 from napari_convpaint.conv_paint_gaussian import GaussianFeatures
 from napari_convpaint.conv_paint_dino import DinoFeatures
-from .conv_paint_nnlayers import Hookmodel
 from .conv_paint_param import Param
 from . import conv_paint_utils
 
@@ -123,8 +123,9 @@ class ConvpaintModel:
         elif fe_name is not None:
             self._set_fe(fe_name, fe_use_cuda, fe_layers)
             self._param = self.get_fe_defaults()
-            self._param.set(fe_layers = fe_layers, # Overwrite the layers with the given layers
-                           fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
+            self.set_params(no_warning=True, # Here at initiation, it is intended to set FE parameters...
+                            fe_layers = fe_layers, # Overwrite the layers with the given layers
+                            fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
                             **kwargs) # Overwrite the parameters with the given parameters
         else:
             cpm_defaults = ConvpaintModel.get_default_params()
@@ -150,7 +151,15 @@ class ConvpaintModel:
             # Handle the case where CellposeFeatures or its dependencies are not available
             print("Info: Cellpose is not installed and is not available as feature extractor.\n"
                 "Run 'pip install napari-convpaint[cellpose]' to install it.")
-
+        # Same for ilastik
+        try:
+            from napari_convpaint.conv_paint_ilastik import AVAILABLE_MODELS as ILASTIK_MODELS
+            from napari_convpaint.conv_paint_ilastik import IlastikFeatures
+            ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: IlastikFeatures for x in ILASTIK_MODELS})
+        except ImportError:
+            # Handle the case where IlastikFeatures or its dependencies are not available
+            print("Info: Ilastik is not installed and is not available as feature extractor.\n"
+                "Run 'pip install napari-convpaint[ilastik]' to install it.")
     @staticmethod
     def get_all_fe_models():
         """
@@ -311,7 +320,7 @@ class ConvpaintModel:
         # Reset the model and classifier
         self.fe_model_state = None
         self.reset_classifier()
-        
+
         # Check if we need to create a new FE model
         new_fe_name = fe_name is not None and fe_name != self._param.get("fe_name")
         new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self._param.get("fe_use_cuda")
@@ -367,6 +376,10 @@ class ConvpaintModel:
                 model_name=name,
                 use_cuda=use_cuda
             )
+
+        # Check if the model was created successfully
+        if fe_model is None:
+            raise ValueError(f'Feature extractor model {name} could not be created.')
 
         return fe_model
 
@@ -424,6 +437,8 @@ class ConvpaintModel:
         """
         features, targets = self.get_features_current_layers(image, annotations)
         self._train_classifier(features, targets)
+        if self.classifier is None:
+            raise ValueError('Training failed. No classifier was trained.')
         return self.classifier
 
     def segment(self, image):
@@ -687,7 +702,7 @@ class ConvpaintModel:
         annotations : np.ndarray
             2D, 3D Annotations (1,2) to extract features from
 
-        Given inside the ConvPaint class:    
+        Given inside the ConvPaint class:
             self.fe_model : feature extraction model
                 Model to extract features from the image
             self._param.scalings : list of ints
@@ -725,7 +740,7 @@ class ConvpaintModel:
         all_targets = []
 
         # find maximal padding necessary
-        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings)
+        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
 
         # iterating over non_empty iteraties of t/z for 3D data
         for ind, t in enumerate(non_empty):

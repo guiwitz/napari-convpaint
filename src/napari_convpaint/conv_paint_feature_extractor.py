@@ -62,7 +62,8 @@ class FeatureExtractor:
 
     def get_default_params(self, param=None):
         """
-        Get the defaul parameters that the FE shall set/enforce when chosen by the user.
+        Get the default parameters that the FE shall set/enforce when chosen by the user.
+        These can still be changed by the user afterwards.
         """
         if param is None:
             def_param = Param()
@@ -99,9 +100,10 @@ class FeatureExtractor:
         """
         return None
     
-    def get_enforced_param(self, param=None):
+    def get_enforced_params(self, param=None):
         """
         Define which parameters need to be absolutley enforced for feature extraction.
+        These are set in the course of the feature extraction process and cannot be changed by the user.
         """
         if param is None:
             enf_param = Param()

@@ -6,11 +6,11 @@ from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
+from napari.utils.notifications import show_info
 from napari_guitils.gui_structures import VHGroup, TabSet
 from pathlib import Path
 import numpy as np
 import warnings
-import pickle
 
 from .conv_paint_utils import normalize_image, compute_image_stats
 from .conv_paint_model import ConvpaintModel
@@ -53,6 +53,8 @@ class ConvPaintWidget(QWidget):
         
         self.third_party = third_party
         self.selected_channel = None
+        self.spatial_dim_info_thresh = 1000000
+        self.default_brush_size = 3
         self._reset_attributes()
 
         ### Build the widget
@@ -509,6 +511,9 @@ class ConvPaintWidget(QWidget):
             self._set_old_data_tag()
             # Activate button to add annotation and segmentation layers
             self.add_layers_btn.setEnabled(True)
+            # Give info if image is very large to use "tile image"
+            if self._check_large_image():
+                show_info('Image is very large. Consider using "Tile image" for segmentation.')
         else:
             self.add_layers_btn.setEnabled(False)
         # Allow other methods again to add layers if that was the case before
@@ -1047,7 +1052,7 @@ class ConvPaintWidget(QWidget):
                     val = str(val)
                 setter(val) # Set the default value in the GUI
                 setattr(new_param, attr, val) # Set the default value in the param object
-        if adjusted_params: warnings.warn(f'The feature extractor adjusted the parameters {adjusted_params}')
+        if adjusted_params: show_info(f'The feature extractor adjusted the parameters {adjusted_params}')
 
         # Create a new model (with a new classifier and model_state)
         self.cp_model = ConvpaintModel(param=new_param)
@@ -1107,7 +1112,7 @@ class ConvPaintWidget(QWidget):
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
-            self.viewer.layers['annotations'].brush_size = 3
+            self.viewer.layers['annotations'].brush_size = self.default_brush_size
 
     def _create_annot_seg_copies(self):
         """Create copies of the annotations and segmentation layers."""
@@ -1303,12 +1308,25 @@ class ConvPaintWidget(QWidget):
     def _get_annot_shape(self):
         """Get shape of annotations and segmentation layers to create."""
         data_dims = self._get_data_dims()
+        img_shape = self.viewer.layers[self.selected_channel].data.shape
         if data_dims in ['2D_RGB', '2D']:
-            return self.viewer.layers[self.selected_channel].data.shape[0:2]
+            return img_shape[0:2]
         if data_dims in ['3D_RGB', '3D_single']:
-            return self.viewer.layers[self.selected_channel].data.shape[0:3]
+            return img_shape[0:3]
         else: # 3D_multi, 4D
-            return self.viewer.layers[self.selected_channel].data.shape[1:]
+            return img_shape[1:]
+
+    def _check_large_image(self):
+        """Check if the image is too large to be processed."""
+        data_dims = self._get_data_dims()
+        img_shape = self.viewer.layers[self.selected_channel].data.shape
+        if data_dims in ['2D', '2D_RGB']:
+            spatial_dims_size = img_shape[0] * img_shape[1]
+        elif data_dims in ['3D_single', '3D_RGB']:
+            spatial_dims_size = img_shape[1] * img_shape[2]
+        else: # 3D_multi, 4D
+            spatial_dims_size = img_shape[2] * img_shape[3]
+        return spatial_dims_size > self.spatial_dim_info_thresh
 
     def _reset_clf(self):
         """Discard the trained classifier."""
