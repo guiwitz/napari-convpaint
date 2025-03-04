@@ -512,7 +512,7 @@ class ConvPaintWidget(QWidget):
             # Activate button to add annotation and segmentation layers
             self.add_layers_btn.setEnabled(True)
             # Give info if image is very large to use "tile image"
-            if self._check_large_image():
+            if self._check_large_image() and not self.cp_model.get_param('tile_image'):
                 show_info('Image is very large. Consider using "Tile image" for segmentation.')
         else:
             self.add_layers_btn.setEnabled(False)
