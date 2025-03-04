@@ -519,7 +519,7 @@ class ConvpaintModel:
         features = self.fe_model.get_features_scaled(image=image,param=self._param)
         nb_features = features.shape[0] #[nb_features, width, height]
 
-        # Move features to last dimension
+        # Move features to last dimension and flatten
         features = np.moveaxis(features, 0, -1)
         features = np.reshape(features, (-1, nb_features)) # flatten
         features_df = pd.DataFrame(features)
@@ -527,7 +527,8 @@ class ConvpaintModel:
         rows = np.ceil(image.shape[-2] / self._param.image_downsample).astype(int)
         cols = np.ceil(image.shape[-1] / self._param.image_downsample).astype(int)
 
-        # First reshape to downsampled shape
+        # Predict
+        # First reshape prediction to downsampled shape
         if return_proba:
             predictions = self.classifier.predict_proba(features_df)
             predicted_image = np.reshape(predictions, [rows, cols, -1])
@@ -542,6 +543,7 @@ class ConvpaintModel:
                 output_shape=(image.shape[-2], image.shape[-1]),
                 preserve_range=True, order=self._param.fe_order)
 
+        # Remove padding and return
         if return_proba:
             predicted_image = predicted_image[..., padding:-padding, padding:-padding, :]
             return predicted_image
