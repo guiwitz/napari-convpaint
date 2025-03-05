@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
-from .conv_paint_utils import get_device
+from .conv_paint_utils import get_device, scale_img
 from .conv_paint_feature_extractor import FeatureExtractor
 from .conv_paint_param import Param
 
@@ -15,9 +15,10 @@ from .conv_paint_param import Param
 AVAILABLE_MODELS = ['vgg16', 'efficient_netb0']
 
 class Hookmodel(FeatureExtractor):
-    """Class to extract features from a pytorch model using hooks on chosen layers.
+    """
+    Class to extract features from a pytorch model using hooks on chosen layers.
 
-    Parameters
+    Parameters:
     ----------
     model_name : str
         Name of model to use. Currently only 'vgg16' and 'efficient_netb0' are supported.
@@ -25,8 +26,8 @@ class Hookmodel(FeatureExtractor):
         Model to extract features from, by default None
     use_cuda : bool, optional
         Use cuda, by default False
-    layers : list of str, optional
-        List of layers to extract features from, by default None
+    layers : list of str or int, optional
+        List of layer keys (if string) or indices (int) to extract features from, by default None
         
     Attributes
     ----------
@@ -41,32 +42,47 @@ class Hookmodel(FeatureExtractor):
     """
 
     def __init__(self, model_name='vgg16', model=None, use_cuda=None, layers=None):
+        
+        super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
 
-        if model is not None:
-            assert model_name is None, 'model_name must be None if model is not None'
-            self.model = model
-        else:
-            if model_name == 'vgg16':
-                self.model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-                # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
-            elif model_name == 'efficient_netb0':
-                self.model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
-        self.model_name = model_name
+        # SET DEVICE
         self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
 
+        # INITIALIZATION OF LAYER HOOKS
         self.update_layer_dict()
+
         self.outputs = []
         if layers is not None:
             self.register_hooks(layers)
         else:
-            self.register_hooks(self.get_default_param().fe_layers)
+            self.register_hooks(self.get_default_params().fe_layers)
 
-    def get_default_param(self, param=None):
+    @staticmethod
+    def create_model(model_name):
+
+        # CREATE VGG16 MODEL
+        if model_name == 'vgg16':
+            return models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+            # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
+
+        # CREATE EFFICIENTNETB0 MODEL
+        elif model_name == 'efficient_netb0':
+            return models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
         
-        param = super().get_default_param(param=param)
+    def get_description(self):
+        if self.model_name == 'vgg16':
+            desc = "CNN model. First layers extract low-level features. Add pyramid scalings to include broader context."
+            desc += "\nGood for: differentiating textures, colours, brightness etc."
+        elif self.model_name == 'efficient_netb0':
+            desc = "EfficientNet model trained on ImageNet data."
+        return desc
+
+    def get_default_params(self, param=None):
         
-        self.update_layer_dict()
+        param = super().get_default_params(param=param)
+        
+        # self.update_layer_dict() # Is done at initialization (and should not change later)
         
         param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
         if self.model_name == 'vgg16':
@@ -77,6 +93,9 @@ class Hookmodel(FeatureExtractor):
         param.tile_annotations = True # Overwrite non-FE settings
 
         return param
+
+    def get_layer_keys(self):
+        return self.selectable_layer_keys
 
     def update_layer_dict(self):
         """Create a flat list of all modules as well as a dictionary of modules with 
@@ -91,12 +110,22 @@ class Hookmodel(FeatureExtractor):
         
         self.selectable_layer_dict = dict([(x[0] + ' ' + x[1].__str__(), x[1]) for x in self.named_modules if isinstance(x[1], nn.Conv2d)])
         self.selectable_layer_keys = list(self.selectable_layer_dict.keys())
+
+    def layers_to_keys(self, layers):
+        if all([isinstance(x, int) for x in layers]):
+            return [self.selectable_layer_keys[x] for x in layers]
+        else:
+            return layers
     
+    def get_padding(self):
+        ks = self.get_max_kernel_size()
+        return ks // 2
+
     def get_max_kernel_size(self):
         """
         Given a hookmodel, find the maximum kernel size needed for the deepest layer.
         
-        Parameters
+        Parameters: None
         ----------
         
         Returns
@@ -132,28 +161,32 @@ class Hookmodel(FeatureExtractor):
         return self.model(tensor_image_dev)
 
     def hook_normal(self, module, input, output):
+        # print("extracting with normal layer")
         self.outputs.append(output)
 
     def hook_last(self, module, input, output):
+        # print("extracting with last layer")
         self.outputs.append(output)
         assert False
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
-
+        selected_layers = self.layers_to_keys(selected_layers)
         self.features_per_layer = []
         self.selected_layers = selected_layers.copy()
         for ind in range(len(selected_layers)):
             self.features_per_layer.append(
                 self.module_dict[selected_layers[ind]].out_channels)
             if ind == len(selected_layers) - 1:
+                # print(f"registering LAST hook for layer {selected_layers[ind]}")
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_last)
             else:
+                # print(f"registering hook for layer {selected_layers[ind]}")
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
 
     def get_features_scaled(self, image, param:Param):
         """Given an image and a set of annotations, extract multiscale features
 
-        Parameters
+        Parameters:
         ----------
         model : Hookmodel
             Model to extract features from
@@ -180,11 +213,8 @@ class Hookmodel(FeatureExtractor):
             max_features = np.min(self.features_per_layer)
         else:
             max_features = np.max(self.features_per_layer)
-        # test with minimal number of features i.e. taking only n first features
-        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
 
-        all_scales = self.filter_image_multichannels(image, param)
+        all_scales = self.get_features(image, param)
         if param.fe_use_min_features:
             all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
         all_values_scales = []
@@ -195,79 +225,23 @@ class Hookmodel(FeatureExtractor):
             all_values_scales.append(extract)
         extracted_features = np.concatenate(all_values_scales, axis=0)
         return extracted_features
-    
-    def predict_image(self, image, classifier, param:Param):
+
+    def get_features(self, image, param):
         """
-        Given a filter model and a classifier, predict the class of 
-        each pixel in an image.
-
-        Parameters
-        ----------
-        image: 2d array
-            image to segment
-        classifier: CatBoost
-            classifier to use for prediction
-        scalings: list of ints
-            downsampling factors
-        order: int
-            interpolation order for low scale resizing
-        use_min_features: bool
-            if True, use the minimum number of features per layer
-        image_downsample: int, optional
-            downsample image by this factor before extracting features, by default 1
-
-        Returns
-        -------
-        predicted_image: 2d array
-            predicted image with classes
-        """
-
-        if param.fe_use_min_features:
-            max_features = np.min(self.features_per_layer)
-            all_scales = self.filter_image_multichannels(image, param)
-            all_scales = [a[:, 0:max_features, :, :] for a in all_scales]
-            tot_filters = max_features * len(all_scales)
-
-        else:
-            # max_features = np.max(model.features_per_layer)
-            all_scales = self.filter_image_multichannels(image, param)
-            tot_filters = sum(a.shape[1] for a in all_scales)
-            #tot_filters = np.sum(a.shape[1] for a in all_scales)
-
-        
-        tot_filters = int(tot_filters)
-        rows = np.ceil(image.shape[-2] / param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / param.image_downsample).astype(int)
-        all_pixels = pd.DataFrame(
-            np.reshape(np.concatenate(all_scales, axis=1), newshape=(tot_filters, rows * cols)).T)
-
-        predictions = classifier.predict(all_pixels)
-
-        predicted_image = np.reshape(predictions, [rows, cols])
-        if param.image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=1).astype(np.uint8)
-
-        return predicted_image
-
-
-    def filter_image_multichannels(self, image, param):
-        """Recover the outputs of chosen layers of a pytorch model. Layers and model are
+        Recover the outputs of chosen layers of a pytorch model. Layers and model are
         specified in the hookmodel object. If image has multiple channels, each channel
         is processed separately.
         
-        Parameters
+        Parameters:
         ----------
         image : np.ndarray
             2d Image to filter
-        scalings : list of ints, optional
+        param.scalings : list of ints, optional
             Downsampling factors, by default None
-        order : int, optional
+        param.order : int, optional
             Interpolation order for low scale resizing,
             by default 0
-        image_downsample : int, optional
+        param.image_downsample : int, optional
             Downsample image by this factor before extracting features, by default 1
 
         Returns
@@ -278,34 +252,44 @@ class Hookmodel(FeatureExtractor):
         """
         input_channels = self.named_modules[0][1].in_channels
         image = np.asarray(image, dtype=np.float32)
-
-        padding = self.get_max_kernel_size() // 2
         
+        # Downsample image
+        image = scale_img(image, param.image_downsample)
         if image.ndim == 2:
-            image = image[::param.image_downsample, ::param.image_downsample]
+            # image = image[::param.image_downsample, ::param.image_downsample]
             image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
             image_series = [image]
         elif image.ndim == 3:
-            image = image[:, ::param.image_downsample, ::param.image_downsample]
+            # image = image[:, ::param.image_downsample, ::param.image_downsample]
             image_series = [np.ones((input_channels, im.shape[0], im.shape[1]), dtype=np.float32) * im for im in image]
 
         int_mode = 'bilinear' if param.fe_order > 0 else 'nearest'
         align_corners = False if param.fe_order > 0 else None
+        # padding = self.get_max_kernel_size() // 2
 
         all_scales = []
         with torch.no_grad():
             for image in image_series:
                 
-                if padding > 0:
-                    image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+                # if padding > 0: # NOTE: PADDING IS DONE ABOVE; NOT NEEDED HERE
+                #     image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+                #     print("padding image in filter_img_mc", image.shape)
 
                 for s in param.fe_scalings:
-                    im_tot = image[:, ::s, ::s]
+                    # im_tot = image[:, ::s, ::s]
+                    im_tot = scale_img(image, s)
                     im_torch = torch.tensor(im_tot[np.newaxis, ::])
                     self.outputs = []
                     try:
+                        # print("extracting features")
+                        # layer_keys = self.get_layer_keys()
+                        # for layer_name in layer_keys:
+                        #     hooked_layers = list(self.module_dict[layer_name]._forward_hooks.keys())  # Get all hook IDs
+                        #     if hooked_layers:
+                        #         print(f"Layer {layer_name} has been hooked with hook ID(s): {hooked_layers}")
                         _ = self(im_torch)
                     except AssertionError as ea:
+                        # print("outputs:", len(self.outputs))
                         pass
                     except Exception as ex:
                         raise ex
@@ -319,7 +303,7 @@ class Hookmodel(FeatureExtractor):
                                 preserve_range=True, order=order)'''
 
                         out_np = im.cpu().detach().numpy()
-                        if padding > 0:
-                            out_np = out_np[:, :, padding:-padding, padding:-padding]
+                        # if padding > 0:
+                        #     out_np = out_np[:, :, padding:-padding, padding:-padding]
                         all_scales.append(out_np)
         return all_scales

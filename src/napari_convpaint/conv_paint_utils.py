@@ -94,8 +94,6 @@ def rescale_probs(label_prob_img, output_shape, order=0):
     """
     return skimage.transform.resize(label_prob_img, output_shape, order=order, mode='reflect', preserve_range=True)
 
-import numpy as np
-
 def pad_for_kernel(data_stack, effective_kernel_padding):
     """
     Pad a data stack (4D image or 3D annotation) to the kernel size.

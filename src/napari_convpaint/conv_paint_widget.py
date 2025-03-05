@@ -6,6 +6,7 @@ from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
+from napari.utils.notifications import show_info
 from napari_guitils.gui_structures import VHGroup, TabSet
 from pathlib import Path
 import numpy as np
@@ -18,17 +19,18 @@ from .conv_paint_model import ConvpaintModel
 class ConvPaintWidget(QWidget):
     """
     Implementation of a napari widget for interactive segmentation performed
-    via a CatBoost Classifier trained on annotations. The filters used to 
-    generate the model features are taken from the first layer of a VGG16 model
+    via multiple means of feature extraction combined with a CatBoost Classifier
+    trained on annotations. The default filters used to generate 
+    the features are taken from the first layer of a VGG16 model
     as proposed here: https://github.com/hinderling/napari_pixel_classifier
 
     Parameters
     ----------
-    napari_viewer: napari.Viewer
+    napari_viewer : napari.Viewer
         main napari viewer
-    project: bool
+    project : bool
         use project widget for multi-image project management
-    third_party: bool
+    third_party : bool
         if True, widget is used as third party and will not add layers to the viewer
         by default.
     """
@@ -36,23 +38,24 @@ class ConvPaintWidget(QWidget):
 ### Define the basic structure of the widget
     
     def __init__(self, napari_viewer, parent=None, init_project=False, third_party=False):
+
+        ### Initialize the widget state
+
         super().__init__(parent=parent)
         self.viewer = napari_viewer
+        # Initialize the Convpaint Model
         self.cp_model = ConvpaintModel()
-        self.default_cp_param = self.cp_model.get_param()
-        self.temp_cp_model = ConvpaintModel()
-        self.image_mean = None
-        self.image_std = None
-        self.trained = False
-        self.project_widget = None
-        self.selected_channel = None
+        # Get default parameters to set in widget
+        self.default_cp_param = ConvpaintModel.get_default_params()
+        # Create a temporary FE model for display
+        self.temp_fe_model = ConvpaintModel.create_fe(self.default_cp_param.fe_name,
+                                                      self.default_cp_param.fe_use_cuda)
+        
         self.third_party = third_party
-        # Plugin options and attributes
-        self.keep_layers = False # Keep old layers when adding new ones
-        self.auto_seg = True # Automatically segment after training
-        self.old_data_tag = "None" # Tag for the data before layers are added
-        self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
-        self.current_model_path = 'not trained' # Path to the current model (if saved)
+        self.selected_channel = None
+        self.spatial_dim_info_thresh = 1000000
+        self.default_brush_size = 3
+        self._reset_attributes()
 
         ### Build the widget
 
@@ -73,23 +76,61 @@ class ConvPaintWidget(QWidget):
 
         # === HOME TAB ===
 
-        # Create groups
-        self.layer_selection_group = VHGroup('Layer selection', orientation='G')
-        self.train_group = VHGroup('Train', orientation='G')
-        self.segment_group = VHGroup('Segment', orientation='G')
-        self.load_save_group = VHGroup('Load/Save', orientation='G')
-        self.image_processing_group = VHGroup('Image processing', orientation='G')
-        self.acceleration_group = VHGroup('Acceleration', orientation='G')
+        # Create groups and separate labels
         self.model_group = VHGroup('Model', orientation='G')
+        self.layer_selection_group = VHGroup('Layer selection', orientation='G')
+        self.image_processing_group = VHGroup('Image processing', orientation='G')
+        self.train_group = VHGroup('Train/Segment', orientation='G')
+        # self.segment_group = VHGroup('Segment', orientation='G')
+        # self.load_save_group = VHGroup('Load/Save', orientation='G')
+        self.acceleration_group = VHGroup('Acceleration', orientation='G')
+        # Create the shortcuts info
+        shortcuts_text1 = 'Shift+a: Toggle annotations\nShift+s: Train\nShift+d: Predict\nShift+f: Toggle prediction'
+        shortcuts_text2 = 'Shift+q: Set annotation label 1\nShift+w: Set annotation label 2\nShift+e: Set annotation label 3\nShift+r: Set annotation label 4'
+        shortcuts_label1 = QLabel(shortcuts_text1)
+        shortcuts_label2 = QLabel(shortcuts_text2)
+        shortcuts_label1.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        shortcuts_label2.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        shortcuts_grid = QGridLayout()
+        shortcuts_grid.addWidget(shortcuts_label1, 0, 0)
+        shortcuts_grid.addWidget(shortcuts_label2, 0, 1)
+        shortcuts_widget = QWidget()
+        shortcuts_widget.setLayout(shortcuts_grid)
+        # self.shortcuts_label = QLabel(shortcuts_text)#"\n[Hover mouse to see shortcuts]")
+        # self.shortcuts_label.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        # self.shortcuts_label.setToolTip(shortcuts_text)
+        # Create a simple box to add a number, for testing purposes
+        self.number_box = create_widget(annotation=int, label='Test')
+        self.number_box.value = 0
+
 
         # Add groups to the tab
-        self.tabs.add_named_tab('Home', self.layer_selection_group.gbox)
-        self.tabs.add_named_tab('Home', self.train_group.gbox)
-        self.tabs.add_named_tab('Home', self.segment_group.gbox)
-        self.tabs.add_named_tab('Home', self.load_save_group.gbox)
-        self.tabs.add_named_tab('Home', self.image_processing_group.gbox)
-        self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
         self.tabs.add_named_tab('Home', self.model_group.gbox)
+        self.tabs.add_named_tab('Home', self.layer_selection_group.gbox)
+        # self.tabs.add_named_tab('Home', self.segment_group.gbox)
+        # self.tabs.add_named_tab('Home', self.load_save_group.gbox)
+        self.tabs.add_named_tab('Home', self.image_processing_group.gbox)
+        self.tabs.add_named_tab('Home', self.train_group.gbox)
+        self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
+        self.tabs.widget(self.tabs.tab_names.index('Home')).layout().addWidget(shortcuts_widget)
+        self.tabs.add_named_tab('Home', self.number_box.native)
+
+        # Add buttons for "Model" group
+        # Current model description label
+        self.model_description1 = QLabel('None')
+        self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
+        # Save and load model buttons
+        self.save_model_btn = QPushButton('Save model')
+        self.save_model_btn.setToolTip('Save model as *.pkl (incl. classifier) or *.yml (parameters only) file')
+        self.save_model_btn.setEnabled(True)
+        self.model_group.glayout.addWidget(self.save_model_btn, 1,0,1,1)
+        self.load_model_btn = QPushButton('Load model')
+        self.load_model_btn.setToolTip('Select *.pkl or *.yml file to load')
+        self.model_group.glayout.addWidget(self.load_model_btn, 1,1,1,1)
+        # Reset model button
+        self._reset_convpaint_btn = QPushButton('Reset Convpaint')
+        self._reset_convpaint_btn.setToolTip('Discard current model and create new default model.')
+        self.model_group.glayout.addWidget(self._reset_convpaint_btn, 2,0,1,2)
 
         # Add elements to "Layer selection" group
         # Image layer (widget for selecting the layer to segment)
@@ -98,7 +139,6 @@ class ConvPaintWidget(QWidget):
         # Annotation layer
         self.annotation_layer_selection_widget = create_widget(annotation=napari.layers.Labels, label='Pick annotation')
         self.annotation_layer_selection_widget.reset_choices()
-
         # Add widgets to layout
         self.layer_selection_group.glayout.addWidget(QLabel('Image layer'), 0,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.image_layer_selection_widget.native, 0,1,1,1)
@@ -113,45 +153,6 @@ class ConvPaintWidget(QWidget):
         self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
         self.check_keep_layers.setChecked(self.keep_layers)
         self.layer_selection_group.glayout.addWidget(self.check_keep_layers, 2,1,1,1)
-
-        # Add buttons for "Train" group
-        self.train_classifier_btn = QPushButton('Train')
-        self.train_classifier_btn.setToolTip('Train model on annotations')
-        self.train_group.glayout.addWidget(self.train_classifier_btn, 0,0,1,1)
-        self.check_auto_seg = QCheckBox('Auto segment')
-        self.check_auto_seg.setToolTip('Automatically segment image after training')
-        self.check_auto_seg.setChecked(self.auto_seg)
-        self.train_group.glayout.addWidget(self.check_auto_seg, 0,1,1,1)
-        # Project checkbox
-        # self.check_use_project = QCheckBox('Project mode (multiple files)')
-        # self.check_use_project.setToolTip('Activate Project tab to use multiple files for training the classifier')
-        # self.check_use_project.setChecked(False)
-        # self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
-        # Project button
-        # self.train_classifier_on_project_btn = QPushButton('Train on Project')
-        # self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Project tab')
-        # self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
-        # if init_project is False:
-        #     self.train_classifier_on_project_btn.setEnabled(False)
-
-        # Add buttons for "Segment" group
-        self.segment_btn = QPushButton('Segment image')
-        self.segment_btn.setEnabled(False)
-        self.segment_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
-        self.segment_group.glayout.addWidget(self.segment_btn, 0,0,1,1)
-        self.segment_all_btn = QPushButton('Segment stack')
-        self.segment_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
-        self.segment_all_btn.setEnabled(False)
-        self.segment_group.glayout.addWidget(self.segment_all_btn, 0,1,1,1)
-
-        # Add buttons for "Load/Save" group
-        self.save_model_btn = QPushButton('Save trained model')
-        self.save_model_btn.setToolTip('Save model as *.pickle file')
-        self.save_model_btn.setEnabled(False)
-        self.load_save_group.glayout.addWidget(self.save_model_btn, 0,0,1,1)
-        self.load_model_btn = QPushButton('Load trained model')
-        self.load_model_btn.setToolTip('Select *.pickle file to load as trained model')
-        self.load_save_group.glayout.addWidget(self.load_model_btn, 0,1,1,1)
 
         # Add buttons for "Image Processing" group
         # Radio buttons for "Data Dimensions"
@@ -171,12 +172,10 @@ class ConvPaintWidget(QWidget):
         self.image_processing_group.glayout.addWidget(self.radio_single_channel, 0,0,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_multi_channel, 1,0,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_rgb, 2,0,1,1)
-        # Create a label to act as a vertical divider
-        # for row in [0,1,2]:
+        # Create and add a label to act as a vertical divider
         divider_label = QLabel('¦\n¦\n¦\n¦')
         divider_label.setAlignment(Qt.AlignCenter)
         divider_label.setStyleSheet("font-size: 13px; color: rgba(120, 120, 120, 35%);")
-        # Add the divider to the layout
         self.image_processing_group.glayout.addWidget(divider_label, 0, 1, 3, 1)
         # "Normalize" radio buttons
         self.button_group_normalize = QButtonGroup()
@@ -195,14 +194,33 @@ class ConvPaintWidget(QWidget):
         self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,2,1,1)
         self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,2,1,1)
 
-        # Add buttons for "Model" group
-        # Current model description label
-        self.model_description1 = QLabel('None')
-        self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
-        # Reset model button
-        self._reset_model_btn = QPushButton('Reset to default model')
-        self._reset_model_btn.setToolTip('Discard current model, create new default model.')
-        self.model_group.glayout.addWidget(self._reset_model_btn, 1,0,1,2)
+        # Add buttons for "Train/Segment" group
+        self.train_classifier_btn = QPushButton('Train')
+        self.train_classifier_btn.setToolTip('Train model on annotations')
+        self.train_group.glayout.addWidget(self.train_classifier_btn, 0,0,1,1)
+        self.check_auto_seg = QCheckBox('Auto segment')
+        self.check_auto_seg.setToolTip('Automatically segment image after training')
+        self.check_auto_seg.setChecked(self.auto_seg)
+        self.train_group.glayout.addWidget(self.check_auto_seg, 0,1,1,1)
+        # Project checkbox
+        # self.check_use_project = QCheckBox('Project mode (multiple files)')
+        # self.check_use_project.setToolTip('Activate Project tab to use multiple files for training the classifier')
+        # self.check_use_project.setChecked(False)
+        # self.train_group.glayout.addWidget(self.check_use_project, 1,0,1,1)
+        # Project button
+        # self.train_classifier_on_project_btn = QPushButton('Train on Project')
+        # self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Project tab')
+        # self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
+        # if init_project is False:
+        #     self.train_classifier_on_project_btn.setEnabled(False)
+        self.segment_btn = QPushButton('Segment image')
+        self.segment_btn.setEnabled(False)
+        self.segment_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie ')
+        self.train_group.glayout.addWidget(self.segment_btn, 1,0,1,1)
+        self.segment_all_btn = QPushButton('Segment stack')
+        self.segment_all_btn.setToolTip('Segment all slices/frames of 3D image/movie')
+        self.segment_all_btn.setEnabled(False)
+        self.train_group.glayout.addWidget(self.segment_all_btn, 1,1,1,1)
 
         # Add elements to "Acceleration" group
         # "Downsample" spinbox
@@ -226,7 +244,7 @@ class ConvPaintWidget(QWidget):
 
         # === MODEL TAB ===
 
-        # Create three groups, 'Current model', 'Feature extractor' and 'Classifier parameters (CatBoost)'
+        # Create three groups
         self.current_model_group = VHGroup('Current model', orientation='G')
         self.fe_group = VHGroup('Feature extractor', orientation='G')
         self.classifier_params_group = VHGroup('Classifier (CatBoost)', orientation='G')
@@ -236,15 +254,20 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Model options', self.classifier_params_group.gbox, [10, 0, 3, 2])
         self.tabs.setTabEnabled(self.tabs.tab_names.index('Model options'), True)
         
-        # Current model and update button
+        # Current model
         self.model_description2 = QLabel('None')
         self.current_model_group.glayout.addWidget(self.model_description2, 0, 0, 1, 2)
 
         # Add "FE architecture" combo box to FE group
         self.qcombo_fe_type = QComboBox()
-        self.qcombo_fe_type.addItems(sorted(self.cp_model.get_all_fe_models().keys()))
+        self.qcombo_fe_type.addItems(sorted(ConvpaintModel.get_all_fe_models().keys()))
         self.qcombo_fe_type.setToolTip('Select architecture of feature extraction model.')
-        self.fe_group.glayout.addWidget(self.qcombo_fe_type, 2, 0, 1, 2)
+        self.fe_group.glayout.addWidget(self.qcombo_fe_type, 1, 0, 1, 2)
+
+        # Add "FE description" label to FE group
+        self.FE_description = QLabel(self.temp_fe_model.get_description())
+        self.FE_description.setWordWrap(True)
+        self.fe_group.glayout.addWidget(self.FE_description, 2, 0, 1, 2)
 
         # Add "FE layers" list to FE group
         self.fe_layer_selection = QListWidget()
@@ -332,18 +355,54 @@ class ConvPaintWidget(QWidget):
         #     self._on_use_project()
 
         # Add connections and initialize by setting default model and params
-        self.add_connections()
-        self._reset_default_general_params()
-        self._reset_clf_params()
-        self._reset_fe_params()
-        self._update_gui_from_param()
-        self._on_select_layer()
+        self._add_connections()
+        self._reset_model()
 
         # Add key bindings
-        self.viewer.bind_key('a', self.toggle_annotation, overwrite=True)
-        self.viewer.bind_key('r', self.toggle_prediction, overwrite=True)
+        self.viewer.bind_key('Shift+a', self.toggle_annotation, overwrite=True)
+        self.viewer.bind_key('Shift+s', self._on_train, overwrite=True)
+        self.viewer.bind_key('Shift+d', self._on_predict, overwrite=True)
+        self.viewer.bind_key('Shift+f', self.toggle_prediction, overwrite=True)
+        self.viewer.bind_key('Shift+q', lambda event=None: self.set_annot_label_class(1, event), overwrite=True)
+        self.viewer.bind_key('Shift+w', lambda event=None: self.set_annot_label_class(2, event), overwrite=True)
+        self.viewer.bind_key('Shift+e', lambda event=None: self.set_annot_label_class(3, event), overwrite=True)
+        self.viewer.bind_key('Shift+r', lambda event=None: self.set_annot_label_class(4, event), overwrite=True)
 
-    def add_connections(self):
+### Visibility toggles for key bindings
+
+    def toggle_annotation(self, event=None):
+        """Hide/unhide annotations layer."""
+        annot_layer = self.annotation_layer_selection_widget.value
+        if annot_layer is None:
+            return
+        if annot_layer.visible == False:
+            annot_layer.visible = True
+            self.viewer.layers.selection.active = annot_layer
+        else:
+            annot_layer.visible = False
+
+    def toggle_prediction(self, event=None):
+        """Hide/unhide prediction layer."""
+        if not 'segmentation' in self.viewer.layers:
+            return
+        if self.viewer.layers['segmentation'].visible == False:
+            self.viewer.layers['segmentation'].visible = True
+        else:
+            self.viewer.layers['segmentation'].visible = False
+
+    def set_annot_label_class(self, x, event=None):
+        """Set the label class of the annotation layer."""
+        annot_layer = self.annotation_layer_selection_widget.value
+        if annot_layer is None:
+            return
+        annot_layer.selected_label = x
+        annot_layer.visible = True
+        annot_layer.mode = 'paint'
+        self.viewer.layers.selection.active = annot_layer
+
+### Define the connections between the widget elements
+
+    def _add_connections(self):
 
         # Reset layer choices in dropdown when layers are renamed; also bind this behaviour to inserted layers
         for layer in self.viewer.layers:
@@ -357,13 +416,34 @@ class ConvPaintWidget(QWidget):
                                    self.image_layer_selection_widget.reset_choices]:
             self.viewer.layers.events.inserted.connect(layer_widget_reset)
             self.viewer.layers.events.removed.connect(layer_widget_reset)
+
+        # Load/Save
+        self.save_model_btn.clicked.connect(self._on_save_model)
+        self.load_model_btn.clicked.connect(self._on_load_model)
+
+        # Model
+        self._reset_convpaint_btn.clicked.connect(self._on_reset_convpaint)
         
-        # Change layer selection when choosing a new image layer in dropdown
+        # Change input layer selection when choosing a new image layer in dropdown
         self.image_layer_selection_widget.changed.connect(self._on_select_layer)
         self.annotation_layer_selection_widget.changed.connect(self._on_select_annot)
         self.add_layers_btn.clicked.connect(self._on_add_annot_seg_layers)
         self.check_keep_layers.stateChanged.connect(lambda: setattr(
             self, 'keep_layers', self.check_keep_layers.isChecked()))
+
+        # Image Processing; only trigger from buttons that are activated (checked)
+        self.radio_single_channel.toggled.connect(lambda checked: 
+            checked and self._on_data_dim_changed())
+        self.radio_multi_channel.toggled.connect(lambda checked:
+            checked and self._on_data_dim_changed())
+        self.radio_rgb.toggled.connect(lambda checked:
+            checked and self._on_data_dim_changed())
+        self.radio_no_normalize.toggled.connect(lambda checked:
+            checked and self._on_norm_changed())
+        self.radio_normalize_over_stack.toggled.connect(lambda checked:
+            checked and self._on_norm_changed())
+        self.radio_normalize_by_image.toggled.connect(lambda checked:
+            checked and self._on_norm_changed())
 
         # Train
         self.train_classifier_btn.clicked.connect(self._on_train)
@@ -376,34 +456,13 @@ class ConvPaintWidget(QWidget):
         self.segment_btn.clicked.connect(self._on_predict)
         self.segment_all_btn.clicked.connect(self._on_predict_all)
 
-        # Load/Save
-        self.save_model_btn.clicked.connect(self._on_save_model)
-        self.load_model_btn.clicked.connect(self._on_load_model)
-
-        # Image Processing; only trigger from buttons that are activated (checked)
-        self.radio_single_channel.toggled.connect(lambda checked: 
-                                                  checked and self._on_data_dim_changed())
-        self.radio_multi_channel.toggled.connect(lambda checked:
-                                                 checked and self._on_data_dim_changed())
-        self.radio_rgb.toggled.connect(lambda checked:
-                                       checked and self._on_data_dim_changed())
-        self.radio_no_normalize.toggled.connect(lambda checked:
-                                                checked and self._on_norm_changed())
-        self.radio_normalize_over_stack.toggled.connect(lambda checked:
-                                                         checked and self._on_norm_changed())
-        self.radio_normalize_by_image.toggled.connect(lambda checked:
-                                                      checked and self._on_norm_changed())
-
-        # Model
-        self._reset_model_btn.clicked.connect(self._on_reset_model)
-
         # Acceleration
-        self.spin_downsample.valueChanged.connect(lambda: setattr(
-            self.cp_model.param, 'image_downsample', self.spin_downsample.value()))
-        self.check_tile_annotations.stateChanged.connect(lambda: setattr(
-            self.cp_model.param, 'tile_annotations', self.check_tile_annotations.isChecked()))
-        self.check_tile_image.stateChanged.connect(lambda: setattr(
-            self.cp_model.param, 'tile_image', self.check_tile_image.isChecked()))
+        self.spin_downsample.valueChanged.connect(lambda:
+            self.cp_model.set_param('image_downsample', self.spin_downsample.value()))
+        self.check_tile_annotations.stateChanged.connect(lambda: 
+            self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked()))
+        self.check_tile_image.stateChanged.connect(lambda: 
+            self.cp_model.set_param('tile_image', self.check_tile_image.isChecked()))
 
         # === MODEL OPTIONS TAB ===
 
@@ -417,28 +476,13 @@ class ConvPaintWidget(QWidget):
         # shall only be applied when the user clicks the button to set the FE
         
         # Classifier
-        self.spin_iterations.valueChanged.connect(lambda: setattr(self.cp_model.param, 'clf_iterations', self.spin_iterations.value()))
-        self.spin_learning_rate.valueChanged.connect(lambda: setattr(self.cp_model.param, 'clf_learning_rate', self.spin_learning_rate.value()))
-        self.spin_depth.valueChanged.connect(lambda: setattr(self.cp_model.param, 'clf_depth', self.spin_depth.value()))
+        self.spin_iterations.valueChanged.connect(lambda:
+            self.cp_model.set_param('clf_iterations', self.spin_iterations.value()))
+        self.spin_learning_rate.valueChanged.connect(lambda:
+            self.cp_model.set_param('clf_learning_rate', self.spin_learning_rate.value()))
+        self.spin_depth.valueChanged.connect(lambda:
+            self.cp_model.set_param('clf_depth', self.spin_depth.value()))
         self.set_default_clf_btn.clicked.connect(self._on_reset_clf_params)
-
-### Visibility toggles for key bindings
-
-    def toggle_annotation(self, event=None):
-        """Hide annotation layer."""
-
-        if self.viewer.layers['annotations'].visible == False:
-            self.viewer.layers['annotations'].visible = True
-        else:
-            self.viewer.layers['annotations'].visible = False
-
-    def toggle_prediction(self, event=None):
-        """Hide prediction layer."""
-
-        if self.viewer.layers['segmentation'].visible == False:
-            self.viewer.layers['segmentation'].visible = True
-        else:
-            self.viewer.layers['segmentation'].visible = False
 
 ### Define the detailed behaviour of the widget
 
@@ -454,25 +498,31 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
+        # If it is the same layer, do nothing
+        if self.selected_channel == self.image_layer_selection_widget.native.currentText():
+            return
+        # Otherwise, update the selected channel and reset the radio buttons
+        initial_add_layers_flag = self.add_layers_flag # Save initial state of add_layers_flag
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         if self.image_layer_selection_widget.value is not None:
             self.add_layers_flag = False # Turn off layer creation, since we do it below
-            # If the image is RGB, this has to be enforced
-            self.cp_model.param.rgb_img = self.image_layer_selection_widget.value.rgb
-            self._get_image_stats()
             # Set radio buttons depending on selected image type
             self._reset_radio_data_dim_choices()
             self._reset_radio_norm_choices()
             self._reset_predict_buttons()
+            self._get_image_stats()
             # Add empty layers and save old data tag for next addition
             self._add_empty_layers()
             self._set_old_data_tag()
             # Activate button to add annotation and segmentation layers
             self.add_layers_btn.setEnabled(True)
+            # Give info if image is very large to use "tile image"
+            if self._check_large_image() and not self.cp_model.get_param('tile_image'):
+                show_info('Image is very large. Consider using "Tile image" for segmentation.')
         else:
             self.add_layers_btn.setEnabled(False)
-        # Allow other methods again to add layers
-        self.add_layers_flag = True
+        # Allow other methods again to add layers if that was the case before
+        self.add_layers_flag = initial_add_layers_flag
 
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
@@ -486,7 +536,7 @@ class ConvPaintWidget(QWidget):
 
     # Train
 
-    def _on_train(self):
+    def _on_train(self, event=None):
         """Given a set of new annotations, update the CatBoost classifier."""
 
         # Check if annotations of at least 2 classes are present
@@ -499,7 +549,7 @@ class ConvPaintWidget(QWidget):
             raise Exception('Annotation layer has wrong shape for the chosen data')
 
         # Set the current model path to 'in training' and adjsut the model description
-        self.current_model_path= 'in training'
+        self.current_model_path = 'in training'
         self._set_model_description()
 
         # Start training
@@ -512,8 +562,7 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            features, targets = self.cp_model.get_features_current_layers(image_stack_norm, annots)
-            self.cp_model.train_classifier(features, targets)
+            self.cp_model.train(image_stack_norm, annots)
     
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -523,7 +572,7 @@ class ConvPaintWidget(QWidget):
         self.current_model_path = 'trained, unsaved'
         self.trained = True
         self._reset_predict_buttons()
-        self.save_model_btn.setEnabled(True)
+        # self.save_model_btn.setEnabled(True)
         self._set_model_description()
         if self.auto_seg:
             self._on_predict()
@@ -561,7 +610,7 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
         
-        self.viewer.layers.events.removed.disconnect(self._on_reset_model)
+        self.viewer.layers.events.removed.disconnect(self._on_reset_convpaint)
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             self.current_model_path = 'in training'
@@ -580,25 +629,25 @@ class ConvPaintWidget(QWidget):
             all_features = np.concatenate(all_features, axis=0)
             all_targets = np.concatenate(all_targets, axis=0)
 
-            self.cp_model.train_classifier(all_features, all_targets)
+            self.cp_model._train_classifier(all_features, all_targets)
 
             self.current_model_path = 'trained, unsaved'
             self.trained = True
             self._reset_predict_buttons()
-            self.save_model_btn.setEnabled(True)
+            # self.save_model_btn.setEnabled(True)
             self._set_model_description()
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
-        self.viewer.layers.events.removed.connect(self._on_reset_model)
+        self.viewer.layers.events.removed.connect(self._on_reset_convpaint)
 
     # Predict
 
-    def _on_predict(self):
+    def _on_predict(self, event=None):
         """Predict the segmentation of the currently viewed frame based 
-        on a RF model trained with annotations"""
+        on a classifier trained with annotations"""
         # Perform checks as preparation for prediction
 
         # NOTE: Do this in cp_model instead
@@ -624,20 +673,21 @@ class ConvPaintWidget(QWidget):
 
             data_dims = self._get_data_dims() # Do not normalize yet, so we can specifically normalize only the current step
 
-            # Get image data and stats depending on the data dim and norm radio buttons
+            # Get image data and stats depending on the data dim and norm mode
+            norm_mode = self.cp_model.get_param("normalize")
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
                 image = self._get_data_channel_first()
-                if self.cp_model.param.normalize != 1:
+                if norm_mode != 1:
                     image_mean = self.image_mean
                     image_std = self.image_std
 
             if data_dims == '3D_single':
                 step = self.viewer.dims.current_step[0]
                 image = self.viewer.layers[self.selected_channel].data[step]
-                if self.cp_model.param.normalize == 2: # over stack (only 1 value in stack dim)
+                if norm_mode == 2: # over stack (only 1 value in stack dim)
                     image_mean = self.image_mean
                     image_std = self.image_std
-                if self.cp_model.param.normalize == 3: # by image (use values for current step)
+                if norm_mode == 3: # by image (use values for current step)
                     image_mean = self.image_mean[step]
                     image_std = self.image_std[step]
             
@@ -645,10 +695,10 @@ class ConvPaintWidget(QWidget):
                 step = self.viewer.dims.current_step[0]
                 image = self.viewer.layers[self.selected_channel].data[step]
                 image = np.moveaxis(image, -1, 0)
-                if self.cp_model.param.normalize == 2: # over stack (only 1 value in stack dim)
+                if norm_mode == 2: # over stack (only 1 value in stack dim)
                     image_mean = self.image_mean[:,0,::]
                     image_std = self.image_std[:,0,::]
-                if self.cp_model.param.normalize == 3: # by image (use values for current step)
+                if norm_mode == 3: # by image (use values for current step)
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
 
@@ -656,22 +706,22 @@ class ConvPaintWidget(QWidget):
                 # for 4D, channel is always first, t/z second
                 step = self.viewer.dims.current_step[1]
                 image = self.viewer.layers[self.selected_channel].data[:, step]
-                if self.cp_model.param.normalize == 2: # over stack (only 1 value in stack dim)
+                if norm_mode == 2: # over stack (only 1 value in stack dim)
                     image_mean = self.image_mean[:,0,::]
                     image_std = self.image_std[:,0,::]
-                if self.cp_model.param.normalize == 3: # by image (use values for current step)
+                if norm_mode == 3: # by image (use values for current step)
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
             
             # Normalize image (using the stats based on the radio buttons)
-            if self.cp_model.param.normalize != 1:
+            if norm_mode != 1:
                 image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
             # Predict image
-            if self.cp_model.param.tile_image:
+            if self.cp_model.get_param("tile_image"):
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.predict_image(image)
+                predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
             
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -686,7 +736,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
-        on a RF model trained with annotations"""
+        on a classifier model trained with annotations"""
         
         data_dims = self._get_data_dims()
         if data_dims not in ['3D_single', '3D_RGB', '4D']:
@@ -719,11 +769,11 @@ class ConvPaintWidget(QWidget):
             elif data_dims in ['3D_RGB', '4D']:
                 image = image_stack_norm[:, step]
 
-            # Predict the current step            
-            if self.cp_model.param.tile_image: # NOTE: We could also move this condition to the cp model
+            # Predict the current step
+            if self.cp_model.get_param("tile_image"): # NOTE: We could also move this condition to the cp model
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.predict_image(image)
+                predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
 
             # Update segmentation layer
             self.viewer.layers['segmentation'].data[step] = predicted_image
@@ -740,45 +790,72 @@ class ConvPaintWidget(QWidget):
         # Get file path
         if save_file is None:
             dialog = QFileDialog()
-            save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pickle)")
-        save_file = Path(save_file)
+            save_file, _ = dialog.getSaveFileName(self, "Save model", None, "PICKLE (*.pkl);;YAML (*.yml)")
+        
+        # If file selection is aborted, raise a warning (instead of an error)
+        if save_file == '':
+            warnings.warn('No file selected')
+            return
+
         # Save model
-        self.cp_model.save(save_file)
+        save_file = Path(save_file)
+        suff = save_file.suffix
+        pkl = suff == '.pkl'
+        yml = suff == '.yml'
+        save_string = str(save_file)
+        self.cp_model.save(save_string, create_pkl=pkl, create_yml=yml)
+
         # Adjust the model description
         self.current_model_path = save_file.name
         self._set_model_description()
 
     def _on_load_model(self, event=None, save_file=None):
         """Select classifier file to load along with the model parameters."""
-        # Get file path
+        # Get file path and open the data
         if save_file is None:
             dialog = QFileDialog()
-            save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pickle)")
-        save_file = Path(save_file)
-        self.cp_model.load(save_file)
+            save_file, _ = dialog.getOpenFileName(self, "Choose model", None, "PICKLE (*.pkl);;YAML (*.yml)")
 
-        # Check if the loaded multichannel setting is compatible with data
+        # If file selection is aborted, raise a warning (instead of an error)
+        if save_file == '':
+            warnings.warn('No file selected')
+            return
+        
+        save_file = Path(save_file)
+        
+        # Load the model parameters
+        save_string = str(save_file)
+        new_model = ConvpaintModel(model_path=save_string)
+        new_param = new_model.get_params()
+        
+        # Check if the new multichannel setting is compatible with data
         data_dims = self._get_data_dims()
-        if data_dims in ['2D', '2D_RGB', '3D_RGB'] and self.cp_model.param.multi_channel_img:
+        if data_dims in ['2D', '2D_RGB', '3D_RGB'] and new_param.multi_channel_img:
             warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}.' +
                             'This might cause problems.')
-        if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and self.cp_model.param.rgb_img:
+        if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and new_param.rgb_img:
             warnings.warn(f'The loaded model works with RGB, but the data is {data_dims}.' +
                             'This might cause problems.')
         # Check if the loaded normalization setting is compatible with data
-        if data_dims in ['2D', '2D_RGB', '3D_multi'] and self.cp_model.param.normalize == 2:
+        if data_dims in ['2D', '2D_RGB', '3D_multi'] and new_param.normalize == 2:
             warnings.warn(f'The loaded model normalizes over stack, but the data is {data_dims}.' +
                             'This might cause problems.')
 
-        # Update GUI from the loaded parameters
-        self._update_gui_from_param()
+        # Update GUI with the new parameters
+        self._update_gui_from_params(new_param)
 
         # Update GUI to show selectable layers of model chosen from drop-down
-        self._update_gui_fe_layers_from_model()
-        
+        self._update_gui_fe_layers_from_model(new_model)
+
+        # Load the model (Note: done after updating GUI, since GUI updates might reset clf or change model)
+        self.cp_model = new_model
+        self.cp_model._param = new_param
+        self.temp_fe_model = ConvpaintModel.create_fe(new_param.fe_name,
+                                                      new_param.fe_use_cuda)
+
         # Adjust trained flag, save button and predict buttons, and update model description
-        self.trained = True
-        self.save_model_btn.setEnabled(True)
+        self.trained = save_file.suffix == '.pkl' and new_model.classifier is not None
+        # self.save_model_btn.setEnabled(True)
         self._reset_predict_buttons()
         self.current_model_path = save_file.name
         self._set_model_description()
@@ -788,8 +865,8 @@ class ConvPaintWidget(QWidget):
     def _on_data_dim_changed(self):
         """Set the image data dimensions based on radio buttons,
         reset classifier, and adjust normalization options."""
-        self.cp_model.param.multi_channel_img = self.radio_multi_channel.isChecked()
-        self.cp_model.param.rgb_img = self.radio_rgb.isChecked() # This should actually not happen (RGB is defined by data)
+        self.cp_model.set_param("multi_channel_img", self.radio_multi_channel.isChecked())
+        self.cp_model.set_param("rgb_img", self.radio_rgb.isChecked()) # This should actually not happen (RGB is defined by data)
         self._reset_clf()
         self._reset_radio_norm_choices()
         if self.add_layers_flag: # Add layers only if not triggered from layer selection
@@ -800,38 +877,77 @@ class ConvPaintWidget(QWidget):
         """Set the normalization options based on radio buttons,
         and update stats."""
         if self.radio_no_normalize.isChecked():
-            self.cp_model.param.normalize = 1
+            self.cp_model.set_param("normalize", 1)
         elif self.radio_normalize_over_stack.isChecked():
-            self.cp_model.param.normalize = 2
+            self.cp_model.set_param("normalize", 2)
         elif self.radio_normalize_by_image.isChecked():
-            self.cp_model.param.normalize = 3
+            self.cp_model.set_param("normalize", 3)
         # self._get_image_stats() # NOTE: Don't we want to set it right away?
         self.image_mean, self.image_std = None, None
         self._reset_clf()
 
-    # Model
+    # Model reset
 
-    def _on_reset_model(self, event=None):
+    def _on_reset_convpaint(self, event=None):
         """Reset model to default and update GUI."""
-        self.save_model_btn.setEnabled(False)
+        # Turn off automatic layer creation for the model reset
+        self.add_layers_flag = False
+        # Reset the model to default
+        self._reset_model()
+        # Reset the widget attributes and the according buttons
+        self._reset_attributes()
+        self.check_auto_seg.setChecked(self.auto_seg) # Adjust the button in the widget
+        self.check_keep_layers.setChecked(self.keep_layers) # Adjust the button in the widget
+        # Reset the model description
+        self._set_model_description()
+        # Turn on layer creation again
+        self.add_layers_flag = True
+
+    def _reset_model(self):
+        """Reset the model to default."""
+        # self.save_model_btn.setEnabled(True)
+        self._reset_fe_params() # Also resets the FE model
         self._reset_clf_params()
-        self._reset_fe_params()
         self._reset_clf()
+        self._reset_default_general_params()
+        self._update_gui_from_params()
+        # Set radio buttons depending on selected image type
+        self._reset_radio_data_dim_choices()
+        self._reset_radio_norm_choices()
+        self._reset_predict_buttons()
+        self._get_image_stats()
+
+    def _reset_attributes(self):
+        """Reset all attributes of the widget."""
+        # Set widget-specific attributes
+        self.image_mean = None
+        self.image_std = None
+        self.trained = False
+        self.project_widget = None
+        # self.selected_channel = None
+        # Plugin options and attributes
+        self.keep_layers = False # Keep old layers when adding new ones
+        self.auto_seg = True # Automatically segment after training
+        self.old_data_tag = "None" # Tag for the data before layers are added
+        self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
+        self.current_model_path = 'not trained' # Path to the current model (if saved)
+
 
     ### Model Tab
 
     def _on_fe_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         # Create a temporary model to get the layers (to display) and default parameters
-        fe_type = self.qcombo_fe_type.currentText()
-        self.temp_cp_model = ConvpaintModel()
-        self.temp_cp_model.set(use_fe_defaults=True, fe_name=fe_type, fe_use_cuda=self.cp_model.param.fe_use_cuda)
-        
-        # Get the default FE params for the temp model and update the GUI
-        fe_defaults = self.temp_cp_model.get_param()
-        
+        new_fe_type = self.qcombo_fe_type.currentText()
+        current_cuda = self.cp_model.get_param("fe_use_cuda")
+        self.temp_fe_model = ConvpaintModel.create_fe(new_fe_type,
+                                                      current_cuda)
+
         # Update the GUI to show the FE layers of the temp model
         self._update_gui_fe_layer_choice_from_temp_model()
+
+        # Get the default FE params for the temp model and update the GUI
+        fe_defaults = self.temp_fe_model.get_default_params()
 
         # NOTE: only FE params are adjusted here, since the FE is not set yet
         self._update_gui_fe_scalings(fe_defaults.fe_scalings)
@@ -846,10 +962,11 @@ class ConvPaintWidget(QWidget):
             if val is not None:
                 if isinstance(val, list): val = str(val)
                 setter(val)
+        self.FE_description.setText(self.temp_fe_model.get_description())
 
     def _on_fe_layer_selection_changed(self):
         """Enable the set button based on the model type."""
-        if self.temp_cp_model.get_fe_layer_keys() is not None:
+        if self.temp_fe_model.get_layer_keys() is not None:
             selected_layers = self._get_selected_layer_names()
             if len(selected_layers) == 0:
                 self.set_fe_btn.setEnabled(False)
@@ -866,27 +983,28 @@ class ConvPaintWidget(QWidget):
         """Create a neural network model that will be used for feature extraction and
         reset the classifier."""
         # Read FE parameters from the GUI
-        new_param = self.cp_model.param.copy()
-        new_param.fe_name = self.qcombo_fe_type.currentText()
-        new_param.fe_layers = self._get_selected_layer_names()
-        new_param.fe_scalings = self.fe_scaling_factors.currentData()
-        new_param.fe_order = self.spin_interpolation_order.value()
-        new_param.fe_use_min_features = self.check_use_min_features.isChecked()
-        new_param.fe_use_cuda = self.check_use_cuda.isChecked()
+        new_param = self.cp_model.get_params()
+        new_layers = self._get_selected_layer_names() # includes re-writing to keys
+        new_param.set(fe_name = self.qcombo_fe_type.currentText(),
+                      fe_layers = new_layers,
+                      fe_use_cuda = self.check_use_cuda.isChecked(),
+                      fe_scalings = self.fe_scaling_factors.currentData(),
+                      fe_order = self.spin_interpolation_order.value(),
+                      fe_use_min_features = self.check_use_min_features.isChecked())
 
         # Get default non-FE params from temp model and update the GUI (also setting the params)
-        fe_defaults = self.temp_cp_model.get_param()
-        enforced_params = [] # List of enforced parameters for raising a warning
+        fe_defaults = self.temp_fe_model.get_default_params()
+        adjusted_params = [] # List of adjusted parameters for raising a warning
         # Multichannel
         if ((fe_defaults.multi_channel_img is not None) and
             (new_param.multi_channel_img != fe_defaults.multi_channel_img)):
             data_dims = self._get_data_dims()
-            # Catch case where multichannel is enforced on incompatible data
+            # Catch case where multichannel is adjusted on incompatible data
             if data_dims in ['2D', '2D_RGB', '3D_RGB'] and fe_defaults.multi_channel_img:
                 warnings.warn(f'The feature extractor tried to enforce multichannel on {data_dims} data.' +
                               'This is not supported and will be ignored.')
             else: # If data is compatible, enforce the model's default multichannel setting
-                enforced_params.append('multi_channel_img')
+                adjusted_params.append('multi_channel_img')
                 if fe_defaults.multi_channel_img: # If the default model is multi-channel, enforce it
                     new_param.multi_channel_img = True
                     self.radio_multi_channel.setChecked(True)
@@ -894,16 +1012,16 @@ class ConvPaintWidget(QWidget):
                     new_param.multi_channel_img = False
                     self._reset_radio_data_dim_choices()
                 self._reset_radio_norm_choices() # Update norm options, since multi_channel_img changed
-        # RGB - cannot be enforced, since it is defined by the image data; but raise a warning if incompatible
+        # RGB - cannot be adjusted, since it is defined by the image data; but raise a warning if incompatible
         if ((fe_defaults.rgb_img is not None) and
             (new_param.rgb_img != fe_defaults.rgb_img)):
             data_dims = self._get_data_dims()
-            # Catch case where RGB is enforced on incompatible data
+            # Catch case where RGB is adjusted on incompatible data
             if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and fe_defaults.rgb_img:
                 warnings.warn(f'The feature extractor tried to enforce RGB on {data_dims} data.' +
                               'This is not supported and will be ignored.')
             # else: # If data is compatible, enforce the model's default RGB setting
-            #     enforced_params.append('rgb_img')
+            #     adjusted_params.append('rgb_img')
             #     if fe_defaults.rgb_img: # If the default model is RGB, enforce it
             #         new_param.rgb_img = True
             #         self.radio_rgb.setChecked(True)
@@ -919,8 +1037,9 @@ class ConvPaintWidget(QWidget):
                 warnings.warn(f'The feature extractor tried to enforce normalization over stack on {data_dims} data.' +
                               'This is not supported and will be ignored.')
             else:
-                enforced_params.append('normalize')
+                adjusted_params.append('normalize')
                 self.button_group_normalize.button(fe_defaults.normalize).setChecked(True)
+                setattr(new_param, 'normalize', fe_defaults.normalize)
         # Other params
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
@@ -933,15 +1052,16 @@ class ConvPaintWidget(QWidget):
         for attr, setter in val_to_setter.items():
             val = getattr(fe_defaults, attr, None)
             if val is not None and val != getattr(new_param, attr):
-                enforced_params.append(attr)
+                adjusted_params.append(attr)
                 if isinstance(val, list):
                     val = str(val)
-                setter(val)
-        if enforced_params: warnings.warn(f'The feature extractor enforced the parameters {enforced_params}')
+                setter(val) # Set the default value in the GUI
+                setattr(new_param, attr, val) # Set the default value in the param object
+        if adjusted_params: show_info(f'The feature extractor adjusted the parameters {adjusted_params}')
 
-        # Set the model (also resets the classifier and model_state)
-        self.cp_model.load_param(new_param)
-        self._set_model_description()
+        # Create a new model (with a new classifier and model_state)
+        self.cp_model = ConvpaintModel(param=new_param)
+        self._reset_clf()
 
     def _on_reset_default_fe(self, event=None):
         """Reset the feature extraction model to the default model."""
@@ -965,7 +1085,8 @@ class ConvPaintWidget(QWidget):
             self._create_annot_seg_copies()
 
         if self.image_layer_selection_widget.value is None:
-            raise Exception('Please select an image layer first')
+            warnings.warn('No image layer selected. No layers added.')
+            return
         
         layer_shape = self._get_annot_shape()
 
@@ -996,7 +1117,7 @@ class ConvPaintWidget(QWidget):
             self.viewer.layers.selection.active = self.viewer.layers['annotations']
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
-            self.viewer.layers['annotations'].brush_size = 3
+            self.viewer.layers['annotations'].brush_size = self.default_brush_size
 
     def _create_annot_seg_copies(self):
         """Create copies of the annotations and segmentation layers."""
@@ -1017,8 +1138,8 @@ class ConvPaintWidget(QWidget):
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
             return
-        
-        if self.cp_model.param.rgb_img: # If the image is RGB (2D or 3D makes no difference), this is the only option
+        self.cp_model.set_param("rgb_img", self.image_layer_selection_widget.value.rgb)
+        if self.cp_model.get_param("rgb_img"): # If the image is RGB (2D or 3D makes no difference), this is the only option
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(True)
@@ -1032,9 +1153,9 @@ class ConvPaintWidget(QWidget):
             self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
-            # multi_channel_val = self.cp_model.param.multi_channel_img is not None and self.cp_model.param.multi_channel_img
-            self.radio_single_channel.setChecked(not self.cp_model.param.multi_channel_img) # Choice depending on param
-            self.radio_multi_channel.setChecked(self.cp_model.param.multi_channel_img)
+            # multi_channel_val = self.cp_model.get_param("multi_channel_img") is not None and self.cp_model.get_param("multi_channel_img")
+            self.radio_single_channel.setChecked(not self.cp_model.get_param("multi_channel_img")) # Choice depending on param
+            self.radio_multi_channel.setChecked(self.cp_model.get_param("multi_channel_img"))
         elif self.image_layer_selection_widget.value.ndim == 4: # If 4D, it must be multi channel
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(True)
@@ -1052,20 +1173,21 @@ class ConvPaintWidget(QWidget):
             return
         
         data_dims = self._get_data_dims()
+        norm_mode = self.cp_model.get_param("normalize")
         
         if data_dims in ['2D', '2D_RGB', '3D_multi']:
             self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_over_stack.setEnabled(False)
             self.radio_normalize_by_image.setEnabled(True)
-            if self.cp_model.param.normalize == 2: # If initially over stack, reset to by image
+            if norm_mode == 2: # If initially over stack, reset to by image
                 self.radio_normalize_by_image.setChecked(True)
             else:
-                self.button_group_normalize.button(self.cp_model.param.normalize).setChecked(True)
+                self.button_group_normalize.button(norm_mode).setChecked(True)
         else: # 3D_single, 4D, 3D_RGB
             self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_over_stack.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
-            self.button_group_normalize.button(self.cp_model.param.normalize).setChecked(True)
+            self.button_group_normalize.button(norm_mode).setChecked(True)
 
     def _reset_predict_buttons(self):
         """Enable or disable predict buttons based on the current state."""
@@ -1079,31 +1201,42 @@ class ConvPaintWidget(QWidget):
             self.segment_btn.setEnabled(False)
             self.segment_all_btn.setEnabled(False)
 
-    def _update_gui_fe_layers_from_model(self):
+    def _update_gui_fe_layers_from_model(self, cp_model=None):
         """Update GUI FE layer selection based on the current (e.g. loaded) model."""
-        fe_layer_keys = self.cp_model.get_fe_layer_keys()        
-        if fe_layer_keys is not None:
+        if cp_model is None:
+            cp_model = self.cp_model
+        # Display layers based on the temp FE model
+        all_fe_layer_keys = cp_model.get_fe_layer_keys()
+        all_fe_layer_texts = self._layer_keys_to_texts(all_fe_layer_keys)
+        if all_fe_layer_texts is not None:
+            # Add layer index to layer names
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(fe_layer_keys)
-            self.fe_layer_selection.setEnabled(len(fe_layer_keys) > 1) # Only need to enable if multiple layers available
-            for layer in self.cp_model.param.fe_layers:
+            self.fe_layer_selection.addItems(all_fe_layer_texts)
+            self.fe_layer_selection.setEnabled(len(all_fe_layer_texts) > 1) # Only need to enable if multiple layers available
+            # Select layers that are in the param object
+            layer_keys = cp_model.get_param("fe_layers")
+            layer_texts = self._layer_keys_to_texts(layer_keys)
+            for layer in layer_texts:
                 items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
                 for item in items:
                     item.setSelected(True)
-        else: # For non-hookmodels, disable the selection
+        # For non-hookmodels, disable the selection
+        else:
             self.fe_layer_selection.clear()
             self.fe_layer_selection.setEnabled(False)
         self.set_fe_btn.setEnabled(True)
 
     def _update_gui_fe_layer_choice_from_temp_model(self):
-        """Update GUI selectable FE layers based on the temporary model."""
+        """Update GUI selectable FE layers based on the temporary FE model."""
         # Get selectable layers from the temp model and update the GUI
-        temp_fe_layer_keys = self.temp_cp_model.get_fe_layer_keys()
-        fe_default_layers = self.temp_cp_model.get_fe_defaults().fe_layers
-        if temp_fe_layer_keys is not None:
+        temp_fe_layer_keys = self.temp_fe_model.get_layer_keys()
+        temp_fe_layer_texts = self._layer_keys_to_texts(temp_fe_layer_keys)
+        fe_default_layers = self.temp_fe_model.get_default_params().get("fe_layers")
+        fe_default_layers = self._layer_keys_to_texts(fe_default_layers)
+        if temp_fe_layer_texts is not None:
             self.fe_layer_selection.clear()
-            self.fe_layer_selection.addItems(temp_fe_layer_keys)
-            self.fe_layer_selection.setEnabled(len(temp_fe_layer_keys) > 1) # Only need to enable if multiple layers available
+            self.fe_layer_selection.addItems(temp_fe_layer_texts)
+            self.fe_layer_selection.setEnabled(len(temp_fe_layer_texts) > 1) # Only need to enable if multiple layers available
             for layer in fe_default_layers:
                 items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
                 for item in items:
@@ -1126,16 +1259,17 @@ class ConvPaintWidget(QWidget):
             self.fe_scaling_factors.addItem(str(fe_scalings), fe_scalings)
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
-    def _update_gui_from_param(self):
+    def _update_gui_from_params(self, params=None):
         """Update GUI from parameters."""
-
+        if params is None:
+            params = self.cp_model.get_params()
         self._reset_radio_data_dim_choices()
         # Set radio buttons depending on param (possibly enforcing a choice)
-        if self.cp_model.param.multi_channel_img:
+        if params.multi_channel_img:
             self.radio_single_channel.setChecked(False)
             self.radio_multi_channel.setChecked(True)
             self.radio_rgb.setChecked(False)
-        elif self.cp_model.param.rgb_img:
+        elif params.rgb_img:
             self.radio_single_channel.setChecked(False)
             self.radio_multi_channel.setChecked(False)
             self.radio_rgb.setChecked(True)
@@ -1145,7 +1279,7 @@ class ConvPaintWidget(QWidget):
             self.radio_rgb.setChecked(False)
         self._reset_radio_norm_choices()
 
-        self.button_group_normalize.button(self.cp_model.param.normalize).setChecked(True)
+        self.button_group_normalize.button(params.normalize).setChecked(True)
 
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
@@ -1160,12 +1294,12 @@ class ConvPaintWidget(QWidget):
             "clf_depth": self.spin_depth.setValue
         }
         for attr, setter in val_to_setter.items():
-            val = getattr(self.cp_model.param, attr, None)
+            val = getattr(params, attr, None)
             if val is not None:
                 if isinstance(val, list): val = str(val)
                 setter(val)
 
-        self._update_gui_fe_scalings(self.cp_model.param.fe_scalings)
+        self._update_gui_fe_scalings(params.fe_scalings)
 
     def _check_create_prediction_layer(self):
         """Check if segmentation layer exists and create it if not."""
@@ -1179,19 +1313,32 @@ class ConvPaintWidget(QWidget):
     def _get_annot_shape(self):
         """Get shape of annotations and segmentation layers to create."""
         data_dims = self._get_data_dims()
+        img_shape = self.viewer.layers[self.selected_channel].data.shape
         if data_dims in ['2D_RGB', '2D']:
-            return self.viewer.layers[self.selected_channel].data.shape[0:2]
+            return img_shape[0:2]
         if data_dims in ['3D_RGB', '3D_single']:
-            return self.viewer.layers[self.selected_channel].data.shape[0:3]
+            return img_shape[0:3]
         else: # 3D_multi, 4D
-            return self.viewer.layers[self.selected_channel].data.shape[1:]
+            return img_shape[1:]
+
+    def _check_large_image(self):
+        """Check if the image is too large to be processed."""
+        data_dims = self._get_data_dims()
+        img_shape = self.viewer.layers[self.selected_channel].data.shape
+        if data_dims in ['2D', '2D_RGB']:
+            spatial_dims_size = img_shape[0] * img_shape[1]
+        elif data_dims in ['3D_single', '3D_RGB']:
+            spatial_dims_size = img_shape[1] * img_shape[2]
+        else: # 3D_multi, 4D
+            spatial_dims_size = img_shape[2] * img_shape[3]
+        return spatial_dims_size > self.spatial_dim_info_thresh
 
     def _reset_clf(self):
         """Discard the trained classifier."""
-        self.cp_model.classifier = None # NOTE: maybe rather do through method ?
+        self.cp_model.reset_classifier()
         self.current_model_path = 'not trained'
         self.trained = False
-        self.save_model_btn.setEnabled(False)
+        # self.save_model_btn.setEnabled(True)
         self._reset_predict_buttons()
         self._set_model_description()
 
@@ -1202,16 +1349,17 @@ class ConvPaintWidget(QWidget):
         self.spin_learning_rate.setValue(self.default_cp_param.clf_learning_rate)
         self.spin_depth.setValue(self.default_cp_param.clf_depth)
         # In the param object (not done through bindings if values in the widget are not changed)
-        self.cp_model.param.clf_iterations = self.default_cp_param.clf_iterations
-        self.cp_model.param.clf_learning_rate = self.default_cp_param.clf_learning_rate
-        self.cp_model.param.clf_depth = self.default_cp_param.clf_depth
+        self.cp_model.set_params(clf_iterations = self.default_cp_param.clf_iterations,
+                                 clf_learning_rate = self.default_cp_param.clf_learning_rate,
+                                 clf_depth = self.default_cp_param.clf_depth)
 
     def _reset_fe_params(self):
         """Reset feature extraction parameters to default values."""
         # Reset the gui values for the FE, which will also trigger to adjust the param object
         self.qcombo_fe_type.setCurrentText(self.default_cp_param.fe_name)
         self.fe_layer_selection.clearSelection()
-        for layer in self.default_cp_param.fe_layers:
+        default_layers = self._layer_keys_to_texts(self.default_cp_param.fe_layers)
+        for layer in default_layers:
             items = self.fe_layer_selection.findItems(layer, Qt.MatchExactly)
             for item in items:
                 item.setSelected(True)
@@ -1234,21 +1382,23 @@ class ConvPaintWidget(QWidget):
         self.check_tile_annotations.setChecked(self.default_cp_param.tile_annotations)
         self.check_tile_image.setChecked(self.default_cp_param.tile_image)
         # Set defaults in param object (not done through bindings if values in the widget are not changed)
-        self.cp_model.param.multi_channel_img = self.default_cp_param.multi_channel_img
-        self.cp_model.param.rgb_img = self.default_cp_param.rgb_img
-        self.cp_model.param.normalize = self.default_cp_param.normalize
-        self.cp_model.param.image_downsample = self.default_cp_param.image_downsample
-        self.cp_model.param.tile_annotations = self.default_cp_param.tile_annotations
-        self.cp_model.param.tile_image = self.default_cp_param.tile_image
+        self.cp_model.set_params(multi_channel_img = self.default_cp_param.multi_channel_img,
+                                 rgb_img = self.default_cp_param.rgb_img,
+                                 normalize = self.default_cp_param.normalize,
+                                 image_downsample = self.default_cp_param.image_downsample,
+                                 tile_annotations = self.default_cp_param.tile_annotations,
+                                 tile_image = self.default_cp_param.tile_image)
 
     def _set_model_description(self):
         """Set the model description text."""
         if self.cp_model.fe_model is None:
             descr = 'No model set'
             return
-        fe_name = self.cp_model.param.fe_name if self.cp_model.param.fe_name is not None else 'None'
-        num_layers = len(self.cp_model.param.fe_layers) if self.cp_model.param.fe_layers is not None else 0
-        num_scalings = len(self.cp_model.param.fe_scalings) if self.cp_model.param.fe_scalings is not None else 0
+        name, layers, scalings = (getattr(self.cp_model.get_params(), x)
+                                  for x in ['fe_name', 'fe_layers', 'fe_scalings'])
+        fe_name = name if name is not None else 'None'
+        num_layers = len(layers) if layers is not None else 0
+        num_scalings = len(scalings) if scalings is not None else 0
         descr = (fe_name +
         f': {num_layers} layer' + ('' if num_layers == 1 else 's') +
         f', {num_scalings} scaling' + ('' if num_scalings == 1 else 's') + 
@@ -1268,8 +1418,25 @@ class ConvPaintWidget(QWidget):
     def _get_selected_layer_names(self):
         """Get names of selected layers."""
         selected_rows = self.fe_layer_selection.selectedItems()
-        selected_layers = [x.text() for x in selected_rows]
+        selected_layers_texts = [x.text() for x in selected_rows]
+        selected_layers = self._layer_texts_to_keys(selected_layers_texts)
         return selected_layers
+
+    @staticmethod
+    def _layer_texts_to_keys(layer_texts):
+        """Convert layer texts to layer keys for use in the model."""
+        if layer_texts is None:
+            return None
+        layer_keys = [text.split(": ", 1)[1] for text in layer_texts]
+        return layer_keys
+    
+    @staticmethod
+    def _layer_keys_to_texts(layer_keys):
+        """Convert layer keys to layer texts for display."""
+        if layer_keys is None:
+            return None
+        layer_texts = [f'{i}: {layer}' for i, layer in enumerate(layer_keys)]
+        return layer_texts
 
     def _get_data_channel_first(self):
         """Get data from selected channel. If RGB, move channel axis to first position."""
@@ -1285,7 +1452,7 @@ class ConvPaintWidget(QWidget):
         if self.image_mean is None:
             self._get_image_stats()
         # Normalize image
-        if self.cp_model.param.normalize != 1:
+        if self.cp_model.get_param("normalize") != 1:
             image_stack = normalize_image(
                 image=image_stack,
                 image_mean=self.image_mean,
@@ -1302,8 +1469,9 @@ class ConvPaintWidget(QWidget):
         # put channels in format (C, T/Z, H, W)
         data = self._get_data_channel_first()
         data_dims = self._get_data_dims()
+        norm_mode = self.cp_model.get_param("normalize")
 
-        if self.cp_model.param.normalize == 2: # normalize over stack
+        if norm_mode == 2: # normalize over stack
             if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]:
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
@@ -1313,25 +1481,28 @@ class ConvPaintWidget(QWidget):
                     image=data,
                     ignore_n_first_dims=None) # for 3D_single, norm over stack
 
-        elif self.cp_model.param.normalize == 3: # normalize by image
+        elif norm_mode == 3: # normalize by image
             # also takes into account CXY case (3D multi-channel image) as first dim is dropped
             self.image_mean, self.image_std = compute_image_stats(
                 image=data, ignore_n_first_dims=data.ndim-2) # ignore all but the spatial dimensions
 
     def _get_data_dims(self):
         """Get data dimensions. Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
+        if self.image_layer_selection_widget.value is None:
+            warnings.warn('No image selected')
+            return None
         num_dims = self.image_layer_selection_widget.value.ndim
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
         if num_dims == 2:
-            if self.cp_model.param.rgb_img:
+            if self.cp_model.get_param("rgb_img"):
                 return '2D_RGB'
             else:
                 return '2D'
         if num_dims == 3:
-            if self.cp_model.param.rgb_img:
+            if self.cp_model.get_param("rgb_img"):
                 return '3D_RGB'
-            if self.cp_model.param.multi_channel_img:
+            if self.cp_model.get_param("multi_channel_img"):
                 return '3D_multi'
             else:
                 return '3D_single'
@@ -1340,10 +1511,9 @@ class ConvPaintWidget(QWidget):
         
     def _approve_annotation_layer_shape(self):
         """Check if the annotation layer has the same shape as the image layer."""
-        if (self.annotation_layer_selection_widget.value is None or
+        problem = (self.annotation_layer_selection_widget.value is None or
             self.image_layer_selection_widget.value is None or
             self.annotation_layer_selection_widget.value.data.shape != self._get_annot_shape()
-            ):
-            return False
+            )
         
-        return True
+        return not problem

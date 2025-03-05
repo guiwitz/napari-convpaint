@@ -2,6 +2,28 @@ from napari_convpaint.conv_paint_widget import ConvPaintWidget
 from napari_convpaint.utils import generate_synthetic_square, generate_synthetic_circle_annotation
 import numpy as np
 import os
+from PIL import Image
+
+def compute_precision_recall(ground_truth, recovered):
+    all_precision = []
+    all_recall = []
+    for class_val in np.unique(ground_truth):
+            tp = np.sum((recovered == class_val) & (ground_truth == class_val))
+            fp = np.sum((recovered == class_val) & (ground_truth != class_val))
+            fn = np.sum((recovered != class_val) & (ground_truth == class_val))
+            tn = np.sum((recovered != class_val) & (ground_truth != class_val))
+            precision = tp / (tp + fp)
+            recall = tp / (tp + fn)
+            all_precision.append(precision)
+            all_recall.append(recall)
+    return np.mean(all_precision), np.mean(all_recall)
+
+    # tp = np.sum((recovered==2) & (ground_truth==2))# / np.sum(ground_truth == 1)
+    # fp = np.sum((recovered==2) & (ground_truth!=2))#/ np.sum(ground_truth == 1)
+    # fn = np.sum((recovered!=2) & (ground_truth==2))
+    # precision = tp /  (tp + fp)
+    # recall = tp / (tp + fn)
+    # return precision, recall
 
 def test_add_layers(make_napari_viewer, capsys):
     """Test that annotation and prediction layers are added correctly"""
@@ -31,8 +53,8 @@ def test_annotation_layer_dims(make_napari_viewer, capsys):
 
 def test_correct_model(make_napari_viewer, capsys):
     # make viewer and add an image layer using our fixture
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -53,8 +75,8 @@ def test_correct_model(make_napari_viewer, capsys):
 def test_rgb_prediction(make_napari_viewer, capsys):
     # make viewer and add an image layer using our fixture
 
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -70,21 +92,13 @@ def test_rgb_prediction(make_napari_viewer, capsys):
     assert precision > 0.9, f"Precision: {precision}, too low"
     assert recall > 0.9, f"Recall: {recall}, too low"
 
-def compute_precision_recall(ground_truth, recovered):
-    tp = np.sum(recovered[ground_truth==1] == 2)# / np.sum(ground_truth == 1)
-    fp = np.sum(recovered[ground_truth==0] == 2)#/ np.sum(ground_truth == 1)
-    fn = np.sum(ground_truth == 1) - tp
-    precision = tp /  (tp + fp)
-    recall = tp / (tp + fn)
-    return precision, recall
-
 def test_multi_channel_prediction(make_napari_viewer, capsys):
     """Check that prediction is bad when disabling multi-channel training for
     image with signal in red channel and large noise in green channel"""
 
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im[:,:,1] = np.random.randint(0,100,(100,100))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
+    im[:,:,1] = np.random.randint(0,200,(252,252))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -102,8 +116,8 @@ def test_multi_channel_prediction(make_napari_viewer, capsys):
 
 
 def test_save_model(make_napari_viewer, capsys):
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -119,8 +133,8 @@ def test_save_model(make_napari_viewer, capsys):
 
 
 def test_load_model(make_napari_viewer, capsys):
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -128,19 +142,24 @@ def test_load_model(make_napari_viewer, capsys):
     my_widget._on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     my_widget._on_predict()
 
-    recovered = viewer.layers['segmentation'].data[ground_truth==1]
-    tp = np.sum(recovered == 2)
-    fp = np.sum(recovered == 1)
-    fn = np.sum(ground_truth == 1) - tp
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
+    # recovered = viewer.layers['segmentation'].data[ground_truth==1]
+    # tp = np.sum(recovered == 2)
+    # fp = np.sum(recovered == 1)
+    # fn = np.sum(ground_truth == 1) - tp
+    # precision = tp / (tp + fp)
+    # recall = tp / (tp + fn)
+    recovered = viewer.layers['segmentation'].data
+    precision, recall = compute_precision_recall(ground_truth, recovered)
     assert precision > 0.8, f"Precision: {precision}, too low"
     assert recall > 0.8, f"Recall: {recall}, too low"
 
 
 def test_save_model_dino(make_napari_viewer, capsys):
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
+    im = np.array(Image.open('./_tests/test_imgs/0000_img.png'))
+    im_annot = np.array(Image.open('./_tests/test_imgs/0000_scribbles_all_01500_w3.png'))
+    ground_truth = np.array(Image.open('./_tests/test_imgs/0000_ground_truth.png'))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -152,18 +171,19 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
     assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     
-    my_widget.param.fe_scalings = [1]
-    my_widget.param.fe_order = 0  # Set interpolation order to 0
-    my_widget.param.fe_name = 'dinov2_vits14_reg'
-    my_widget.param.fe_use_cuda = False
-    my_widget.param.fe_use_min_features = False
-    my_widget.param.tile_annotations = False
-    my_widget.param.image_downsample = 1
-    my_widget.param.normalize = 1 #no normalization (button id)
-    my_widget._update_gui_from_param()
+    cp_model = my_widget.cp_model
+    cp_model._param.fe_scalings = [1]
+    cp_model._param.fe_order = 0  # Set interpolation order to 0
+    cp_model._param.fe_name = 'dinov2_vits14_reg'
+    cp_model._param.fe_use_cuda = False
+    cp_model._param.fe_use_min_features = False
+    cp_model._param.tile_annotations = False
+    cp_model._param.image_downsample = 1
+    cp_model._param.normalize = 1 #no normalization (button id)
+    my_widget._update_gui_from_params()
     my_widget.set_fe_btn.click()  # Load the model
-    assert my_widget.param.fe_scalings == [1]
-    assert my_widget.param.fe_name == 'dinov2_vits14_reg'
+    assert cp_model._param.fe_scalings == [1]
+    assert cp_model._param.fe_name == 'dinov2_vits14_reg'
 
     my_widget._on_train()  # Update the classifier with the new parameters
     my_widget._on_predict()
@@ -174,8 +194,11 @@ def test_save_model_dino(make_napari_viewer, capsys):
 
 
 def test_load_model_dino(make_napari_viewer, capsys):
-    im, ground_truth = generate_synthetic_square(im_dims=(100,100), square_dims=(30,30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100,100), circle1_xy=(19,19), circle2_xy=(56,56))
+    # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
+    im = np.array(Image.open('./_tests/test_imgs/0000_img.png'))
+    im_annot = np.array(Image.open('./_tests/test_imgs/0000_scribbles_all_01500_w3.png'))
+    ground_truth = np.array(Image.open('./_tests/test_imgs/0000_ground_truth.png'))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -188,20 +211,22 @@ def test_load_model_dino(make_napari_viewer, capsys):
     assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     my_widget._on_predict()
 
-    recovered = viewer.layers['segmentation'].data[ground_truth==1]
-    tp = np.sum(recovered == 2)
-    fp = np.sum(recovered == 1)
-    fn = np.sum(ground_truth == 1) - tp
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
+    # recovered = viewer.layers['segmentation'].data[ground_truth==1]
+    # tp = np.sum(recovered == 2)
+    # fp = np.sum(recovered == 1)
+    # fn = np.sum(ground_truth == 1) - tp
+    # precision = tp / (tp + fp)
+    # recall = tp / (tp + fn)
+    recovered = viewer.layers['segmentation'].data
+    precision, recall = compute_precision_recall(ground_truth, recovered)
     assert precision > 0.8, f"Precision: {precision}, too low"
     assert recall > 0.8, f"Recall: {recall}, too low"
     
 
 def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     # Setup synthetic data
-    im, ground_truth = generate_synthetic_square(im_dims=(100, 100), square_dims=(30, 30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100, 100), circle1_xy=(19, 19), circle2_xy=(56, 56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -214,7 +239,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.fe_scaling_factors.setCurrentText('[1]')
     my_widget.set_fe_btn.setEnabled(True)
     my_widget.set_fe_btn.click()
-    assert my_widget.param.fe_scalings == [1]
+    assert my_widget.cp_model._param.fe_scalings == [1]
     my_widget._on_train()
     my_widget._on_predict()
     model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
@@ -224,10 +249,10 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     # Create and save the second model with scales [1, 2, 3, 4]. Change in the UI:
     my_widget.fe_scaling_factors.setCurrentText('[1,2,4,8]')
     my_widget.set_fe_btn.click()
-    assert my_widget.param.fe_scalings == [1, 2, 4, 8]
+    assert my_widget.cp_model._param.fe_scalings == [1, 2, 4, 8]
 
     my_widget.set_fe_btn.click()
-    assert my_widget.param.fe_scalings == [1, 2, 4, 8]
+    assert my_widget.cp_model._param.fe_scalings == [1, 2, 4, 8]
     my_widget._on_train()
     my_widget._on_predict()
     model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
@@ -236,17 +261,17 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
 
     # Load the second model and predict
     my_widget._on_load_model(save_file=model_path_2)
-    assert my_widget.param.fe_scalings == [1, 2, 4, 8]
+    assert my_widget.cp_model._param.fe_scalings == [1, 2, 4, 8]
     my_widget._on_predict()
-    recovered = viewer.layers['segmentation'].data[ground_truth == 1]
-    assert np.any(recovered)  # Check if there is any prediction
+    recovered = viewer.layers['segmentation'].data
+    assert np.any(recovered[ground_truth == 1])  # Check if there is any prediction
 
     # Load the first model and predict
     my_widget._on_load_model(save_file=model_path_1)
-    assert my_widget.param.fe_scalings == [1]
+    assert my_widget.cp_model._param.fe_scalings == [1]
     my_widget._on_predict()
-    recovered = viewer.layers['segmentation'].data[ground_truth == 1]
-    assert np.any(recovered)  # Check if there is any prediction
+    recovered = viewer.layers['segmentation'].data
+    assert np.any(recovered[ground_truth == 1])  # Check if there is any prediction
 
 
 # test dino model with different image sizes
@@ -285,8 +310,8 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
 
 def test_custom_vgg16_layers(make_napari_viewer, capsys):
     # Setup synthetic data
-    im, ground_truth = generate_synthetic_square(im_dims=(100, 100), square_dims=(30, 30))
-    im_annot = generate_synthetic_circle_annotation(im_dims=(100, 100), circle1_xy=(19, 19), circle2_xy=(56, 56))
+    im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
+    im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)

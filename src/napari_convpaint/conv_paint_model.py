@@ -10,208 +10,567 @@ import skimage
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
 from napari_convpaint.conv_paint_dino import AVAILABLE_MODELS as DINO_MODELS
+from .conv_paint_nnlayers import Hookmodel
 from napari_convpaint.conv_paint_gaussian import GaussianFeatures
 from napari_convpaint.conv_paint_dino import DinoFeatures
-from .conv_paint_nnlayers import Hookmodel
 from .conv_paint_param import Param
 from . import conv_paint_utils
 
 class ConvpaintModel:
+    """
+    Base Convpaint model class that combines a feature extraction and a classifier.
+    Consists of a feature extractor model, a classifier and a Param object,
+    which defines the details of the model procedures.
+    Model can be initialized with an alias, a model path, a param object, or a feature extractor name.
+    If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
+    If neither an alias, a model path, a param object, nor a feature extractor name is given,
+    a default Conpaint model is created (defined in the get_default_params() method).
 
-    def __init__(self, model_path=None, param=None):
-        self._init_models_dict()
+    Parameters
+    ----------
+    alias : str, optional
+        Alias of a predefined model, by default None
+    model_path : str, optional
+        Path to a saved model, by default None
+    param : Param, optional
+        Param object with the model parameters, by default None
+    fe_name : str, optional
+        Name of the feature extractor model, by default None
+    fe_use_cuda : bool, optional
+        Whether to use CUDA for the feature extractor (if initialized by name), by default None
+    fe_layers : list[str], optional
+        List of layer names to extract features from (if initialized by name), by default None
+    **kwargs : additional parameters
+        Additional parameters to override defaults for the model or feature extractor
+    """
+
+    ALL_MODELS_TYPES_DICT = {}
+
+    std_models = {"vgg": Param(fe_name="vgg16"),
+                  "vgg-m": Param(fe_name="vgg16",
+                                 fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
+                                 fe_scalings=[1, 2, 4]),
+                  "vgg-l": Param(fe_name="vgg16",
+                                 fe_layers=['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.5 Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.7 Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
+                                            'features.10 Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'],
+                                 fe_scalings=[1, 2, 4, 8]),
+                  "dino": Param(fe_name="dinov2_vits14_reg"),
+                  "gaussian": Param(fe_name="gaussian_features"),
+                  "cellpose": Param(fe_name="cellpose_backbone")
+                  }
+
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_use_cuda=None, fe_layers=None, **kwargs):
+        """
+        Initializes the Convpaint model by loading the specified model, parameters, or feature extractor.
+
+        The constructor can be initialized in three ways:
+        1. By providing an alias (e.g., "vgg-s", "dino", "gaussian", etc.), in which case a corresponding model
+        configuration will be loaded.
+        2. By providing a saved model path (model_path) to load a pre-trained model.
+        3. By providing a Param object, which contains model parameters.
+        4. By providing the name of the feature extractor, CUDA usage, and feature extraction layers, in which case
+        the additional kwargs will be used to override the defaults of the feature extractor model.
+        
+        If none of the options are provided, a default Convpaint model will be created.
+
+        Parameters
+        ----------
+        alias : str, optional
+            The alias of a predefined model, by default None.
+        model_path : str, optional
+            Path to a saved model file, by default None.
+        param : Param, optional
+            Param object containing model parameters, by default None.
+        fe_name : str, optional
+            Name of the feature extractor model, by default None.
+        fe_use_cuda : bool, optional
+            Whether to use CUDA for the feature extractor, by default None.
+        fe_layers : list[str], optional
+            List of layers to extract features from, by default None.
+        **kwargs : additional parameters
+            Additional parameters to override defaults for the model or feature extractor.
+
+        Raises
+        ------
+        ValueError
+            If more than one of alias, model_path, param, or fe_name is provided.
+        """
+        self._param = Param()
+        # Initialize the dictionary of all available models
+        if not ConvpaintModel.ALL_MODELS_TYPES_DICT:
+            ConvpaintModel._init_models_dict()
+
+        if (alias is not None) + (model_path is not None) + (param is not None) + (fe_name is not None) > 1:
+            raise ValueError('Please provide a model path, a param object, or a model name but not multiples.')
+
+        # If an alias is given, create an according model
+        if alias is not None:
+            if alias in ConvpaintModel.std_models:
+                param = ConvpaintModel.std_models[alias]
+            else:
+                raise ValueError(f'Alias "{alias}" not found in the standard models.')
+
+        # Initialize the model
         if model_path is not None:
-            self.load(model_path)
+            self._load(model_path)
         elif param is not None:
-            self.load_param(param)
+            self._load_param(param)
+        elif fe_name is not None:
+            self._set_fe(fe_name, fe_use_cuda, fe_layers)
+            self._param = self.get_fe_defaults()
+            self.set_params(no_warning=True, # Here at initiation, it is intended to set FE parameters...
+                            fe_layers = fe_layers, # Overwrite the layers with the given layers
+                            fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
+                            **kwargs) # Overwrite the parameters with the given parameters
         else:
-            self.set_default_param() # Set the default parameters
+            cpm_defaults = ConvpaintModel.get_default_params()
+            self._load_param(cpm_defaults)
 
-    def _init_models_dict(self):
+    @staticmethod
+    def _init_models_dict():
+        """
+        Initializes the dictionary of all available feature extractor models.
+        """
         # Initialize the MODELS TO TYPES dictionary with the models that are always available
-        self.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
-        self.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
-        self.ALL_MODELS_TYPES_DICT.update({x: DinoFeatures for x in DINO_MODELS})
+        ConvpaintModel.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
+        ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
+        ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: DinoFeatures for x in DINO_MODELS})
 
         # Try to import CellposeFeatures and update the MODELS TO TYPES  dictionary if successful
         # Cellpose is only installed with pip install napari-convpaint[cellpose]
         try:
             from napari_convpaint.conv_paint_cellpose import AVAILABLE_MODELS as CELLPOSE_MODELS
             from napari_convpaint.conv_paint_cellpose import CellposeFeatures
-            self.ALL_MODELS_TYPES_DICT.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
+            ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: CellposeFeatures for x in CELLPOSE_MODELS})
         except ImportError:
             # Handle the case where CellposeFeatures or its dependencies are not available
             print("Info: Cellpose is not installed and is not available as feature extractor.\n"
                 "Run 'pip install napari-convpaint[cellpose]' to install it.")
-            
-    def get_all_fe_models(self):
-        """Return a dictionary of all available models"""
-        return self.ALL_MODELS_TYPES_DICT
+        # Same for ilastik
+        try:
+            from napari_convpaint.conv_paint_ilastik import AVAILABLE_MODELS as ILASTIK_MODELS
+            from napari_convpaint.conv_paint_ilastik import IlastikFeatures
+            ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: IlastikFeatures for x in ILASTIK_MODELS})
+        except ImportError:
+            # Handle the case where IlastikFeatures or its dependencies are not available
+            print("Info: Ilastik is not installed and is not available as feature extractor.\n"
+                "Run 'pip install napari-convpaint[ilastik]' to install it.")
+    @staticmethod
+    def get_all_fe_models():
+        """
+        Returns a dictionary of all available feature extractor models
+        """
+        return ConvpaintModel.ALL_MODELS_TYPES_DICT
+    
+    @staticmethod
+    def get_default_params():
+        """
+        Returns a param object, which defines the default Convpaint model.
+        """
 
-    def load(self, model_path):
-        with open(model_path, 'rb') as f:
+        def_param = Param()
+
+        # Image processing parameters
+        def_param.multi_channel_img = False
+        def_param.rgb_img = False
+        def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
+
+        # Acceleration parameters
+        def_param.image_downsample = 1
+        def_param.tile_annotations = True
+        def_param.tile_image = False
+
+        # FE parameters
+        def_param.fe_name = "vgg16"
+        def_param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
+        def_param.fe_use_cuda = False
+        def_param.fe_scalings = [1, 2, 4]
+        def_param.fe_order = 0
+        def_param.fe_use_min_features = False
+
+        # Classifier parameters
+        def_param.classifier = None
+        def_param.clf_iterations = 50
+        def_param.clf_learning_rate = 0.1
+        def_param.clf_depth = 5
+
+        return def_param
+    
+    def get_param(self, key):
+        """
+        Returns the value of the given parameter key.
+        """
+        return self._param.get(key)
+    
+    def get_params(self):
+        """
+        Returns all parameters of the model (= a copy of the Param object).
+        """
+        return self._param.copy()
+    
+    def set_param(self, key, val, no_warning=False):
+        """
+        Sets the value of the given parameter key.
+        """
+        if key in Param.get_keys():
+            self._param.set_single(key, val)
+            if (key == 'fe_name' or key == 'fe_use_cuda' or key == 'fe_layers') and not no_warning:
+                warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+                    "You should create a new ConvpaintModel instead.")
+        else:
+            warnings.warn(f'Parameter "{key}" not found in the model parameters.')
+
+    def set_params(self, param=None, no_warning=False, **kwargs):
+        """
+        Sets the parameters if given. Note that the model is not reset and no FE model is created.
+        If fe_name, fe_use_cuda, and fe_layers changes, you should create a new ConvpaintModel.
+        """
+        if param is not None:
+            kwargs = param.__dict__
+        for key, val in kwargs.items():
+            if val is not None:
+                self.set_param(key, val, no_warning=no_warning)
+
+    def save(self, model_path, create_pkl=True, create_yml=True):
+        """
+        Saves the model to a file. Includes the classifier, the param object, and the
+        state of the feature extractor model in a pickle file.
+
+        Parameters
+        ----------
+        model_path : str
+            Path to save the model to.
+        """
+        if model_path[-4:] == ".pkl" or model_path[-4:] == ".yml":
+            model_path = model_path[:-4]
+        if create_pkl:
+            pkl_path = model_path + ".pkl"
+            if self.classifier is None:
+                warnings.warn('No trained classifier found.')
+            with open(pkl_path, 'wb') as f:
+                data = {
+                    'classifier': self.classifier,
+                    'param': self._param,
+                    'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
+                }
+                pickle.dump(data, f)
+
+        if create_yml:
+            yml_path = model_path + ".yml"
+            self._param.save(yml_path)
+
+    def _load(self, model_path):
+        """
+        Loads the model from a file. Guesses the file type based on the file ending.
+        Only intended for internal use at model initiation.
+        """
+        if model_path[-4:] == ".pkl":
+            self._load_pkl(model_path)
+        elif model_path[-4:] == ".yml":
+            self._load_yml(model_path)
+        else:
+            raise ValueError('Model path must end with ".pkl" or ".yml".')
+
+    def _load_pkl(self, pkl_path):
+        """
+        Loads the model from a pickle file.
+        Only intended for internal use at model initiation.
+        """
+        with open(pkl_path, 'rb') as f:
             data = pickle.load(f)
-        self.param = data['param']
-        self.set() # Resets classifier and model_state
+        new_param = data['param']
+        self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self._param = new_param.copy()
         self.classifier = data['classifier']
         if 'model_state' in data:
             self.fe_model_state = data['model_state']
             if hasattr(self.fe_model, 'load_state_dict'): # TODO: CHECK IF THIS MAKES SENSE
                 self.fe_model.load_state_dict(data['model_state'])
-
-    def save(self, model_path):
-        if self.classifier is None:
-            raise Exception('No trained classifier found. Please train a model first.')
-        with open(model_path, 'wb') as f:
-            data = {
-                'classifier': self.classifier,
-                'param': self.param,
-                'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
-            }
-            pickle.dump(data, f)
-
-    def set(self, use_fe_defaults=False, **kwargs):
-        """Set the model based on the given parameters."""
-        self.set_param(**kwargs)
-
-        # Reset the model and classifier; create a new FE model
-        self.fe_model_state = None
-        self.classifier = None
-        fe_model_class = self.ALL_MODELS_TYPES_DICT[self.param.fe_name]
-        self.fe_model = fe_model_class(
-            model_name=self.param.fe_name,
-            use_cuda=self.param.fe_use_cuda
-        )
-        
-        # Apply default parameters to the model
-        if use_fe_defaults:
-            self.param = self.fe_model.get_default_param(self.param)
-        
-        # Register hooks if the model is a Hookmodel
-        if isinstance(self.fe_model, Hookmodel):
-            if self.param.fe_layers:
-                self.fe_model.register_hooks(selected_layers=self.param.fe_layers)
-            elif len(self.fe_model.named_modules) == 1:
-                self.fe_model.register_hooks(selected_layers=[list(self.fe_model.module_dict.keys())[0]])
-
-    def set_param(self,
-                  multi_channel_img: bool = None,
-                  normalize: int = None, # 1: no normalization, 2: normalize stack, 3: normalize each image
-                  image_downsample: int = None,
-                  tile_annotations: bool = False,
-                  tile_image: bool = False,
-                  fe_name: str = None,
-                  fe_layers: list[str] = None,
-                  fe_padding : int = 0,
-                  fe_scalings: list[int] = None,
-                  fe_order: int = None,
-                  fe_use_min_features: bool = None,
-                  fe_use_cuda: bool = None,
-                  clf_iterations: int = None,
-                  clf_learning_rate: float = None,
-                  clf_depth: int = None):
-        """Set the values of the param objects in the model."""
-        for attr, val in {
-            'multi_channel_img': multi_channel_img,
-            'normalize': normalize,
-            'image_downsample': image_downsample,
-            'tile_annotations': tile_annotations,
-            'tile_image': tile_image,
-            'fe_name': fe_name,
-            'fe_layers': fe_layers,
-            'fe_padding': fe_padding,
-            'fe_scalings': fe_scalings,
-            'fe_order': fe_order,
-            'fe_use_min_features': fe_use_min_features,
-            'fe_use_cuda': fe_use_cuda,
-            'clf_iterations': clf_iterations,
-            'clf_learning_rate': clf_learning_rate,
-            'clf_depth': clf_depth
-        }.items():
-            if val is not None:
-                setattr(self.param, attr, val)
-
-    def load_param(self, param: Param):
-        """Load the given param object into the model and set the model accordingly."""
-        self.param = param.copy()
-        self.set()
-
-    def get_param(self):
-        return self.param
-
-    def get_default_param(self):
-        """
-        Return a default param object, which defines the default model.
-        """
-
-        param = Param()
-
-        # Image processing parameters
-        param.multi_channel_img = False
-        param.rgb_img = False
-        param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
-
-        # Acceleration parameters
-        param.image_downsample = 1
-        param.tile_annotations = True
-        param.tile_image = False
-
-        # FE parameters
-        param.fe_name = "vgg16"
-        param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
-        param.fe_padding = 0
-        param.fe_scalings = [1, 2, 4]
-        param.fe_order = 0
-        param.fe_use_min_features = False
-        param.fe_use_cuda = False
-
-        # Classifier parameters
-        param.clf_iterations = 50
-        param.clf_learning_rate = 0.1
-        param.clf_depth = 5
-
-        return param
     
-    def set_default_param(self):
-        """Set the default parameters for the model."""
-        def_param = self.get_default_param()
-        self.load_param(def_param)
+    def _load_yml(self, yml_path):
+        """
+        Loads the model from a yml file.
+        Only intended for internal use at model initiation.
+        """
+        new_param = Param.load(yml_path)
+        self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self._param = new_param
+
+    def _load_param(self, param: Param):
+        """
+        Loads the given param object into the model and sets the model accordingly.
+        Only intended for internal use at model initiation.
+        """
+        self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
+        self._param = self.get_fe_defaults()
+        self.set_params(no_warning=True, **param.__dict__) # Overwrite the parameters with the given parameters
+
+    def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
+        """
+        Sets the model based on the given FE parameters.
+        Creates new feature extracture, and resets the model state and classifier.
+        Only intended for internal use at model initiation.
+        """
+
+        # Reset the model and classifier
+        self.fe_model_state = None
+        self.reset_classifier()
+
+        # Check if we need to create a new FE model
+        new_fe_name = fe_name is not None and fe_name != self._param.get("fe_name")
+        new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self._param.get("fe_use_cuda")
+        new_fe_layers = fe_layers is not None and fe_layers != self._param.get("fe_layers")
+
+        # Create the feature extractor model
+        if new_fe_name or new_fe_use_cuda or new_fe_layers:
+            self.fe_model = ConvpaintModel.create_fe(
+                name=fe_name,
+                use_cuda=fe_use_cuda,
+                layers=fe_layers
+            )
+
+        # Set the parameters
+        self._param.set(fe_name=fe_name, fe_use_cuda=fe_use_cuda, fe_layers=fe_layers)
+
+    @staticmethod
+    def create_fe(name, use_cuda=None, layers=None):
+        """
+        Creates a feature extractor model based on the given parameters.
+        Distinguishes between different types of feature extractors such as Hookmodels
+        and initializes them accordingly.
+
+        Parameters
+        ----------
+        name : str
+            Name of the feature extractor model
+        use_cuda : bool, optional
+            Whether to use CUDA for the feature extractor
+        layers : list[str], optional
+            List of layer names to extract features from, by default None
+
+        Returns
+        -------
+        FeatureExtractor
+            The created feature extractor model
+        """
+        
+        # Check if name is valid and create the feature extractor object
+        if not name in ConvpaintModel.ALL_MODELS_TYPES_DICT:
+            raise ValueError(f'Feature extractor model {name} not found.')
+        fe_model_class = ConvpaintModel.ALL_MODELS_TYPES_DICT.get(name)
+        
+        # Initialize the feature extractor model
+        if fe_model_class is Hookmodel:
+            fe_model = fe_model_class(
+                model_name=name,
+                use_cuda=use_cuda,
+                layers=layers
+        )
+        else:
+            fe_model = fe_model_class(
+                model_name=name,
+                use_cuda=use_cuda
+            )
+
+        # Check if the model was created successfully
+        if fe_model is None:
+            raise ValueError(f'Feature extractor model {name} could not be created.')
+
+        return fe_model
+
+    def get_fe_defaults(self):
+        """
+        Return the default params for the feature extractor.
+        Where they are not sepecified, the default Convpaint params are used.
+        """
+        cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
+        new_param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
+        return new_param
     
     def get_fe_layer_keys(self):
-        """Return the selection of layer key for the feature extractor."""
-        if self.fe_model is None or not isinstance(self.fe_model, Hookmodel):
-            return None
-        return self.fe_model.selectable_layer_keys
-    
-    def get_fe_defaults(self):
-        """Return the default values for the feature extractor."""
-        return self.fe_model.get_default_param()
-    
-    ### OLD FE and Classifier methods
+        """
+        Returns the keys of the feature extractor layers.
+        """
+        return self.fe_model.get_layer_keys()
 
-    def predict_image(self, image):                    # FROM FEATURE EXTRACTOR CLASS
-        features = self.fe_model.get_features_scaled(image=image,param=self.param)
+    def get_features_img(self, image):
+        """
+        Extracts features from an image using the Convpaint model's Parameters and feature extractor model.
+        Returns the extracted features with the spatial dimensions identical to the input image.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to extract features from
+        
+        Returns
+        -------
+        f_img : np.ndarray
+            Extracted features [nb_features, height, width]
+        """
+        features = self.fe_model.get_features_scaled(image=image, param=self._param)
+        return features
+    
+    def train(self, image, annotations):
+        """
+        Trains the Convpaint model's classifier given an image and annotations.
+        Uses the Parameter and the FeatureExtractor model to extract features.
+        Then uses the features of annotated pixels to train the classifier.
+        Trains the internal classifier, which is also returned.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to train the classifier on
+        annotations : np.ndarray
+            Annotations to train the classifier on
+
+        Returns
+        -------
+        CatBoostClassifier or RandomForestClassifier
+            Trained classifier
+        """
+        features, targets = self.get_features_current_layers(image, annotations)
+        self._train_classifier(features, targets)
+        if self.classifier is None:
+            raise ValueError('Training failed. No classifier was trained.')
+        return self.classifier
+
+    def segment(self, image, smoothen=0):
+        """
+        Segments an image by predicting its classes using the trained classifier.
+        Uses the feature extractor model to extract features from the image.
+        Predicts the classes of the pixels in the image using the trained classifier.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to segment
+        """
+        return self._predict_image(image, return_proba=False, smoothen=smoothen)
+
+    def predict_probas(self, image):
+        """
+        Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
+        Uses the feature extractor model to extract features from the image.
+        Estimates the probablity of each class based on the features and the trained classifier.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to predict probabilities for
+
+        Returns
+        -------
+        np.ndarray
+            Predicted probabilities of the classes of the pixels in the image
+        """
+        return self._predict_image(image, return_proba=True)
+
+    ### CLASSIFIER METHODS
+
+    def _train_classifier(self, features, targets, use_rf=False):
+        """
+        Trains a classifier given a set of features and targets.
+        If use_rf is False, a CatBoostClassifier is trained, otherwise a RandomForestClassifier.
+        The trained classifier is saved in the model, but also returned.
+
+        Parameters
+        ----------
+        features : np.ndarray
+            Features to train the classifier on
+        targets : np.ndarray
+            Targets to train the classifier on
+        use_rf : bool, optional
+            Whether to use a RandomForestClassifier, by default False
+
+        Returns
+        -------
+        CatBoostClassifier or RandomForestClassifier
+            Trained classifier
+        """
+        if not use_rf:
+            self.classifier = CatBoostClassifier(iterations=self._param.clf_iterations,
+                                                 learning_rate=self._param.clf_learning_rate,
+                                                 depth=self._param.clf_depth)
+            self.classifier.fit(features, targets)
+            self._param.classifier = 'CatBoost'
+        else:
+                # train a random forest classififer
+                self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
+                self.classifier.fit(features, targets)
+                self._param.classifier = 'RandomForest'
+
+        return self.classifier
+
+    def reset_classifier(self):
+        """
+        Resets the classifier of the model.
+        """
+        self.classifier = None
+        self._param.classifier = None
+
+
+    ### OLD FE METHODS
+
+    def _predict_image(self, image, return_proba=False, smoothen=0):                    # FROM FEATURE EXTRACTOR CLASS
+        # Pad Image
+        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
+        if image.ndim == 2:
+            image = np.pad(image, padding, mode='reflect')
+        elif image.ndim == 3:
+            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
+        elif image.ndim == 4:
+            image = np.pad(image, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='reflect')
+        else:
+            raise ValueError('Image must be 2D, 3D, or 4D.')
+
+        # Extract features
+        features = self.fe_model.get_features_scaled(image=image,param=self._param)
         nb_features = features.shape[0] #[nb_features, width, height]
 
-        # Move features to last dimension
+        # Move features to last dimension and flatten
         features = np.moveaxis(features, 0, -1)
-        features = np.reshape(features, (-1, nb_features))
+        features = np.reshape(features, (-1, nb_features)) # flatten
+        features_df = pd.DataFrame(features)
 
-        rows = np.ceil(image.shape[-2] / self.param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / self.param.image_downsample).astype(int)
+        rows = np.floor(image.shape[-2] / self._param.image_downsample).astype(int)
+        cols = np.floor(image.shape[-1] / self._param.image_downsample).astype(int)
 
-        all_pixels = pd.DataFrame(features)
-        predictions = self.classifier.predict(all_pixels)
+        # Predict
+        # First reshape prediction to downsampled shape
+        if return_proba:
+            predictions = self.classifier.predict_proba(features_df)
+            predicted_image = np.reshape(predictions, [rows, cols, -1])
+        else:
+            predictions = self.classifier.predict(features_df)
+            predicted_image = np.reshape(predictions, [rows, cols])
 
-        predicted_image = np.reshape(predictions, [rows, cols])
-        if self.param.image_downsample > 1:
+        # Then resize to original shape
+        if self._param.image_downsample > 1:
             predicted_image = skimage.transform.resize(
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=self.param.fe_order).astype(np.uint8)
-        return predicted_image
+                preserve_range=True, order=self._param.fe_order)
+
+        # Remove padding and return
+        if return_proba:
+            predicted_image = predicted_image[..., padding:-padding, padding:-padding, :]
+            return predicted_image
+        else:
+            predicted_image = predicted_image[..., padding:-padding, padding:-padding]
+            if smoothen > 0:
+                predicted_image = skimage.filters.rank.majority(predicted_image,
+                                                                footprint=skimage.morphology.disk(smoothen))
+                predicted_image = skimage.util.img_as_ubyte(predicted_image)
+            return predicted_image.astype(np.uint8)
     
-    def parallel_predict_image(self, image, use_dask=False):
+    def parallel_predict_image(self, image, use_dask=False, smoothen=False):
         """
         Given a filter model and a classifier, predict the class of 
         each pixel in an image.
@@ -221,18 +580,18 @@ class ConvpaintModel:
         image: 2d array
             image to segment
 
-        Given inside the ConvPaint class:    
-            self.model: Hookmodel
+        Given inside the ConvpaintModel class:    
+            self.model: FeatureExtractor model
                 model to extract features from
             self.classifier: CatBoostClassifier
                 classifier to use for prediction
-            self.param.scalings: list of ints
+            self._param.scalings: list of ints
                 downsampling factors
-            self.param.order: int
+            self._param.order: int
                 interpolation order for low scale resizing
-            self.param.use_min_features: bool
+            self._param.use_min_features: bool
                 if True, use the minimum number of features per layer
-            self.param.image_downsample: int, optional
+            self._param.image_downsample: int, optional
                 downsample image by this factor before extracting features, by default 1
         
         use_dask: bool
@@ -303,7 +662,7 @@ class ConvpaintModel:
 
                 if use_dask:
                     processes.append(client.submit(
-                        self.predict_image, image=image_block))
+                        self._predict_image, image=image_block))
                     
                     min_row_ind_collection.append(min_row_ind)
                     min_col_ind_collection.append(min_col_ind)
@@ -315,7 +674,7 @@ class ConvpaintModel:
                     new_min_row_ind_collection.append(new_min_row_ind)
 
                 else:
-                    predicted_image = self.predict_image(image_block)
+                    predicted_image = self._predict_image(image_block, smoothen=smoothen)
                     crop_pred = predicted_image[
                         new_min_row_ind: new_max_row_ind,
                         new_min_col_ind: new_max_col_ind]
@@ -335,9 +694,10 @@ class ConvpaintModel:
         
         return predicted_image_complete
 
-    def get_features_current_layers(self, image, annotations):        # FROM CONV_PAINT SCRIPT
+    def get_features_current_layers(self, image, annotations):        # ORIGINALLY FROM CONV_PAINT SCRIPT
         """Given a potentially multidimensional image and a set of annotations,
         extract multiscale features from multiple layers of a model.
+        
         Parameters
         ----------
         image : np.ndarray
@@ -346,17 +706,18 @@ class ConvpaintModel:
         annotations : np.ndarray
             2D, 3D Annotations (1,2) to extract features from
 
-        Given inside the ConvPaint class:    
+        Given inside the ConvPaint class:
             self.fe_model : feature extraction model
                 Model to extract features from the image
-            self.param.scalings : list of ints
+            self._param.scalings : list of ints
                 Downsampling factors
-            self.param.order : int, optional
+            self._param.order : int, optional
                 Interpolation order for low scale resizing, by default 0
-            self.param.use_min_features : bool, optional
+            self._param.use_min_features : bool, optional
                 Use minimal number of features, by default True
-            self.param.image_downsample : int, optional
+            self._param.image_downsample : int, optional
                 Downsample image by this factor before extracting features, by default 1
+
         Returns
         -------
         features : pandas DataFrame
@@ -383,7 +744,7 @@ class ConvpaintModel:
         all_targets = []
 
         # find maximal padding necessary
-        padding = self.param.fe_padding * np.max(self.param.fe_scalings)
+        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
 
         # iterating over non_empty iteraties of t/z for 3D data
         for ind, t in enumerate(non_empty):
@@ -406,13 +767,14 @@ class ConvpaintModel:
             annot_regions = skimage.morphology.label(current_annot > 0)
 
             # TILE ANNOTATIONS (applying the padding to each annotations part)
-            if self.param.tile_annotations:
+            if self._param.tile_annotations:
                 boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
             else:
                 boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
             for i in range(len(boxes['label'])):
                 # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-                pad_size = self.param.fe_padding # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
+                # pad_size = self.fe_model.get_padding() # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
+                pad_size = padding
                 x_min = boxes['bbox-0'][i]-pad_size
                 x_max = boxes['bbox-2'][i]+pad_size
                 y_min = boxes['bbox-1'][i]-pad_size
@@ -424,22 +786,23 @@ class ConvpaintModel:
                 y_min = max(0, y_min)
                 y_max = min(current_image.shape[-1], y_max)
 
-                im_crop = current_image[...,
+                img_tile = current_image[...,
                     x_min:x_max,
                     y_min:y_max
                 ]
-                annot_crop = current_annot[
+                annot_tile = current_annot[
                     x_min:x_max,
                     y_min:y_max
                 ]
-                extracted_features = self.fe_model.get_features_scaled(image=im_crop, param=self.param)
+                extracted_features = self.fe_model.get_features_scaled(image=img_tile, param=self._param)
 
-                if self.param.image_downsample > 1:
-                    annot_crop = annot_crop[::self.param.image_downsample, :: self.param.image_downsample]
+                if self._param.image_downsample > 1: # Downsample the ANNOTATION (img is done inside get_features_scaled)
+                    annot_tile = conv_paint_utils.scale_img(annot_tile, self._param.image_downsample, use_labels=True)
+                    # annot_tile = annot_tile[::self._param.image_downsample, :: self._param.image_downsample]
 
                 # EXTRACT TARGETED FEATURES
                 #from the [features, w, h] make a list of [features] with len nb_annotations
-                mask = annot_crop > 0
+                mask = annot_tile > 0
                 nb_features = extracted_features.shape[0]
 
                 extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
@@ -447,7 +810,7 @@ class ConvpaintModel:
                 extracted_features = extracted_features[mask]
                 all_values.append(extracted_features)
 
-                targets = annot_crop[annot_crop > 0]
+                targets = annot_tile[annot_tile > 0]
                 targets = targets.flatten()
                 all_targets.append(targets)
 
@@ -459,7 +822,8 @@ class ConvpaintModel:
         targets = pd.Series(all_targets)
 
         return features, targets
-    
+
+
     ### NEW Feature extraction methods
 
     def run_model_checks(self):
@@ -489,7 +853,7 @@ class ConvpaintModel:
         return output_data_stack_list
 
     def pre_process_stack(self, data_stack):
-        input_scaling = self.param.image_downsample
+        input_scaling = self._param.image_downsample
         effective_kernel_padding = self.fe_model.get_effective_kernel_padding()
         effective_patch_size = self.fe_model.get_effective_patch_size()
         # Process input data stack
@@ -509,7 +873,7 @@ class ConvpaintModel:
         patch_size = self.fe_model.patch_size
         extract_3d = ((kernel_size is not None and kernel_size[0] is not None) or
                       (patch_size is not None and patch_size[0] is not None))
-        tile_annots = self.param.tile_annotations
+        tile_annots = self._param.tile_annotations
         if extract_3d and tile_annots:
             annot_img_list = conv_paint_utils.tile_annots_3d(img_stack,
                                                              annot_stack,
@@ -559,18 +923,65 @@ class ConvpaintModel:
         for img, annots in zip(image_list, annots_list):
             features, targets = self.get_features_targets_img_stack(img, annots)
 
-    ### Classifier methods
+######################################
 
-    def train_classifier(self, features, targets, use_rf=False):
-        """Train a classifier given a set of features and targets."""
-        if not use_rf:
-            self.classifier = CatBoostClassifier(iterations=self.param.clf_iterations,
-                                                 learning_rate=self.param.clf_learning_rate,
-                                                 depth=self.param.clf_depth)
-            self.classifier.fit(features, targets)
-        else:
-                # train a random forest classififer
-                self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
-                self.classifier.fit(features, targets)
+    def train_new(self, img, annotations):
+        """
+        Train the model on the given image and annotations.
+        """
+        self.annots = annotations
+        self.patch_size = self.fe_model.get_patch_size()
+        self.padding = self.fe_model.get_padding()
+        tile_annots = self._param.get("tile_annotations")
+        self.run_checks()
+        prep_img = self.prepare_img_dims(img) # -> Z, C, H, W
+        prep_annots = self.prepare_annots_dims(annotations)
+        annotated_slices, non_empty_annots = self.extract_annotated_slices(prep_img, prep_annots)
+        features_lin = self.get_features_lin(annotated_slices, tile_annotations=tile_annots)
+        f, t = self.get_features_annots(features_lin) # For patch-based FE, create image, re-scale and re-linearize first
+        clf = self._train_classifier(f, t)
+        return clf
 
+    def prepare_img_dims(self, img):
+        """
+        Prepare the dimensions of the image.
+        Makes sure the image is in Z,C,H,W format (if necessary with Z and/or C = 1).
+        """
+        ndim = img.ndim
+        if ndim == 2:
+            img = img[np.newaxis, np.newaxis, :, :]
 
+        if ndim == 3 and self._param.get("rgb_img") and img.shape[2] == 3:
+            img = np.moveaxis(img, 2, 0) # -> C, H, W -> Can now be treated together with multi-channel images
+        if ndim == 3 and not self._param.get("multi_channel_img"):
+            img = img[:, np.newaxis, :, :] # non-multichannel have Z -> C = 1 is added
+        elif ndim == 3:
+            img = img[np.newaxis, :, :, :] # multichannel (and RGB) have C -> Z = 1 is added
+
+        return img
+        
+    def prepare_annots_dims(self, annotations):
+        """
+        Prepare the dimensions of the annotations.
+        Makes sure the annotations are in Z,H,W format.
+        """
+        if annotations is not None:
+            ndim = annotations.ndim
+            if ndim == 2:
+                annotations = annotations[np.newaxis, :, :] # add Z = 1
+            if ndim == 3:
+                annotations = annotations[:, :, :] # if 3D, it must already be Z, H, W
+        return annotations
+    
+    def get_features(self,  img_list, annots=None, do_pad=True, do_downsample=True, tile_annotations=False):
+        
+        for img in img_list:
+            self.run_img_checks(img)
+            img = self.prepare_img_dims(img)
+            img_scaled = self.downsample(img)
+            if annots is not None:
+                img, annots = self.extract_annotated_slices(img, annots)
+            annot_scaled = self.downsample(self.annots)
+            img_padded = self.pad_image(img_scaled)
+            annot_padded = self.pad_image(self.annots)
+        

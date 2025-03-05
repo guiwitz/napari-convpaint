@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device
+from .conv_paint_utils import get_device, scale_img
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
 import pandas as pd
@@ -9,30 +9,43 @@ AVAILABLE_MODELS = ['dinov2_vits14_reg']
 
 class DinoFeatures(FeatureExtractor):
     def __init__(self, model_name='dinov2_vits14_reg', use_cuda=False):
-        self.model_name = model_name
-        self.use_cuda = use_cuda
-        # prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
-        torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
-        try:
-            self.model = torch.hub.load('facebookresearch/dinov2', self.model_name, pretrained=True, verbose=False)
-        except(RuntimeError):
-            self.model = torch.hub.load('facebookresearch/dinov2', self.model_name, pretrained=True, verbose=False, force_reload=True)
-        self.patchsize = 14
-        self.padding = int(self.patchsize/2)
-        if self.use_cuda:
+        
+        # Sets self.model_name and self.use_cuda and creates the model
+        super().__init__(model_name=model_name, use_cuda=use_cuda)
+        
+        self.patch_size = 14
+        self.padding = int(self.patch_size/2)
+
+        if use_cuda:
             self.device = get_device()
             self.model.to(self.device)
         else:
             self.device = 'cpu'
         self.model.eval()
 
-    def get_default_param(self, param=None):
-        param = super().get_default_param(param=param)
+    @staticmethod
+    def create_model(model_name):
+        # prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
+        torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
+        try:
+            model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False)
+        except(RuntimeError):
+            model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False, force_reload=True)
+        return model
+    
+    def get_description(self):
+        desc = "Foundational ViT model. Extracts long range, semantic features."
+        desc += "\nGood for: natural images (living beings, objects), histology etc."
+        desc += "\n(The small version is used, with registers and patch size 14x14.)"
+        return desc
+
+    def get_default_params(self, param=None):
+        param = super().get_default_params(param=param)
         param.fe_name = self.model_name
+        param.fe_use_cuda = self.use_cuda
+        param.fe_layers = []
         param.fe_scalings = [1]
         param.fe_order = 0
-        param.fe_use_cuda = self.use_cuda
-        param.fe_padding = self.padding
         # param.image_downsample = 1
         param.tile_image = False
         param.tile_annotations = False
@@ -68,8 +81,8 @@ class DinoFeatures(FeatureExtractor):
 
 #       # make sure image is divisible by patch size
         h, w = image.shape[-2:]
-        new_h = h - (h % self.patchsize)
-        new_w = w - (w % self.patchsize)
+        new_h = h - (h % self.patch_size)
+        new_w = w - (w % self.patch_size)
         if new_h != h or new_w != w:
             image = image[:, :new_h, :new_w]
 
@@ -83,8 +96,8 @@ class DinoFeatures(FeatureExtractor):
     def _extract_features_rgb(self, image):
         '''Extract features from image, return features as np.array with dimensions  H x W x nfeatures.
         Input image has to be multiple of patch size'''
-        assert image.shape[-2] % self.patchsize == 0
-        assert image.shape[-1] % self.patchsize == 0
+        assert image.shape[-2] % self.patch_size == 0
+        assert image.shape[-1] % self.patch_size == 0
         assert image.shape[0] == 3
 
         image_tensor = self._preprocess_image(image)
@@ -94,11 +107,11 @@ class DinoFeatures(FeatureExtractor):
         if self.use_cuda:
             features = features.cpu()
         features = features.numpy()[0]
-        features_shape = (int(image.shape[-2] / self.patchsize), int(image.shape[-1] / self.patchsize), features.shape[-1])
+        features_shape = (int(image.shape[-2] / self.patch_size), int(image.shape[-1] / self.patch_size), features.shape[-1])
         features = np.reshape(features, features_shape)
 
-        assert features.shape[0] == image.shape[-2] / self.patchsize
-        assert features.shape[1] == image.shape[-1] / self.patchsize
+        assert features.shape[0] == image.shape[-2] / self.patch_size
+        assert features.shape[1] == image.shape[-1] / self.patch_size
         return features
     
     def _extract_features(self, image):
@@ -142,7 +155,8 @@ class DinoFeatures(FeatureExtractor):
             image = np.expand_dims(image, axis=0)
 
         if param.image_downsample > 1:
-            image = image[:, ::param.image_downsample, ::param.image_downsample]
+            # image = image[:, ::param.image_downsample, ::param.image_downsample]
+            image = scale_img(image, param.image_downsample)
         
         features = self.get_features(image, order=param.fe_order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
         nb_features = features.shape[0]
@@ -161,8 +175,8 @@ class DinoFeatures(FeatureExtractor):
 
         #make sure image is divisible by patch size
         h, w = image.shape[-2:]
-        new_h = (h // self.patchsize) * self.patchsize
-        new_w = (w // self.patchsize) * self.patchsize
+        new_h = (h // self.patch_size) * self.patch_size
+        new_w = (w // self.patch_size) * self.patch_size
         h_pad_top = (h - new_h)//2
         w_pad_left = (w - new_w)//2
         h_pad_bottom = h - new_h - h_pad_top
@@ -171,14 +185,13 @@ class DinoFeatures(FeatureExtractor):
         if h_pad_top > 0 or w_pad_left > 0 or h_pad_bottom > 0 or w_pad_right > 0:
             image = image[:, h_pad_top:-h_pad_bottom if h_pad_bottom != 0 else None, 
                              w_pad_left:-w_pad_right if w_pad_right != 0 else None]
-#
 
         features = self._extract_features(image) #[H, W, nfeatures]
 
         if not return_patches:
             #upsample features to original size
-            features = np.repeat(features, self.patchsize, axis=0)
-            features = np.repeat(features, self.patchsize, axis=1)
+            features = np.repeat(features, self.patch_size, axis=0)
+            features = np.repeat(features, self.patch_size, axis=1)
 
             #replace with padding where there are no annotations
             pad_width = ((h_pad_top, h_pad_bottom), (w_pad_left, w_pad_right), (0,0))
@@ -192,43 +205,5 @@ class DinoFeatures(FeatureExtractor):
         else:
             #return patches
             features = np.moveaxis(features, -1, 0) #[nb_features, H, W]
-            assert features.shape[1] == (h // self.patchsize) and features.shape[2] == (w // self.patchsize)
+            assert features.shape[1] == (h // self.patch_size) and features.shape[2] == (w // self.patch_size)
             return features
-
-
-    def predict_image(self, image, classifier, param, **kwargs):
-        '''Special predict function for feature extraction models that output patchwise features.
-        1. Extract patch wise features
-        2. Predict each patch with classifier
-        3. Scale up the predictions'''
-
-        #add padding
-        padding = param.fe_padding
-        if image.ndim == 2:
-            image = np.expand_dims(image, axis=0)
-        image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
-
-        features = self.get_features_scaled(image, param, return_patches=True, **kwargs)
-        w_patch = np.ceil(features.shape[-2] / param.image_downsample).astype(int)
-        h_path = np.ceil(features.shape[-1] / param.image_downsample).astype(int)
-
-        nb_features = features.shape[0] #[nb_features, width, height]
-
-        #move features to last dimension
-        features = np.moveaxis(features, 0, -1) #[width, height, nb_features]
-        features = np.reshape(features, (-1, nb_features)) #[width*height, nb_features] (1d-array for RF)
-
-
-        all_pixels = pd.DataFrame(features)
-        predictions = classifier.predict(all_pixels)
-
-        predicted_image = np.reshape(predictions, [w_patch, h_path])
-        predicted_image = skimage.transform.resize(
-            image=predicted_image,
-            output_shape=(image.shape[-2], image.shape[-1]),
-            preserve_range=True, order=param.fe_order).astype(np.uint8)
-        
-        if padding > 0:
-            predicted_image = predicted_image[padding:-padding, padding:-padding]
-        
-        return predicted_image
