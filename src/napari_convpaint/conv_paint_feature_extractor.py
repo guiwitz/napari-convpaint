@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import skimage
 from .conv_paint_param import Param
+from .conv_paint_utils import scale_img
 
 class FeatureExtractor:
     def __init__(self, model_name="vgg16", model=None, use_cuda=None, **kwargs):
@@ -146,11 +147,13 @@ class FeatureExtractor:
             image = np.expand_dims(image, axis=0)
 
         if param.image_downsample > 1:
-            image = image[:, ::param.image_downsample, ::param.image_downsample]
+            # image = image[:, ::param.image_downsample, ::param.image_downsample]
+            image = scale_img(image, param.image_downsample)
 
         features_all_scales = []
         for s in param.fe_scalings:
-            image_scaled = image[:, ::s, ::s]
+            # image_scaled = image[:, ::s, ::s]
+            image_scaled = scale_img(image, s)
             features = self.get_features(image_scaled, order=param.fe_order, **kwargs) #features have shape [nb_features, width, height]
             nb_features = features.shape[0]
             features = skimage.transform.resize(

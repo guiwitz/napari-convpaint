@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device
+from .conv_paint_utils import get_device, scale_img
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
 import pandas as pd
@@ -155,7 +155,8 @@ class DinoFeatures(FeatureExtractor):
             image = np.expand_dims(image, axis=0)
 
         if param.image_downsample > 1:
-            image = image[:, ::param.image_downsample, ::param.image_downsample]
+            # image = image[:, ::param.image_downsample, ::param.image_downsample]
+            image = scale_img(image, param.image_downsample)
         
         features = self.get_features(image, order=param.fe_order, return_patches= return_patches, **kwargs) #features have shape [nb_features, width, height]
         nb_features = features.shape[0]

@@ -441,7 +441,7 @@ class ConvpaintModel:
             raise ValueError('Training failed. No classifier was trained.')
         return self.classifier
 
-    def segment(self, image):
+    def segment(self, image, smoothen=0):
         """
         Segments an image by predicting its classes using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -452,7 +452,7 @@ class ConvpaintModel:
         image : np.ndarray
             Image to segment
         """
-        return self._predict_image(image, return_proba=False)
+        return self._predict_image(image, return_proba=False, smoothen=smoothen)
 
     def predict_probas(self, image):
         """
@@ -518,7 +518,7 @@ class ConvpaintModel:
 
     ### OLD FE METHODS
 
-    def _predict_image(self, image, return_proba=False):                    # FROM FEATURE EXTRACTOR CLASS
+    def _predict_image(self, image, return_proba=False, smoothen=0):                    # FROM FEATURE EXTRACTOR CLASS
         # Pad Image
         padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
         if image.ndim == 2:
@@ -539,8 +539,8 @@ class ConvpaintModel:
         features = np.reshape(features, (-1, nb_features)) # flatten
         features_df = pd.DataFrame(features)
 
-        rows = np.ceil(image.shape[-2] / self._param.image_downsample).astype(int)
-        cols = np.ceil(image.shape[-1] / self._param.image_downsample).astype(int)
+        rows = np.floor(image.shape[-2] / self._param.image_downsample).astype(int)
+        cols = np.floor(image.shape[-1] / self._param.image_downsample).astype(int)
 
         # Predict
         # First reshape prediction to downsampled shape
@@ -564,9 +564,13 @@ class ConvpaintModel:
             return predicted_image
         else:
             predicted_image = predicted_image[..., padding:-padding, padding:-padding]
+            if smoothen > 0:
+                predicted_image = skimage.filters.rank.majority(predicted_image,
+                                                                footprint=skimage.morphology.disk(smoothen))
+                predicted_image = skimage.util.img_as_ubyte(predicted_image)
             return predicted_image.astype(np.uint8)
     
-    def parallel_predict_image(self, image, use_dask=False):
+    def parallel_predict_image(self, image, use_dask=False, smoothen=False):
         """
         Given a filter model and a classifier, predict the class of 
         each pixel in an image.
@@ -670,7 +674,7 @@ class ConvpaintModel:
                     new_min_row_ind_collection.append(new_min_row_ind)
 
                 else:
-                    predicted_image = self._predict_image(image_block)
+                    predicted_image = self._predict_image(image_block, smoothen=smoothen)
                     crop_pred = predicted_image[
                         new_min_row_ind: new_max_row_ind,
                         new_min_col_ind: new_max_col_ind]
@@ -793,7 +797,8 @@ class ConvpaintModel:
                 extracted_features = self.fe_model.get_features_scaled(image=img_tile, param=self._param)
 
                 if self._param.image_downsample > 1: # Downsample the ANNOTATION (img is done inside get_features_scaled)
-                    annot_tile = annot_tile[::self._param.image_downsample, :: self._param.image_downsample]
+                    annot_tile = conv_paint_utils.scale_img(annot_tile, self._param.image_downsample, use_labels=True)
+                    # annot_tile = annot_tile[::self._param.image_downsample, :: self._param.image_downsample]
 
                 # EXTRACT TARGETED FEATURES
                 #from the [features, w, h] make a list of [features] with len nb_annotations

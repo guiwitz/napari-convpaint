@@ -99,6 +99,10 @@ class ConvPaintWidget(QWidget):
         # self.shortcuts_label = QLabel(shortcuts_text)#"\n[Hover mouse to see shortcuts]")
         # self.shortcuts_label.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
         # self.shortcuts_label.setToolTip(shortcuts_text)
+        # Create a simple box to add a number, for testing purposes
+        self.number_box = create_widget(annotation=int, label='Test')
+        self.number_box.value = 0
+
 
         # Add groups to the tab
         self.tabs.add_named_tab('Home', self.model_group.gbox)
@@ -109,6 +113,7 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Home', self.train_group.gbox)
         self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
         self.tabs.widget(self.tabs.tab_names.index('Home')).layout().addWidget(shortcuts_widget)
+        self.tabs.add_named_tab('Home', self.number_box.native)
 
         # Add buttons for "Model" group
         # Current model description label
@@ -716,7 +721,7 @@ class ConvPaintWidget(QWidget):
             if self.cp_model.get_param("tile_image"):
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.segment(image)
+                predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
             
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -768,7 +773,7 @@ class ConvPaintWidget(QWidget):
             if self.cp_model.get_param("tile_image"): # NOTE: We could also move this condition to the cp model
                 predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.segment(image)
+                predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
 
             # Update segmentation layer
             self.viewer.layers['segmentation'].data[step] = predicted_image

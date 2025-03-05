@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
-from .conv_paint_utils import get_device
+from .conv_paint_utils import get_device, scale_img
 from .conv_paint_feature_extractor import FeatureExtractor
 from .conv_paint_param import Param
 
@@ -254,12 +254,13 @@ class Hookmodel(FeatureExtractor):
         image = np.asarray(image, dtype=np.float32)
         
         # Downsample image
+        image = scale_img(image, param.image_downsample)
         if image.ndim == 2:
-            image = image[::param.image_downsample, ::param.image_downsample]
+            # image = image[::param.image_downsample, ::param.image_downsample]
             image = np.ones((input_channels, image.shape[0], image.shape[1]), dtype=np.float32) * image
             image_series = [image]
         elif image.ndim == 3:
-            image = image[:, ::param.image_downsample, ::param.image_downsample]
+            # image = image[:, ::param.image_downsample, ::param.image_downsample]
             image_series = [np.ones((input_channels, im.shape[0], im.shape[1]), dtype=np.float32) * im for im in image]
 
         int_mode = 'bilinear' if param.fe_order > 0 else 'nearest'
@@ -275,7 +276,8 @@ class Hookmodel(FeatureExtractor):
                 #     print("padding image in filter_img_mc", image.shape)
 
                 for s in param.fe_scalings:
-                    im_tot = image[:, ::s, ::s]
+                    # im_tot = image[:, ::s, ::s]
+                    im_tot = scale_img(image, s)
                     im_torch = torch.tensor(im_tot[np.newaxis, ::])
                     self.outputs = []
                     try:
