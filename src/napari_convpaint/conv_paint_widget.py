@@ -518,7 +518,7 @@ class ConvPaintWidget(QWidget):
             self.add_layers_btn.setEnabled(True)
             # Give info if image is very large to use "tile image"
             if self._check_large_image() and not self.cp_model.get_param('tile_image'):
-                show_info('Image is very large. Consider using "Tile image" for segmentation.')
+                show_info('Image is very large. Consider using "Tile image for segmentation".')
         else:
             self.add_layers_btn.setEnabled(False)
         # Allow other methods again to add layers if that was the case before
@@ -719,7 +719,8 @@ class ConvPaintWidget(QWidget):
 
             # Predict image
             if self.cp_model.get_param("tile_image"):
-                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
+                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False,
+                                                                       smoothen=self.number_box.value)
             else:
                 predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
             
@@ -771,7 +772,8 @@ class ConvPaintWidget(QWidget):
 
             # Predict the current step
             if self.cp_model.get_param("tile_image"): # NOTE: We could also move this condition to the cp model
-                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
+                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False,
+                                                                       smoothen=self.number_box.value)
             else:
                 predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
 
