@@ -1,4 +1,4 @@
-from napari_convpaint import conv_paint, conv_paint_param, conv_paint_nnlayers, conv_paint_model
+from napari_convpaint import conv_paint_param, conv_paint_nnlayers, conv_paint_model
 from napari_convpaint.convpaint_sample import create_annotation_cell3d
 from torch.nn.modules.container import Sequential
 import numpy as np
