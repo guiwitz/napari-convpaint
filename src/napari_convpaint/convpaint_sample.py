@@ -15,4 +15,3 @@ def create_annotation_cell3d() -> list[napari.types.LayerDataTuple]:
 
     return [(labels, {}, 'labels')]
     
-    

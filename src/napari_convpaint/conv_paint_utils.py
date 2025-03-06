@@ -3,6 +3,8 @@ import warnings
 
 import torch
 import numpy as np
+from scipy.stats import mode
+# from scipy.ndimage import median_filter
 import skimage.transform
 import skimage.morphology as morph
 from joblib import Parallel, delayed
@@ -15,7 +17,7 @@ from sklearn.model_selection import train_test_split
 
 from torch.nn.functional import interpolate as torch_interpolate
 
-def scale_img(image, scaling_factor, upscale=False):
+def scale_img(image, scaling_factor, upscale=False, use_labels=False):
     """
     Downscale an image by averaging over non-overlapping blocks of the specified size.
     OR Upscale by repeating the pixels.
@@ -28,7 +30,9 @@ def scale_img(image, scaling_factor, upscale=False):
         Factor by which to downscale the image.
     upscale : bool
         If True, upscale the image by repeating the pixels.
-        
+    use_labels : bool
+        If True, use the mode (majority) instead of the median for downscaling labels.
+
     Returns
     -------
     downscaled_img / upscaled_img : np.ndarray
@@ -49,19 +53,30 @@ def scale_img(image, scaling_factor, upscale=False):
     
     # Else DOWNSCALE the image
     # Slice the last two dimensions
+    slice_start = ((image.shape[-2] % scaling_factor) // 2,
+                     (image.shape[-1] % scaling_factor) // 2)
+    slice_size = (image.shape[-2] // scaling_factor * scaling_factor,
+                image.shape[-1] // scaling_factor * scaling_factor)
     sliced_img = image[
         ..., 
-        :image.shape[-2] // scaling_factor * scaling_factor, 
-        :image.shape[-1] // scaling_factor * scaling_factor
+        slice_start[0]:slice_start[0] + slice_size[0],
+        slice_start[1]:slice_start[1] + slice_size[1]
     ]
     # Reshape to group elements for downscaling
     stacked_blocks = sliced_img.reshape(
         *image.shape[:-2],  # Preserve all leading dimensions
-        image.shape[-2] // scaling_factor, scaling_factor,
-        image.shape[-1] // scaling_factor, scaling_factor
+        slice_size[0] // scaling_factor, scaling_factor,
+        slice_size[1] // scaling_factor, scaling_factor
     )
-    # Take the median along the scaling dimensions
-    scaled_img = np.median(stacked_blocks, axis=(-2, -1))
+    # print(stacked_blocks[0,:,0,:])
+    if not use_labels:
+        # Take the median along the scaling dimensions
+        scaled_img = np.median(stacked_blocks, axis=(-3, -1))
+        # scaled_img = median_filter(stacked_blocks, size=(1, scaling_factor, 1, scaling_factor)).reshape(
+        #     *image.shape[:-2], slice_size[0] // scaling_factor, slice_size[1] // scaling_factor)
+    else:
+        # For labels, take the majority (max count) along the scaling dimensions
+        scaled_img = mode(stacked_blocks, axis=(-3, -1)).mode
     return scaled_img
 
 def rescale_features(image, output_shape, order=1):
@@ -75,6 +90,137 @@ def rescale_class_labels(label_img, output_shape):
     Rescale a class label image to the specified output size.
     """
     return skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
+
+def rescale_probs(label_prob_img, output_shape, order=0):
+    """
+    Rescale a class probability image to the specified output size.
+    """
+    return skimage.transform.resize(label_prob_img, output_shape, order=order, mode='reflect', preserve_range=True)
+
+def pad_for_kernel(data_stack, effective_kernel_padding):
+    """
+    Pad a data stack (4D image or 3D annotation) to the kernel size.
+    Adds half the kernel size to each side of the data stack.
+    Takes into account the scale factor (for later pyramid scaling) for padding.
+    If kernel[0] is not None, also pad along the Z axis.
+
+    Parameters
+    ----------
+    data_stack : np.ndarray
+        Input data stack to be padded. Shape:
+        - [C, Z, H, W] for images (e.g., with multiple channels)
+        - [Z, H, W] for annotations
+    effective_kernel_padding : tuple of int
+        Effective padding for the kernel size, to be added to each side of the data stack.
+        Takes into account the scale factor for later pyramid scaling.
+
+    Returns
+    -------
+    padded_data : np.ndarray
+        Padded data stack with the same shape as the input plus padding.
+    """
+    if not isinstance(effective_kernel_padding, tuple) or len(effective_kernel_padding) != 3:
+        raise ValueError("kernel_size must be a tuple of three integers (Z, H, W), " +
+                         "whereas Z can be None.")
+    
+    # Get padding for each dimension
+    z_pad, h_pad, w_pad = effective_kernel_padding
+
+    # Create padding tuples
+    if data_stack.ndim == 4:  # [C, Z, H, W] for images
+        padding = ((0, 0), (z_pad, z_pad), (h_pad, h_pad), (w_pad, w_pad))
+        mode = 'reflect'
+    elif data_stack.ndim == 3:  # [Z, H, W] for annotations
+        padding = ((z_pad, z_pad), (h_pad, h_pad), (w_pad, w_pad))
+        mode = 'constant'
+    else:
+        raise ValueError("Invalid data_stack dimensions. Expected 3D or 4D array.")
+
+    # Apply padding
+    padded_data = np.pad(data_stack, padding, mode=mode)
+
+    return padded_data
+
+def pad_to_patch(data_stack, effective_patch_size):
+    """
+    Pad an image and annotation stack to the next multiple of patch size.
+    Takes into account the scale factor (for later pyramid scaling) for padding.
+    If kernel[0] is not None, also pad along the Z axis.
+
+    Parameters
+    ----------
+    data_stack : np.ndarray
+        Input data stack to be padded. Shape:
+        - [C, Z, H, W] for images (e.g., with multiple channels)
+        - [Z, H, W] for annotations
+    effective_patch_size : tuple of int
+        Patch size, to a multiple of which shall be padded
+        Takes into account the scale factor for later pyramid scaling.
+
+    Returns
+    -------
+    padded_data : np.ndarray
+        Padded data stack with the same shape as the input plus padding.
+    """
+    # Compute padding
+    z_pad, h_pad, w_pad = compute_patch_padding(data_stack.shape, effective_patch_size)
+
+    # Split padding evenly (add extra padding to the end if padding is odd)
+    z_pad_front, z_pad_back = z_pad // 2, z_pad - z_pad // 2
+    h_pad_front, h_pad_back = h_pad // 2, h_pad - h_pad // 2
+    w_pad_front, w_pad_back = w_pad // 2, w_pad - w_pad // 2
+
+    # Create padding tuples
+    if data_stack.ndim == 4:  # [C, Z, H, W] for images
+        padding = ((0, 0), (z_pad_front, z_pad_back), (h_pad_front, h_pad_back), (w_pad_front, w_pad_back))
+        mode = 'reflect'
+    elif data_stack.ndim == 3:  # [Z, H, W] for annotations
+        padding = ((z_pad_front, z_pad_back), (h_pad_front, h_pad_back), (w_pad_front, w_pad_back))
+        mode = 'constant'
+
+    # Apply padding
+    padded_data = np.pad(data_stack, padding, mode=mode)
+
+    return padded_data
+
+def compute_patch_padding(data_stack_shape, effective_patch_size):
+    """
+    Compute the padding required to make the data stack a multiple of the patch size.
+    Takes into account the scale factor (for later pyramid scaling) for padding.
+    """
+    if not isinstance(effective_patch_size, tuple) or len(effective_patch_size) != 3:
+        raise ValueError("patch_size must be a tuple of three integers (Z, H, W), " +
+                         "whereas Z can be None.")
+    
+    # Extract dimensions
+    if len(data_stack_shape) == 4:  # [C, Z, H, W] for images
+        _, z_dim, h_dim, w_dim = data_stack_shape
+    elif len(data_stack_shape) == 3:  # [Z, H, W] for annotations
+        z_dim, h_dim, w_dim = data_stack_shape
+    else:
+        raise ValueError("Invalid data_stack dimensions. Expected 3D or 4D array.")
+    
+    # Compute padding for each dimension
+    patch_z, patch_h, patch_w = effective_patch_size
+    z_pad = (patch_z - (z_dim % patch_z)) % patch_z if patch_z is not None else 0
+    h_pad = (patch_h - (h_dim % patch_h)) % patch_h
+    w_pad = (patch_w - (w_dim % patch_w)) % patch_w
+
+    return z_pad, h_pad, w_pad
+
+def pre_process_stack(data_stack, input_scaling, effective_kernel_padding, effective_patch_size):
+    # Scale input
+    scaled_stack = scale_img(data_stack, input_scaling)
+    # Pad images and annots; take into account maximum scaling for later pyramid scaling
+    padded_stack = scaled_stack
+    if effective_kernel_padding is not None:
+        padded_stack = pad_for_kernel(padded_stack, effective_kernel_padding)
+    if effective_patch_size is not None:
+        padded_stack = pad_to_patch(padded_stack, effective_patch_size)
+    return padded_stack
+
+def tile_annots_3D(img_stack, annot_stack, effective_kernel_padding, effective_patch_size): # TODO: IMPLEMENT
+    return img_stack, annot_stack
 
 def get_device(use_cuda=None):
     if torch.cuda.is_available() and (use_cuda==True):

@@ -36,6 +36,22 @@ And this is the resulting Convpaint segmentation:
 
 Check out the documentation or the paper for more usecases!
 
+## API
+
+You can now use the API in a fashion very similar to the napari plugin. The ConvpaintModel class combines a feature extractor and a classifier model, and holds all the parameters defining the model. Initialize a ConvpaintModel object, train its classifier and use it to segment an image:
+
+```Python
+cp_model = ConvpaintModel("dino") # alternatively use vgg, cellpose or gaussian
+cp_model.train(image, annotations)
+segmentation = cp_model.segment(image)
+```
+
+There are many other options, such as predicting all class probabilities (see below) and we will update the documentation and notebook examples soon. In the meantime feel free to test it yourself.
+
+```Python
+probas = cp_model.predict_probas(image)
+```
+
 ## License
 
 Distributed under the terms of the [BSD-3] license,
