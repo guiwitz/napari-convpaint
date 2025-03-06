@@ -564,11 +564,11 @@ class ConvpaintModel:
             return predicted_image
         else:
             predicted_image = predicted_image[..., padding:-padding, padding:-padding]
+            predicted_image = predicted_image.astype(np.uint8)
             if smoothen > 0:
                 predicted_image = skimage.filters.rank.majority(predicted_image,
                                                                 footprint=skimage.morphology.disk(smoothen))
-                predicted_image = skimage.util.img_as_ubyte(predicted_image)
-            return predicted_image.astype(np.uint8)
+            return predicted_image
     
     def parallel_predict_image(self, image, use_dask=False, smoothen=False):
         """
@@ -662,7 +662,7 @@ class ConvpaintModel:
 
                 if use_dask:
                     processes.append(client.submit(
-                        self._predict_image, image=image_block))
+                        self._predict_image, image=image_block, smoothen=smoothen))
                     
                     min_row_ind_collection.append(min_row_ind)
                     min_col_ind_collection.append(min_col_ind)

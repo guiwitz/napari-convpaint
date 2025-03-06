@@ -4,6 +4,7 @@ import warnings
 import torch
 import numpy as np
 from scipy.stats import mode
+# from scipy.ndimage import median_filter
 import skimage.transform
 import skimage.morphology as morph
 from joblib import Parallel, delayed
@@ -71,6 +72,8 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
     if not use_labels:
         # Take the median along the scaling dimensions
         scaled_img = np.median(stacked_blocks, axis=(-3, -1))
+        # scaled_img = median_filter(stacked_blocks, size=(1, scaling_factor, 1, scaling_factor)).reshape(
+        #     *image.shape[:-2], slice_size[0] // scaling_factor, slice_size[1] // scaling_factor)
     else:
         # For labels, take the majority (max count) along the scaling dimensions
         scaled_img = mode(stacked_blocks, axis=(-3, -1)).mode
