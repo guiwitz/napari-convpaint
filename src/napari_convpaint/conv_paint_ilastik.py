@@ -68,9 +68,9 @@ class IlastikFeatures(FeatureExtractor):
         image = np.moveaxis(image, 0, -1)
 
         # Loop over channels, extract features and concatenate them
-        for ch_idx in range(image.data.shape[2]):
+        for ch_idx in range(image.shape[2]):
             # channel_feature_map = np.zeros((100,100))
-            channel_feature_map = filter_set.transform(np.asarray(image[:,:,ch_idx]))
+            channel_feature_map = filter_set.transform(image[:,:,ch_idx])
             if ch_idx == 0:
                 feature_map = channel_feature_map
             else:
