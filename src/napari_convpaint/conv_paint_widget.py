@@ -79,11 +79,11 @@ class ConvPaintWidget(QWidget):
         # Create groups and separate labels
         self.model_group = VHGroup('Model', orientation='G')
         self.layer_selection_group = VHGroup('Layer selection', orientation='G')
-        self.image_processing_group = VHGroup('Image processing', orientation='G')
+        self.image_processing_group = VHGroup('Image shape and normalization', orientation='G')
         self.train_group = VHGroup('Train/Segment', orientation='G')
         # self.segment_group = VHGroup('Segment', orientation='G')
         # self.load_save_group = VHGroup('Load/Save', orientation='G')
-        self.acceleration_group = VHGroup('Acceleration', orientation='G')
+        self.acceleration_group = VHGroup('Acceleration and post-processing', orientation='G')
         # Create the shortcuts info
         shortcuts_text1 = 'Shift+a: Toggle annotations\nShift+s: Train\nShift+d: Predict\nShift+f: Toggle prediction'
         shortcuts_text2 = 'Shift+q: Set annotation label 1\nShift+w: Set annotation label 2\nShift+e: Set annotation label 3\nShift+r: Set annotation label 4'
@@ -113,7 +113,7 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Home', self.train_group.gbox)
         self.tabs.add_named_tab('Home', self.acceleration_group.gbox)
         self.tabs.widget(self.tabs.tab_names.index('Home')).layout().addWidget(shortcuts_widget)
-        self.tabs.add_named_tab('Home', self.number_box.native)
+        # self.tabs.add_named_tab('Home', self.number_box.native)
 
         # Add buttons for "Model" group
         # Current model description label
@@ -229,18 +229,26 @@ class ConvPaintWidget(QWidget):
         self.spin_downsample.setMaximum(10)
         self.spin_downsample.setValue(1)
         self.spin_downsample.setToolTip('Reduce image size for faster computing.')
-        self.acceleration_group.glayout.addWidget(QLabel('Downsample'), 0,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.spin_downsample, 0,1,1,1)
+        self.acceleration_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
+        # "Smoothen output" spinbox
+        self.spin_smoothen = QSpinBox()
+        self.spin_smoothen.setMinimum(1)
+        self.spin_smoothen.setMaximum(50)
+        self.spin_smoothen.setValue(1)
+        self.spin_smoothen.setToolTip('Smoothen output with a filter of this size.')
+        self.acceleration_group.glayout.addWidget(QLabel('Smoothen output'), 2,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.spin_smoothen, 2,1,1,1)
         # "Tile annotations" checkbox
         self.check_tile_annotations = QCheckBox('Tile annotations for training')
         self.check_tile_annotations.setChecked(False)
         self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\nDisable for models that extract long range features (e.g. DINO)!')
-        self.acceleration_group.glayout.addWidget(self.check_tile_annotations, 1,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.check_tile_annotations, 0,0,1,1)
         # "Tile image" checkbox
         self.check_tile_image = QCheckBox('Tile image for segmentation')
         self.check_tile_image.setChecked(False)
         self.check_tile_image.setToolTip('Tile image to reduce memory usage.\nTake care when using models that extract long range features (e.g. DINO).')
-        self.acceleration_group.glayout.addWidget(self.check_tile_image, 1,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.check_tile_image, 0,1,1,1)
 
         # === MODEL TAB ===
 
@@ -459,6 +467,8 @@ class ConvPaintWidget(QWidget):
         # Acceleration
         self.spin_downsample.valueChanged.connect(lambda:
             self.cp_model.set_param('image_downsample', self.spin_downsample.value()))
+        self.spin_smoothen.valueChanged.connect(lambda:
+            self.cp_model.set_param('seg_smoothening', self.spin_smoothen.value()))
         self.check_tile_annotations.stateChanged.connect(lambda: 
             self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked()))
         self.check_tile_image.stateChanged.connect(lambda: 
@@ -719,10 +729,9 @@ class ConvPaintWidget(QWidget):
 
             # Predict image
             if self.cp_model.get_param("tile_image"):
-                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False,
-                                                                       smoothen=self.number_box.value)
+                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
+                predicted_image = self.cp_model.segment(image)
             
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -772,10 +781,9 @@ class ConvPaintWidget(QWidget):
 
             # Predict the current step
             if self.cp_model.get_param("tile_image"): # NOTE: We could also move this condition to the cp model
-                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False,
-                                                                       smoothen=self.number_box.value)
+                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
             else:
-                predicted_image = self.cp_model.segment(image, smoothen=self.number_box.value)
+                predicted_image = self.cp_model.segment(image)
 
             # Update segmentation layer
             self.viewer.layers['segmentation'].data[step] = predicted_image
@@ -1045,6 +1053,7 @@ class ConvPaintWidget(QWidget):
         # Other params
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
+            "seg_smoothening": self.spin_smoothen.setValue,
             "tile_annotations": self.check_tile_annotations.setChecked,
             "tile_image": self.check_tile_image.setChecked,
             "clf_iterations": self.spin_iterations.setValue,
@@ -1285,6 +1294,7 @@ class ConvPaintWidget(QWidget):
 
         val_to_setter = {
             "image_downsample": self.spin_downsample.setValue,
+            "seg_smoothening": self.spin_smoothen.setValue,
             "tile_annotations": self.check_tile_annotations.setChecked,
             "tile_image": self.check_tile_image.setChecked,
             "fe_name": self.qcombo_fe_type.setCurrentText,
@@ -1381,6 +1391,7 @@ class ConvPaintWidget(QWidget):
         self.radio_rgb.setChecked(self.default_cp_param.rgb_img)
         self.button_group_normalize.button(self.default_cp_param.normalize).setChecked(True)
         self.spin_downsample.setValue(self.default_cp_param.image_downsample)
+        self.spin_smoothen.setValue(self.default_cp_param.seg_smoothening)
         self.check_tile_annotations.setChecked(self.default_cp_param.tile_annotations)
         self.check_tile_image.setChecked(self.default_cp_param.tile_image)
         # Set defaults in param object (not done through bindings if values in the widget are not changed)
@@ -1388,6 +1399,7 @@ class ConvPaintWidget(QWidget):
                                  rgb_img = self.default_cp_param.rgb_img,
                                  normalize = self.default_cp_param.normalize,
                                  image_downsample = self.default_cp_param.image_downsample,
+                                 seg_smoothening = self.default_cp_param.seg_smoothening,
                                  tile_annotations = self.default_cp_param.tile_annotations,
                                  tile_image = self.default_cp_param.tile_image)
 

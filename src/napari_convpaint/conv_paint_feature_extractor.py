@@ -84,6 +84,7 @@ class FeatureExtractor:
         # param.rgb_img: bool = None # use RGB image (note: should not be set, as the input defines this mode)
         # param.normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
         # param.image_downsample: int = None
+        # param.seg_smoothening: int = None
         # param.tile_annotations: bool = None
         # param.tile_image: bool = None
         # # Classifier

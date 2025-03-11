@@ -182,6 +182,7 @@ class ConvpaintModel:
 
         # Acceleration parameters
         def_param.image_downsample = 1
+        def_param.seg_smoothening = 1
         def_param.tile_annotations = True
         def_param.tile_image = False
 
@@ -441,7 +442,7 @@ class ConvpaintModel:
             raise ValueError('Training failed. No classifier was trained.')
         return self.classifier
 
-    def segment(self, image, smoothen=0):
+    def segment(self, image):
         """
         Segments an image by predicting its classes using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -452,7 +453,7 @@ class ConvpaintModel:
         image : np.ndarray
             Image to segment
         """
-        return self._predict_image(image, return_proba=False, smoothen=smoothen)
+        return self._predict_image(image, return_proba=False)
 
     def predict_probas(self, image):
         """
@@ -518,7 +519,7 @@ class ConvpaintModel:
 
     ### OLD FE METHODS
 
-    def _predict_image(self, image, return_proba=False, smoothen=0):                    # FROM FEATURE EXTRACTOR CLASS
+    def _predict_image(self, image, return_proba=False):                    # FROM FEATURE EXTRACTOR CLASS
         # Pad Image
         padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
         if image.ndim == 2:
@@ -565,12 +566,12 @@ class ConvpaintModel:
         else:
             predicted_image = predicted_image[..., padding:-padding, padding:-padding]
             predicted_image = predicted_image.astype(np.uint8)
-            if smoothen > 0:
+            if self._param.seg_smoothening > 1:
                 predicted_image = skimage.filters.rank.majority(predicted_image,
-                                                                footprint=skimage.morphology.disk(smoothen))
+                                    footprint=skimage.morphology.disk(self._param.seg_smoothening))
             return predicted_image
     
-    def parallel_predict_image(self, image, use_dask=False, smoothen=False):
+    def parallel_predict_image(self, image, use_dask=False):
         """
         Given a filter model and a classifier, predict the class of 
         each pixel in an image.
@@ -593,6 +594,8 @@ class ConvpaintModel:
                 if True, use the minimum number of features per layer
             self._param.image_downsample: int, optional
                 downsample image by this factor before extracting features, by default 1
+            self._param.seg_smoothening: int, optional
+                smoothening factor for segmentation, by default 1
         
         use_dask: bool
             if True, use dask for parallel processing
@@ -662,7 +665,7 @@ class ConvpaintModel:
 
                 if use_dask:
                     processes.append(client.submit(
-                        self._predict_image, image=image_block, smoothen=smoothen))
+                        self._predict_image, image=image_block))
                     
                     min_row_ind_collection.append(min_row_ind)
                     min_col_ind_collection.append(min_col_ind)
@@ -674,7 +677,7 @@ class ConvpaintModel:
                     new_min_row_ind_collection.append(new_min_row_ind)
 
                 else:
-                    predicted_image = self._predict_image(image_block, smoothen=smoothen)
+                    predicted_image = self._predict_image(image_block)
                     crop_pred = predicted_image[
                         new_min_row_ind: new_max_row_ind,
                         new_min_col_ind: new_max_col_ind]

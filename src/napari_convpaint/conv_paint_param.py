@@ -24,6 +24,8 @@ class Param:
         image_downsample : int
             factor for downscaling the image right after input
             (predicted classes are upsampled accordingly for output)
+        seg_smoothening : int
+            factor for smoothening the segmentation output with a Majority filter
         tile_annotations : bool
             if True, extract only features of bounding boxes around annotated areas
         tile_image : bool
@@ -57,6 +59,7 @@ class Param:
 
     # Acceleration parameters
     image_downsample: int = None
+    seg_smoothening: int = None
     tile_annotations: bool = None
     tile_image: bool = None
 
