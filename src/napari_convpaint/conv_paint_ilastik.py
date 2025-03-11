@@ -31,7 +31,7 @@ class IlastikFeatures(FeatureExtractor):
         self.padding = FILTER_SET.kernel_size // 2
 
     def get_description(self):
-        return "Extraction of image features using the filter set of the popular segmentation tool Ilastik."
+        return "Extraction of image features using the full filter set of the popular segmentation tool Ilastik."
 
     def get_features(self, image, filter_set=FILTER_SET, **kwargs):
         """
@@ -58,14 +58,14 @@ class IlastikFeatures(FeatureExtractor):
         Feature Extraction with Ilastik for multichannel images.
         Concatenates the feature maps of each channel.
         INPUT:
-            image (np.ndarray): image to predict on; shape (C, H, W) or (H, W, C)
+            image (np.ndarray): image to predict on; shape (C, H, W)
             filter_set (FilterSet from ilastik.napari.filters): filter set to use for feature extraction
         OUTPUT:
             features (np.ndarray): feature map (H, W, C) with C being the number of features per pixel
         """
-        # Ensure (H, W, C) - expected by Ilastik
-        if len(image.shape) == 3 and image.shape[0] < 4:
-            image = np.moveaxis(image, 0, -1)
+        # Transform to (H, W, C) - expected by Ilastik
+        # if len(image.shape) == 3 and image.shape[0] < 5:
+        image = np.moveaxis(image, 0, -1)
 
         # Loop over channels, extract features and concatenate them
         for ch_idx in range(image.data.shape[2]):
