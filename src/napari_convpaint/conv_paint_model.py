@@ -417,7 +417,7 @@ class ConvpaintModel:
         features = self.fe_model.get_features_scaled(image=image, param=self._param)
         return features
     
-    def train(self, image, annotations):
+    def train(self, image, annotations, use_rf=False, allow_writing_files=False):
         """
         Trains the Convpaint model's classifier given an image and annotations.
         Uses the Parameter and the FeatureExtractor model to extract features.
@@ -437,7 +437,7 @@ class ConvpaintModel:
             Trained classifier
         """
         features, targets = self.get_features_current_layers(image, annotations)
-        self._train_classifier(features, targets)
+        self._train_classifier(features, targets, use_rf=use_rf, allow_writing_files=allow_writing_files)
         if self.classifier is None:
             raise ValueError('Training failed. No classifier was trained.')
         return self.classifier
@@ -475,7 +475,7 @@ class ConvpaintModel:
 
     ### CLASSIFIER METHODS
 
-    def _train_classifier(self, features, targets, use_rf=False):
+    def _train_classifier(self, features, targets, use_rf=False, allow_writing_files=False):
         """
         Trains a classifier given a set of features and targets.
         If use_rf is False, a CatBoostClassifier is trained, otherwise a RandomForestClassifier.
@@ -499,7 +499,7 @@ class ConvpaintModel:
             self.classifier = CatBoostClassifier(iterations=self._param.clf_iterations,
                                                  learning_rate=self._param.clf_learning_rate,
                                                  depth=self._param.clf_depth,
-                                                 allow_writing_files=False)
+                                                 allow_writing_files=allow_writing_files)
             self.classifier.fit(features, targets)
             self._param.classifier = 'CatBoost'
         else:
