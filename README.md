@@ -86,18 +86,59 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 
 ## Authors
 
-The idea behind this napari plugin was first developed by [Lucien Hinderling](https://hinderling.github.io) in the group of [Olivier Pertz](https://www.pertzlab.net/), at the Institute of Cell Biology, University of Bern. The code has first been shared as open source resource in form of a [Jupyter Notebook](https://github.com/hinderling/napari_pixel_classifier). With the desire to make this resource accessible to a broader public in the scientific community, the Pertz lab obtained a CZI napari plugin development grant with the title ["Democratizing Image Analysis with an Easy-to-Train Classifier"](https://chanzuckerberg.com/science/programs-resources/imaging/napari/democratizing-image-analysis-with-an-easy-to-train-classifier/) which supported the adaptation of the initial concept as a napari plugin called napari-convpaint. The plugin has been developed by [Guillaume Witz](https://guiwitz.github.io/blog/about/), Mykhailo Vladymyrov and Ana Stojiljkovic at the [Data Science Lab](https://www.dsl.unibe.ch/), University of Bern, in tight collaboration with the Pertz lab (Lucien Hinderling, [Roman Schwob](https://github.com/quasar1357), [Benjamin Gräedel](https://x.com/benigraedel), [Maciej Dobrzyński](https://macdobry.net)).
+The idea behind this napari plugin was first developed by [Lucien Hinderling](https://hinderling.github.io) in the group of [Olivier Pertz](https://www.pertzlab.net/), at the Institute of Cell Biology, University of Bern. The code has first been shared as open source resource in form of a [Jupyter Notebook](https://github.com/hinderling/napari_pixel_classifier). With the desire to make this resource accessible to a broader public in the scientific community, the Pertz lab obtained a CZI napari plugin development grant with the title ["Democratizing Image Analysis with an Easy-to-Train Classifier"](https://chanzuckerberg.com/science/programs-resources/imaging/napari/democratizing-image-analysis-with-an-easy-to-train-classifier/) which supported the adaptation of the initial concept as a napari plugin called napari-convpaint. The plugin has been developed by [Guillaume Witz<sup>1</sup>](https://guiwitz.github.io/blog/about/), [Roman Schwob<sup>1,2</sup>](https://github.com/quasar1357) and Lucien Hinderling<sup>2</sup> with much appreciated assistance of [Benjamin Gräedel<sup>2</sup>](https://x.com/benigraedel), [Maciej Dobrzyński<sup>2</sup>](https://macdobry.net), Mykhailo Vladymyrov<sup>1</sup> and Ana Stojiljkovic<sup>1</sup>.
+
+<sup>1</sup>[Data Science Lab](https://www.dsl.unibe.ch/), University of Bern \
+<sup>2</sup>[Pertz Lab](https://www.pertzlab.net/), Institute of Cell Biology, University of Bern 
 
 ## Cite Convpaint
 
-If you find Convpaint useful in your research, please consider citing:
+If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used in Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/) or [DINOv2](https://github.com/facebookresearch/dinov2).
+
+Convpaint:
 ```
-@article {Hinderling2024.09.12.610926,
-	author = {Hinderling, Lucien and Witz, Guillaume and Schwob, Roman and Stojiljkovic, Ana and Dobrzynski, Maciej and Vladymyrov, Mykhailo and Frei, Joel and Graedel, Benjamin and Frismantiene, Agne and Pertz, Olivier},
-	title = {Convpaint - Universal framework for interactive pixel classification using pretrained neural networks},
-	year = {2024},
+@article {Hinderling2024,
+	author = {Hinderling, Lucien and Witz, Guillaume and Schwob, Roman and Stojiljkovi, Ana and Dobrzyński, Maciej and Vladymyrov, Mykhailo and Frei, Joël and Grädel, Benjamin and Frismantiene, Agne and Pertz, Olivier},
+	title = {Convpaint - Interactive pixel classification using pretrained neural networks},
+	elocation-id = {2024.09.12.610926},
 	doi = {10.1101/2024.09.12.610926},
-	URL = {https://www.biorxiv.org/content/early/2024/09/14/2024.09.12.610926},
-	journal = {bioRxiv}
+	journal = {bioRxiv},
+	publisher = {Cold Spring Harbor Laboratory},
+	year = {2024},
+}
+```
+Suggested citations for feature extractors:
+```
+@article {Berg2019,
+	author = {Berg, Stuart and Kutra, Dominik and Kroeger, Thorben and Straehle, Christoph N. and Kausler, Bernhard X. and Haubold, Carsten and Schiegg, Martin and Ales, Janez and Beier, Thorsten and Rudy, Markus and Eren, Kemal and Cervantes, Jaime I. and Xu, Buote and Beuttenmueller, Fynn and Wolny, Adrian and Zhang, Chong and Koethe, Ullrich and Hamprecht, Fred A. and Kreshuk, Anna},
+	title = {ilastik: interactive machine learning for (bio)image analysis.},
+	issn = {1548-7105},
+	url = {https://doi.org/10.1038/s41592-019-0582-9},
+	doi = {10.1038/s41592-019-0582-9},
+	journal = {Nature Methods},
+	publisher = {Springer Nature},
+	year = {2019},
+	journal = {Nature Methods},
+	abstract = {We present ilastik, an easy-to-use interactive tool that brings machine-learning-based (bio)image analysis to end users without substantial computational expertise. It contains pre-defined workflows for image segmentation, object classification, counting and tracking. Users adapt the workflows to the problem at hand by interactively providing sparse training annotations for a nonlinear classifier. ilastik can process data in up to five dimensions (3D, time and number of channels). Its computational back end runs operations on-demand wherever possible, allowing for interactive prediction on data larger than RAM. Once the classifiers are trained, ilastik workflows can be applied to new data from the command line without further user interaction. We describe all ilastik workflows in detail, including three case studies and a discussion on the expected performance.}
+}
+
+@article {Stringer2021,
+	author = {Stringer, C., Wang, T., Michaelos, M. et al.},
+	title = {Cellpose: a generalist algorithm for cellular segmentation.},
+	elocation-id = {s41592-020-01018-x},
+	doi = {10.1038/s41592-020-01018-x},
+	journal = {Nature Methods},
+	publisher = {Springer Nature},
+	year = {2021},
+}
+
+@article {oquab2024dinov2learningrobustvisual,
+      title={DINOv2: Learning Robust Visual Features without Supervision}, 
+      author={Maxime Oquab and Timothée Darcet and Théo Moutakanni and Huy Vo and Marc Szafraniec and Vasil Khalidov and Pierre Fernandez and Daniel Haziza and Francisco Massa and Alaaeldin El-Nouby and Mahmoud Assran and Nicolas Ballas and Wojciech Galuba and Russell Howes and Po-Yao Huang and Shang-Wen Li and Ishan Misra and Michael Rabbat and Vasu Sharma and Gabriel Synnaeve and Hu Xu and Hervé Jegou and Julien Mairal and Patrick Labatut and Armand Joulin and Piotr Bojanowski},
+      year={2024},
+      eprint={2304.07193},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2304.07193}
 }
 ```
