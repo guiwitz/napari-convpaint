@@ -498,7 +498,8 @@ class ConvpaintModel:
         if not use_rf:
             self.classifier = CatBoostClassifier(iterations=self._param.clf_iterations,
                                                  learning_rate=self._param.clf_learning_rate,
-                                                 depth=self._param.clf_depth)
+                                                 depth=self._param.clf_depth,
+                                                 allow_writing_files=False)
             self.classifier.fit(features, targets)
             self._param.classifier = 'CatBoost'
         else:
