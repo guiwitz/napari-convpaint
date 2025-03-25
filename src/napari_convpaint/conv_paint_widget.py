@@ -522,6 +522,7 @@ class ConvPaintWidget(QWidget):
             return
         if annot_layer.visible == False:
             annot_layer.visible = True
+            self.viewer.layers.selection.active = None
             self.viewer.layers.selection.active = annot_layer
         else:
             annot_layer.visible = False
@@ -532,6 +533,8 @@ class ConvPaintWidget(QWidget):
             return
         if self.viewer.layers['segmentation'].visible == False:
             self.viewer.layers['segmentation'].visible = True
+            self.viewer.layers.selection.active = None
+            self.viewer.layers.selection.active = self.viewer.layers['segmentation']
         else:
             self.viewer.layers['segmentation'].visible = False
 
@@ -542,6 +545,7 @@ class ConvPaintWidget(QWidget):
             annot_layer.selected_label = x
             annot_layer.visible = True
             annot_layer.mode = 'paint'
+            self.viewer.layers.selection.active = None
             self.viewer.layers.selection.active = annot_layer
         if 'segmentation' in self.viewer.layers:
             self.viewer.layers['segmentation']. selected_label = x
