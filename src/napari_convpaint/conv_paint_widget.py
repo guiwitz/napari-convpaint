@@ -538,12 +538,13 @@ class ConvPaintWidget(QWidget):
     def set_annot_label_class(self, x, event=None):
         """Set the label class of the annotation layer."""
         annot_layer = self.annotation_layer_selection_widget.value
-        if annot_layer is None:
-            return
-        annot_layer.selected_label = x
-        annot_layer.visible = True
-        annot_layer.mode = 'paint'
-        self.viewer.layers.selection.active = annot_layer
+        if annot_layer is not None:
+            annot_layer.selected_label = x
+            annot_layer.visible = True
+            annot_layer.mode = 'paint'
+            self.viewer.layers.selection.active = annot_layer
+        if 'segmentation' in self.viewer.layers:
+            self.viewer.layers['segmentation']. selected_label = x
 
 ### Define the connections between the widget elements
 
