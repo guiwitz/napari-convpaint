@@ -271,6 +271,8 @@ class ConvPaintWidget(QWidget):
         self.qcombo_fe_type = QComboBox()
         self.qcombo_fe_type.addItems(sorted(ConvpaintModel.get_all_fe_models().keys()))
         self.qcombo_fe_type.setToolTip('Select architecture of feature extraction model.')
+        num_items = self.qcombo_fe_type.count()
+        self.qcombo_fe_type.setMaxVisibleItems(num_items) # Make sure the dropdown shows all items
         self.fe_group.glayout.addWidget(self.qcombo_fe_type, 1, 0, 1, 2)
 
         # Add "FE description" label to FE group

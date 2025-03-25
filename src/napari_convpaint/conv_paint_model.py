@@ -10,10 +10,12 @@ import skimage
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
 from napari_convpaint.conv_paint_dino import AVAILABLE_MODELS as DINO_MODELS
-from .conv_paint_nnlayers import Hookmodel
+from napari_convpaint.conv_paint_combo_fe import AVAILABLE_MODELS as COMBO_MODELS
+from napari_convpaint.conv_paint_nnlayers import Hookmodel
 from napari_convpaint.conv_paint_gaussian import GaussianFeatures
 from napari_convpaint.conv_paint_dino import DinoFeatures
-from .conv_paint_param import Param
+from napari_convpaint.conv_paint_combo_fe import ComboFeatures
+from napari_convpaint.conv_paint_param import Param
 from . import conv_paint_utils
 
 class ConvpaintModel:
@@ -140,6 +142,7 @@ class ConvpaintModel:
         ConvpaintModel.ALL_MODELS_TYPES_DICT = {x: Hookmodel for x in NN_MODELS}
         ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: GaussianFeatures for x in GAUSSIAN_MODELS})
         ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: DinoFeatures for x in DINO_MODELS})
+        ConvpaintModel.ALL_MODELS_TYPES_DICT.update({x: ComboFeatures for x in COMBO_MODELS})
 
         # Try to import CellposeFeatures and update the MODELS TO TYPES  dictionary if successful
         # Cellpose is only installed with pip install napari-convpaint[cellpose]
@@ -190,6 +193,8 @@ class ConvpaintModel:
         # FE parameters
         def_param.fe_name = "vgg16"
         def_param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
+        # def_param.fe_name = "convnext"
+        # def_param.fe_layers = [0,1]
         def_param.fe_use_cuda = False
         def_param.fe_scalings = [1, 2, 4]
         def_param.fe_order = 0
@@ -559,7 +564,8 @@ class ConvpaintModel:
             predicted_image = skimage.transform.resize(
                 image=predicted_image,
                 output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=self._param.fe_order)
+                preserve_range=True, order=0)
+                # OLD: order=self._param.fe_order
 
         # Remove padding and return
         if return_proba:
