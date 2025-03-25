@@ -2,6 +2,7 @@ from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox, QButtonGroup,
                             QRadioButton,QDoubleSpinBox)
+from PyQt5 import QtWidgets, QtGui, QtCore
 from qtpy.QtCore import Qt
 from magicgui.widgets import create_widget
 import napari
@@ -64,8 +65,8 @@ class ConvPaintWidget(QWidget):
         self.setLayout(self.main_layout)
 
         # Create and add tabs
-        self.tab_names = ['Home', 'Model options'] #['Home', 'Project', 'Model options']
-        self.tabs = TabSet(self.tab_names, tab_layouts=[None, QGridLayout()]) # [None, None, QGridLayout()])
+        self.tab_names = ['Home', 'Model options', 'Class labels'] #['Home', 'Project', 'Model options']
+        self.tabs = TabSet(self.tab_names, tab_layouts=[None, QGridLayout(), None]) # [None, None, QGridLayout()])
         self.main_layout.addWidget(self.tabs)
         # Disable project tab as long as not activated
         # self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False)
@@ -356,6 +357,11 @@ class ConvPaintWidget(QWidget):
         self.set_default_clf_btn.setEnabled(True)
         self.classifier_params_group.glayout.addWidget(self.set_default_clf_btn, 3, 0, 1, 1)
 
+        # === CLASS LABELS TAB ===
+
+        # Create List of class labels that the user can set
+        self._create_class_labels_widget()
+
         # === === ===
 
         # If project mode is initially activated, add project tab and widget
@@ -364,6 +370,8 @@ class ConvPaintWidget(QWidget):
 
         # Add connections and initialize by setting default model and params
         self._add_connections()
+        if self.image_layer_selection_widget.value is not None:
+            self._on_select_layer()
         self._reset_model()
 
         # Add key bindings
@@ -375,6 +383,135 @@ class ConvPaintWidget(QWidget):
         self.viewer.bind_key('Shift+w', lambda event=None: self.set_annot_label_class(2, event), overwrite=True)
         self.viewer.bind_key('Shift+e', lambda event=None: self.set_annot_label_class(3, event), overwrite=True)
         self.viewer.bind_key('Shift+r', lambda event=None: self.set_annot_label_class(4, event), overwrite=True)
+
+    def _create_class_labels_widget(self):
+        # Remove existing widgets if already there
+        if hasattr(self, 'class_labels_widget'):
+            self.class_labels_widget.deleteLater()
+        # Define initial state
+        self.initial_labels = ['Background', 'Foreground']
+        self.cmap_flag = False
+        # Create the main layout
+        self.class_labels_layout = QGridLayout()
+        self.class_labels_layout.setAlignment(Qt.AlignTop)
+        self.class_labels_widget = QWidget()
+        self.class_labels_widget.setLayout(self.class_labels_layout)
+        # Add text to instruct the user (note that it is optional to use)
+        class_label_text = QLabel('Set the names of the classes (optional):')
+        class_label_text.setWordWrap(True)
+        # class_label_text.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%)")#; font-style: italic")
+        self.class_labels_layout.addWidget(class_label_text, 0, 0, 1, 10)
+        # Create the class labels
+        self._create_class_labels()
+        # Add an "add class" and a "remove class" button
+        self.add_class_btn = QPushButton('Add class')
+        self.add_class_btn.clicked.connect(self._on_add_class_label)
+        self.class_labels_layout.addWidget(self.add_class_btn, len(self.initial_labels)+1, 0, 1, 5)
+        self.remove_class_btn = QPushButton('Remove class')
+        self.remove_class_btn.clicked.connect(self._on_remove_class_label)
+        self.class_labels_layout.addWidget(self.remove_class_btn, len(self.initial_labels)+1, 5, 1, 5)
+        # Add button to reset to initial state
+        self.reset_class_btn = QPushButton('Reset to default')
+        self.reset_class_btn.clicked.connect(self._create_class_labels_widget)
+        self.class_labels_layout.addWidget(self.reset_class_btn, len(self.initial_labels)+2, 0, 1, 10)
+
+        # Add the widget to the tab
+        self.tabs.add_named_tab('Class labels', self.class_labels_widget)
+
+    def _create_class_labels(self):
+        # Start with default class labels
+        self.class_labels = [QtWidgets.QLineEdit() for _ in self.initial_labels]
+        self.class_icons = [QtWidgets.QLabel() for _ in self.initial_labels]
+        for i, label in enumerate(self.initial_labels):
+            self.class_labels[i].setText(label)
+            # Add the lines to the layout
+            self.class_labels_layout.addWidget(self.class_icons[i], i+1, 0, 1, 1)
+            self.class_labels_layout.addWidget(self.class_labels[i], i+1, 1, 1, 9)
+        # Update icons if possible
+        self._update_class_icons()
+    
+    def _on_add_class_label(self):
+        new_label = QtWidgets.QLineEdit()
+        self.class_labels.append(new_label)
+        self.class_labels_layout.addWidget(new_label, len(self.class_labels), 1, 1, 9)
+        new_label.setText('Class ' + str(len(self.class_labels)))
+        # Change clear button to the last label and connect it to deleting the entire entry (instead of only text)
+        # new_label.setClearButtonEnabled(True)
+        # new_label.textChanged.connect(self.remove_class_label)
+        # self.class_labels[-2].setClearButtonEnabled(False)
+        # Connect the new label to the update function
+        new_label.textChanged.connect(self._update_class_labels)
+        # Add a new icon
+        new_icon = QtWidgets.QLabel()
+        self.class_icons.append(new_icon)
+        self.class_labels_layout.addWidget(new_icon, len(self.class_labels), 0)
+        if self.annotation_layer_selection_widget.value is not None:
+            self._update_class_icons(len(self.class_labels))
+            self._update_class_labels()
+        # Move the add, remove and reset buttons one down
+        self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
+        self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
+        self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+    
+    def _on_remove_class_label(self, event=None):
+        last_label = len(self.class_labels)
+        if last_label > 2:
+            if self.annotation_layer_selection_widget.value is not None:
+                label_img = self.annotation_layer_selection_widget.value.data
+                self.annotation_layer_selection_widget.value.data[label_img == last_label] = 0
+                # Update the layer to show changes immediately
+                self.annotation_layer_selection_widget.value.refresh()
+            self.class_labels[-1].deleteLater()
+            self.class_icons[-1].deleteLater()
+            self.class_labels.pop()
+            self.class_icons.pop()
+            self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
+            self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
+            self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+            self._update_class_labels()
+        else:
+            show_info('You need at least two classes.')
+
+    def _update_class_icons(self, class_num=None, event=None):
+        if self.annotation_layer_selection_widget.value is None:
+            return
+        cmap = self.annotation_layer_selection_widget.value.colormap.copy()
+        if class_num is not None:
+            col = cmap.map(class_num)
+            pixmap = self.get_pixmap(col)
+            self.class_icons[class_num-1].setPixmap(pixmap)
+            self.class_icons[class_num-1].mousePressEvent = lambda event: self.set_annot_label_class(class_num, event)
+        else:
+            for i, _ in enumerate(self.class_labels):
+                cl = i+1
+                col = cmap.map(cl)
+                pixmap = self.get_pixmap(col)
+                self.class_icons[i].setPixmap(pixmap)
+                # Bind clicking on the icon to selecting the label
+                self.class_icons[i].mousePressEvent = lambda event, idx=i: self.set_annot_label_class(idx+1, event)
+
+    def _update_class_labels(self, event=None):
+        label_names = ["No label"] + [label.text() for label in self.class_labels]
+        props = {"Class": label_names}
+        if self.annotation_layer_selection_widget.value is not None:
+           self.annotation_layer_selection_widget.value.properties = props
+        if 'segmentation' in self.viewer.layers:
+           self.viewer.layers['segmentation'].properties = props
+
+    @staticmethod
+    def get_pixmap(color):
+        if color.ndim == 2:
+            color = color[0]
+        # If color is float, convert to uint8
+        if color.dtype != np.uint8:
+            color = (color * 255).astype(np.uint8)
+
+        qcol = QtGui.QColor(*color)
+        pixmap = QtGui.QPixmap(20, 20)  # Create a QPixmap of size 20x20
+        pixmap.fill(qcol)  # Fill the pixmap with the chosen color
+        # icon = QtGui.QIcon(pixmap)  # Convert pixmap to QIcon
+        return pixmap
+
 
 ### Visibility toggles for key bindings
 
@@ -494,6 +631,18 @@ class ConvPaintWidget(QWidget):
             self.cp_model.set_param('clf_depth', self.spin_depth.value()))
         self.set_default_clf_btn.clicked.connect(self._on_reset_clf_params)
 
+    # === CLASS LABELS TAB ===
+
+        for class_label in self.class_labels:
+            class_label.textChanged.connect(self._update_class_labels)
+        if self.annotation_layer_selection_widget.value is not None:
+            labels_layer = self.annotation_layer_selection_widget.value
+            labels_layer.events.colormap.connect(self._on_change_annot_cmap)
+        if 'segmentation' in self.viewer.layers:
+            seg_layer = self.viewer.layers['segmentation']
+            seg_layer.events.colormap.connect(self._on_change_seg_cmap)
+
+
 ### Define the detailed behaviour of the widget
 
     # Handling of Napari layers
@@ -536,6 +685,10 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
+        labels_layer = self.annotation_layer_selection_widget.value
+        labels_layer.events.colormap.connect(self._on_change_annot_cmap)
+        self._on_change_annot_cmap()
+        self._update_class_labels()
         if self.image_layer_selection_widget.value is not None:
             if not self._approve_annotation_layer_shape():
                 warnings.warn('Annotation layer has wrong shape for the selected data')
@@ -543,6 +696,28 @@ class ConvPaintWidget(QWidget):
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
         self._add_empty_layers(event, force_add)
+
+    def _on_change_annot_cmap(self, event=None):
+        """Update class icons and segmentation colormap when annotation colormap changes."""
+        if (self.cmap_flag or
+            (event is not None and event.source != self.annotation_layer_selection_widget.value)):
+            return
+        self.cmap_flag = True
+        if 'segmentation' in self.viewer.layers:
+            self.viewer.layers['segmentation'].colormap = self.annotation_layer_selection_widget.value.colormap.copy()
+            self._update_class_icons()
+        self.cmap_flag = False
+
+    def _on_change_seg_cmap(self, event=None):
+        """Update annotation colormap when segmentation colormap changes."""
+        if (self.cmap_flag or
+            (event is not None and event.source != self.viewer.layers['segmentation'])):
+            return
+        self.cmap_flag = True
+        if 'segmentation' in self.viewer.layers:
+            self.annotation_layer_selection_widget.value.colormap = self.viewer.layers['segmentation'].colormap.copy()
+            self._update_class_icons()
+        self.cmap_flag = False
 
     # Train
 
@@ -910,6 +1085,8 @@ class ConvPaintWidget(QWidget):
         self.check_keep_layers.setChecked(self.keep_layers) # Adjust the button in the widget
         # Reset the model description
         self._set_model_description()
+        # Reset labels names
+        self._create_class_labels_widget()
         # Turn on layer creation again
         self.add_layers_flag = True
 
@@ -1129,6 +1306,15 @@ class ConvPaintWidget(QWidget):
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
             self.viewer.layers['annotations'].brush_size = self.default_brush_size
+        
+        # Connect colormap events in new layers
+        labels_layer = self.annotation_layer_selection_widget.value
+        labels_layer.events.colormap.connect(self._on_change_annot_cmap)
+        seg_layer = self.viewer.layers['segmentation']
+        seg_layer.events.colormap.connect(self._on_change_seg_cmap)
+
+        # Update class labels
+        self._update_class_labels()
 
     def _create_annot_seg_copies(self):
         """Create copies of the annotations and segmentation layers."""
@@ -1454,6 +1640,8 @@ class ConvPaintWidget(QWidget):
 
     def _get_data_channel_first(self):
         """Get data from selected channel. If RGB, move channel axis to first position."""
+        if self.selected_channel is None:
+            return
         image_stack = self.viewer.layers[self.selected_channel].data
         if self._get_data_dims() in ['2D_RGB', '3D_RGB']:
             image_stack = np.moveaxis(image_stack, -1, 0)
