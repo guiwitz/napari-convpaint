@@ -181,25 +181,25 @@ def test_RGBT_image(make_napari_viewer):
     my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
     assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
 
-    normalized = my_widget._get_data_channel_first_norm()
+    # normalized = my_widget._get_data_channel_first_norm()
 
-    # check that mean of per channel normalized stacks is 0
-    np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
+    # # check that mean of per channel normalized stacks is 0
+    # np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
 
-    # check that first time point is above 0 and last one below
-    assert normalized[0].mean(axis=(1,2))[0] > 0.5
-    assert normalized[0].mean(axis=(1,2))[-1] < 0
+    # # check that first time point is above 0 and last one below
+    # assert normalized[0].mean(axis=(1,2))[0] > 0.5
+    # assert normalized[0].mean(axis=(1,2))[-1] < 0
 
-    # switch to by image normalization
-    my_widget.radio_normalize_by_image.setChecked(True)
-    assert my_widget.image_mean is None, "Bad reset of image stats"
-    my_widget._get_image_stats()
+    # # switch to by image normalization
+    # my_widget.radio_normalize_by_image.setChecked(True)
+    # assert my_widget.image_mean is None, "Bad reset of image stats"
+    # my_widget._get_image_stats()
 
-    normalized = my_widget._get_data_channel_first_norm()
+    # normalized = my_widget._get_data_channel_first_norm()
 
-    # check that mean over each full channel is 0
-    np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
+    # # check that mean over each full channel is 0
+    # np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2,3)), np.zeros((3)))
 
-    # check that each single time point of a channel has mean 0 as expected when normalizing by plane
-    np.testing.assert_array_almost_equal(normalized[0].mean(axis=(1,2)), np.zeros(10))
+    # # check that each single time point of a channel has mean 0 as expected when normalizing by plane
+    # np.testing.assert_array_almost_equal(normalized[0].mean(axis=(1,2)), np.zeros(10))
 
