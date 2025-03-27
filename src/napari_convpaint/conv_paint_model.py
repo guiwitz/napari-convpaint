@@ -164,6 +164,7 @@ class ConvpaintModel:
             print("Info: Ilastik is not installed and is not available as feature extractor.\n"
                 "Run 'pip install napari-convpaint[ilastik]' to install it.\n"
                 "Make sure to also have fastfilters installed ('conda install -c ilastik-forge fastfilters').")
+
     @staticmethod
     def get_all_fe_models():
         """

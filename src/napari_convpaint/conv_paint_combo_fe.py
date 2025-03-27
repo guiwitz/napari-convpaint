@@ -3,22 +3,23 @@ from .conv_paint_utils import get_device
 from .conv_paint_feature_extractor import FeatureExtractor
 from .conv_paint_dino import DinoFeatures
 from .conv_paint_nnlayers import Hookmodel
-from .conv_paint_ilastik import IlastikFeatures
+# from .conv_paint_ilastik import IlastikFeatures
 from .conv_paint_gaussian import GaussianFeatures
 from .conv_paint_cellpose import CellposeFeatures
 from math import gcd
 
-AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_ila', 'combo_dino_gauss', 'combo_dino_cellpose', 'combo_vgg_ila']
+# AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_ila', 'combo_dino_gauss', 'combo_dino_cellpose', 'combo_vgg_ila']
+AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_gauss', 'combo_dino_cellpose']
 
 COMBOS = {'combo_dino_vgg': {'constructors': [Hookmodel, DinoFeatures],
                              'model names': ['vgg16', 'dinov2_vits14_reg'],
                              'description': "Combining a default VGG16 with DINOv2."},
-          'combo_dino_ila': {'constructors': [IlastikFeatures, DinoFeatures],
-                             'model names': ['ilastik_2d', 'dinov2_vits14_reg'],
-                             'description': "Combining Ilastik with DINOv2."},
-          'combo_vgg_ila': {'constructors': [IlastikFeatures, Hookmodel],
-                            'model names': ['ilastik_2d', 'vgg16'],
-                            'description': "Combining Ilastik with a default VGG16."},
+        #   'combo_dino_ila': {'constructors': [IlastikFeatures, DinoFeatures],
+        #                      'model names': ['ilastik_2d', 'dinov2_vits14_reg'],
+        #                      'description': "Combining Ilastik with DINOv2."},
+        #   'combo_vgg_ila': {'constructors': [IlastikFeatures, Hookmodel],
+        #                     'model names': ['ilastik_2d', 'vgg16'],
+        #                     'description': "Combining Ilastik with a default VGG16."},
           'combo_dino_gauss': {'constructors': [GaussianFeatures, DinoFeatures],
                                'model names': ['gaussian', 'dinov2_vits14_reg'],
                                'description': "Combining a Gaussian filter with DINOv2."},
