@@ -12,7 +12,7 @@ from .conv_paint_feature_extractor import FeatureExtractor
 from .conv_paint_param import Param
 
 
-AVAILABLE_MODELS = ['vgg16', 'efficient_netb0']
+AVAILABLE_MODELS = ['vgg16', 'efficient_netb0', 'convnext']
 
 class Hookmodel(FeatureExtractor):
     """
@@ -28,7 +28,7 @@ class Hookmodel(FeatureExtractor):
         Use cuda, by default False
     layers : list of str or int, optional
         List of layer keys (if string) or indices (int) to extract features from, by default None
-        
+
     Attributes
     ----------
     model : torch model
@@ -48,6 +48,7 @@ class Hookmodel(FeatureExtractor):
         # SET DEVICE
         self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
+        self.model.eval()
 
         # INITIALIZATION OF LAYER HOOKS
         self.update_layer_dict()
@@ -64,18 +65,24 @@ class Hookmodel(FeatureExtractor):
         # CREATE VGG16 MODEL
         if model_name == 'vgg16':
             return models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-            # self.transform =  models.VGG16_Weights.IMAGENET1K_V1.transforms()
+            # self.transform = models.VGG16_Weights.IMAGENET1K_V1.transforms()
 
         # CREATE EFFICIENTNETB0 MODEL
         elif model_name == 'efficient_netb0':
             return models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
         
+        # CREATE ConvNeXt MODEL
+        elif model_name == 'convnext':
+            return models.convnext_base(weights=models.ConvNeXt_Base_Weights.IMAGENET1K_V1)
+
     def get_description(self):
         if self.model_name == 'vgg16':
             desc = "CNN model. First layers extract low-level features. Add pyramid scalings to include broader context."
             desc += "\nGood for: differentiating textures, colours, brightness etc."
         elif self.model_name == 'efficient_netb0':
             desc = "EfficientNet model trained on ImageNet data."
+        elif self.model_name == 'convnext':
+            desc = "ConvNeXt model trained on ImageNet data."
         return desc
 
     def get_default_params(self, param=None):
@@ -84,11 +91,15 @@ class Hookmodel(FeatureExtractor):
         
         # self.update_layer_dict() # Is done at initialization (and should not change later)
         
-        param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
         if self.model_name == 'vgg16':
             param.fe_scalings = [1,2,4]
+            param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
         elif self.model_name == 'efficient_netb0':
             param.fe_scalings = [1,2]
+            param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
+        elif self.model_name == 'convnext':
+            param.fe_scalings = [1,2,4]
+            param.fe_layers = self.selectable_layer_keys[:2]
 
         param.tile_annotations = True # Overwrite non-FE settings
 
