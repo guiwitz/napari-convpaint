@@ -1282,7 +1282,7 @@ class ConvPaintWidget(QWidget):
         if self.image_layer_selection_widget.value is None:
             warnings.warn('No image layer selected. No layers added.')
             return
-        
+
         layer_shape = self._get_annot_shape()
 
         # Add segmentation layer; do this first, so that the annotation layer is on top
