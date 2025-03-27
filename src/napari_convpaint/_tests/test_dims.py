@@ -165,10 +165,10 @@ def test_RGBT_image(make_napari_viewer):
     for i in range(10):
         multid_rgb_t[i] = (multid_rgb_t[i] * np.exp(-i/10)).astype(np.uint8)
 
-    # UNTIL HERE: 
+    # UNTIL HERE: all pass
 
-    # viewer = make_napari_viewer()
-    # my_widget = ConvPaintWidget(viewer)
+    viewer = make_napari_viewer()
+    my_widget = ConvPaintWidget(viewer)
     # viewer.add_image(multid_rgb_t)
     # my_widget._on_add_annot_seg_layers()
 
