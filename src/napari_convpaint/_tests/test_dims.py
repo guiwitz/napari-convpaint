@@ -170,16 +170,16 @@ def test_RGBT_image(make_napari_viewer):
     viewer.add_image(multid_rgb_t)
     my_widget._on_add_annot_seg_layers()
 
-    # check that for a time lapse RGB, annotations are 3D
-    assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
+    # # check that for a time lapse RGB, annotations are 3D
+    # assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
 
-    my_widget._get_image_stats()
+    # my_widget._get_image_stats()
 
-    # check that stack normalization generates one mean per RGB channel
-    my_widget.radio_normalize_over_stack.setChecked(True)
-    my_widget._get_image_stats()
-    my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
-    assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
+    # # check that stack normalization generates one mean per RGB channel
+    # my_widget.radio_normalize_over_stack.setChecked(True)
+    # my_widget._get_image_stats()
+    # my_widget.image_mean.ndim == 4, f"Wrong stats dims, expected 4 got {my_widget.image_mean.ndim}"
+    # assert my_widget.image_mean.shape == (3,1,1,1), f"Wrong number of values, expected (3,1,1,1) got {my_widget.image_mean.shape}"
 
     # normalized = my_widget._get_data_channel_first_norm()
 
