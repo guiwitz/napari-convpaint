@@ -9,7 +9,7 @@ from .conv_paint_cellpose import CellposeFeatures
 from math import gcd
 
 # AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_ila', 'combo_dino_gauss', 'combo_dino_cellpose', 'combo_vgg_ila']
-AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_gauss', 'combo_dino_cellpose']
+AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_gauss']
 
 COMBOS = {'combo_dino_vgg': {'constructors': [Hookmodel, DinoFeatures],
                              'model names': ['vgg16', 'dinov2_vits14_reg'],
@@ -23,9 +23,9 @@ COMBOS = {'combo_dino_vgg': {'constructors': [Hookmodel, DinoFeatures],
           'combo_dino_gauss': {'constructors': [GaussianFeatures, DinoFeatures],
                                'model names': ['gaussian', 'dinov2_vits14_reg'],
                                'description': "Combining a Gaussian filter with DINOv2."},
-          'combo_dino_cellpose': {'constructors': [CellposeFeatures, DinoFeatures],
-                                  'model names': ['cellpose', 'dinov2_vits14_reg'],
-                                  'description': "Combining Cellpose with DINOv2."}
+        #   'combo_dino_cellpose': {'constructors': [CellposeFeatures, DinoFeatures],
+        #                           'model names': ['cellpose', 'dinov2_vits14_reg'],
+        #                           'description': "Combining Cellpose with DINOv2."}
                        }
 
 class ComboFeatures(FeatureExtractor):
