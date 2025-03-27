@@ -157,9 +157,10 @@ def test_load_model(make_napari_viewer, capsys):
 def test_save_model_dino(make_napari_viewer, capsys):
     # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
-    im = np.array(Image.open('./_tests/test_imgs/0000_img.png'))
-    im_annot = np.array(Image.open('./_tests/test_imgs/0000_scribbles_all_01500_w3.png'))
-    ground_truth = np.array(Image.open('./_tests/test_imgs/0000_ground_truth.png'))
+    imgs_dir = os.path.join(os.path.dirname(__file__), '_tests', 'test_imgs')
+    im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
+    im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
+    ground_truth = np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png')))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
@@ -196,9 +197,10 @@ def test_save_model_dino(make_napari_viewer, capsys):
 def test_load_model_dino(make_napari_viewer, capsys):
     # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
-    im = np.array(Image.open('./_tests/test_imgs/0000_img.png'))
-    im_annot = np.array(Image.open('./_tests/test_imgs/0000_scribbles_all_01500_w3.png'))
-    ground_truth = np.array(Image.open('./_tests/test_imgs/0000_ground_truth.png'))
+    imgs_dir = os.path.join(os.path.dirname(__file__), '_tests', 'test_imgs')
+    im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
+    im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
+    ground_truth = np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png')))
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
