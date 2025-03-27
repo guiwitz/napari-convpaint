@@ -158,7 +158,7 @@ def test_4d_image(make_napari_viewer, capsys):
     # check that each single time point of a channel has mean 0 as expected when normalizing by plane
     np.testing.assert_array_almost_equal(normalized[0].mean(axis=(1,2)), np.zeros(10))
 
-def test_RGBT_image(make_napari_viewer):
+def test_RGBT_image(make_napari_viewer, capsys):
 
     # create time varying RGB time lapse
     multid_rgb_t = np.stack([i*np.random.randint(0, 255, (10,40,50)) for i in range(1,4)], axis=-1)#.astype(float)
