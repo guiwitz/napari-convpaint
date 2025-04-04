@@ -1,4 +1,4 @@
-from napari_convpaint import conv_paint, conv_paint_param, conv_paint_nnlayers
+from napari_convpaint import conv_paint_param, conv_paint_nnlayers, conv_paint_model
 from napari_convpaint.convpaint_sample import create_annotation_cell3d
 from torch.nn.modules.container import Sequential
 import numpy as np
@@ -20,6 +20,7 @@ def test_hook_model():
 def test_filter_image():
 
     param = conv_paint_param.Param()
+    param.fe_name = 'vgg16'
     param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
             'features.12 Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'
             ]
@@ -29,7 +30,7 @@ def test_filter_image():
     param.tile_annotations = True
     param.image_downsample = 1
 
-    model = conv_paint_nnlayers.Hookmodel(model_name='vgg16',param=param)
+    model = conv_paint_model.ConvpaintModel(param=param)
     layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
           'features.12 Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'
          ]
@@ -40,13 +41,13 @@ def test_filter_image():
     image = image[60:188, 0:128]
     labels = labels[60:188, 0:128]
 
-    features, targets = conv_paint.get_features_current_layers(model=model, image=image, annotations=labels, param=param)
+    features, targets = model.get_features_current_layers(image=image, annotations=labels)
     assert len(features.shape) == 2, f'Expecting dataframe with 2 dims but got {len(features.shape)}'
     assert features.shape[0] == 218, f'Expecting 218 annotated pixels but got {features.shape[0]}'
     assert features.shape[1] == 320, f'Expecting 320 features but got {features.shape[1]}'
 
     #disable annotation tiling should lead to the same results
-    features, targets = conv_paint.get_features_current_layers(model=model, image=image, annotations=labels, param=param)
+    features, targets = model.get_features_current_layers(image=image, annotations=labels)
     assert len(features.shape) == 2, f'Expecting dataframe with 2 dims but got {len(features.shape)}'
     assert features.shape[0] == 218, f'Expecting 218 annotated pixels but got {features.shape[0]}'
     assert features.shape[1] == 320, f'Expecting 320 features but got {features.shape[1]}'
