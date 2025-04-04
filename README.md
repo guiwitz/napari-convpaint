@@ -76,12 +76,14 @@ The idea behind this napari plugin was first developed by [Lucien Hinderling](ht
 
 If you find Convpaint useful in your research, please consider citing:
 ```
-@article {Hinderling2024.09.12.610926,
-	author = {Hinderling, Lucien and Witz, Guillaume and Schwob, Roman and Stojiljkovic, Ana and Dobrzynski, Maciej and Vladymyrov, Mykhailo and Frei, Joel and Graedel, Benjamin and Frismantiene, Agne and Pertz, Olivier},
-	title = {Convpaint - Universal framework for interactive pixel classification using pretrained neural networks},
+@article {Hinderling2024,
+	author = {Hinderling, Lucien and Witz, Guillaume and Schwob, Roman and Stojiljkovi{\'c}, Ana and Dobrzy{\'n}ski, Maciej and Vladymyrov, Mykhailo and Frei, Jo{\"e}l and Gr{\"a}del, Benjamin and Frismantiene, Agne and Pertz, Olivier},
+	title = {Convpaint - Interactive pixel classification using pretrained neural networks},
+	elocation-id = {2024.09.12.610926},
 	year = {2024},
 	doi = {10.1101/2024.09.12.610926},
-	URL = {https://www.biorxiv.org/content/early/2024/09/14/2024.09.12.610926},
+	publisher = {Cold Spring Harbor Laboratory},
 	journal = {bioRxiv}
 }
+
 ```
