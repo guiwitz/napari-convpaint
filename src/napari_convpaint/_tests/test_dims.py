@@ -161,7 +161,7 @@ def test_4d_image(make_napari_viewer, capsys):
 def test_RGBT_image(make_napari_viewer, capsys):
 
     # create time varying RGB time lapse
-    steps = 5
+    steps = 10
     multid_rgb_t = np.stack([i*np.random.randint(0, 255, (steps,40,50)) for i in range(1,4)], axis=-1)#.astype(float)
     for i in range(steps):
         multid_rgb_t[i] = (multid_rgb_t[i] * np.exp(-i/steps)).astype(np.uint8)
