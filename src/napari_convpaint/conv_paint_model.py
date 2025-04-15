@@ -466,7 +466,10 @@ class ConvpaintModel:
         image : np.ndarray
             Image to segment
         """
-        return self.predict(image, return_proba=False)
+        if self._param.tile_image:
+            return self._parallel_predict_image(image, return_proba=False, use_dask=False)
+        else:
+            return self._predict_image(image, return_proba=False)
 
     def predict_probas(self, image):
         """
@@ -484,13 +487,16 @@ class ConvpaintModel:
         np.ndarray
             Predicted probabilities of the classes of the pixels in the image
         """
-        return self.predict(image, return_proba=True)
-
-    def predict(self, image, return_proba=False):
         if self._param.tile_image:
-            return self._parallel_predict_image(image, return_proba=return_proba, use_dask=False)
+            return self._parallel_predict_image(image, return_proba=True, use_dask=False)
         else:
-            return self.predict2(image, return_proba=return_proba)
+            return self._predict_image(image, return_proba=True)
+
+    def predict(self, image):
+        probas = self.predict_probas(image)
+        seg = self._probas_to_classes(probas)
+        return probas, seg
+
 
     ### CLASSIFIER METHODS
 
@@ -572,7 +578,7 @@ class ConvpaintModel:
 
     ### OLD FE METHODS
 
-    def _predict_image(self, image, return_proba=False):
+    def _predict_image_old(self, image, return_proba=False):
         # Pad Image
         padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
         if image.ndim == 2:
@@ -665,8 +671,14 @@ class ConvpaintModel:
         nblocks_cols = image.shape[-1] // maxblock
         margin = 50
 
-        predicted_image_complete = np.zeros(image.shape[-2:], dtype=(np.uint8))
-        
+        if return_proba:
+            num_classes = self.classifier.classes_.shape[0]
+            z, h, w = image.shape[-3:]
+            predicted_image_complete = np.zeros((num_classes, z, h, w),
+                                                dtype=(np.float32))
+        else:
+            predicted_image_complete = np.zeros(image.shape[-3:], dtype=(np.uint8))
+
         if use_dask:
             from dask.distributed import Client
             import dask
@@ -716,7 +728,7 @@ class ConvpaintModel:
 
                 if use_dask:
                     processes.append(client.submit(
-                        self.predict2, image=image_block, return_proba=return_proba))
+                        self._predict_image, image=image_block, return_proba=return_proba))
                     
                     min_row_ind_collection.append(min_row_ind)
                     min_col_ind_collection.append(min_col_ind)
@@ -728,16 +740,15 @@ class ConvpaintModel:
                     new_min_row_ind_collection.append(new_min_row_ind)
 
                 else:
-                    predicted_image = self.predict2(image_block, return_proba=return_proba)
-                    crop_pred = predicted_image[
+                    predicted_image = self._predict_image(image_block, return_proba=return_proba)
+                    crop_pred = predicted_image[...,
                         new_min_row_ind: new_max_row_ind,
                         new_min_col_ind: new_max_col_ind]
-
-                    predicted_image_complete[min_row_ind:max_row_ind, min_col_ind:max_col_ind] = crop_pred.astype(np.uint8)
-                    if return_proba:
-                        predicted_image_complete[..., min_row_ind:max_row_ind, min_col_ind:max_col_ind, :] = crop_pred.astype(np.uint8)
-                    else:
-                        predicted_image_complete[..., min_row_ind:max_row_ind, min_col_ind:max_col_ind] = crop_pred.astype(np.uint8)
+                    if not return_proba:
+                        crop_pred = crop_pred.astype(np.uint8)
+                    predicted_image_complete[...,
+                        min_row_ind:max_row_ind,
+                        min_col_ind:max_col_ind] = crop_pred
 
         if use_dask:
             for k in range(len(processes)):
@@ -745,7 +756,7 @@ class ConvpaintModel:
                 out = future.result()
                 future.cancel()
                 del future
-                predicted_image_complete[
+                predicted_image_complete[...,
                     min_row_ind_collection[k]:max_row_ind_collection[k],
                     min_col_ind_collection[k]:max_col_ind_collection[k]] = out.astype(np.uint8)
             client.close()
@@ -897,7 +908,7 @@ class ConvpaintModel:
 
         # If we want to extend the features, we need to add the new to the existing features
         if extend_features:
-            features, targets = self.extend_features(features, targets)
+            features, targets = self._extend_features(features, targets)
 
         # Convert features to a DataFrame and targets to a Series
         features = pd.DataFrame(features)
@@ -915,7 +926,7 @@ class ConvpaintModel:
         self.targets = None
         self.num_trainings = 0
 
-    def extend_features(self, features, targets):
+    def _extend_features(self, features, targets):
         """
         Extend the features and targets of the model with new features and targets.
         """
@@ -935,7 +946,7 @@ class ConvpaintModel:
 
         return features, targets
 
-    def predict2(self, data, return_proba=False, patched=True):
+    def _predict_image(self, data, return_proba=False, patched=True):
 
         # Use get_feature_image to extract features
         features = self.get_feature_image(data, restore_input_form=False)
@@ -946,7 +957,7 @@ class ConvpaintModel:
                        for f in features]
         predictions = [np.moveaxis(pred, -1, 0) for pred in predictions]
         
-        # Get the parameters that were used for feature extraction
+        # Get the parameters that were used for feature extraction (for reshaping)
         params_for_extract = self._enforce_fe_params(self._param)
         padding = self._get_total_pad_size(params_for_extract)
 
@@ -962,18 +973,8 @@ class ConvpaintModel:
         
         # If we want classes, take the argmax of the probabilities
         if not return_proba:
-            class_labels = self.classifier.classes_
-            max_prob = [np.argmax(pred, axis=0) for pred in pred_reshaped]
-            pred_reshaped = [class_labels[prob] for prob in max_prob]
+            pred_reshaped = [self._probas_to_classes(p) for p in pred_reshaped]
 
-        # Finally, smoothen the segmentation if desired (only for class predictions)
-        if self._param.seg_smoothening > 1 and not return_proba:
-            kernel = skimage.morphology.disk(self._param.seg_smoothening)
-            kernel = np.expand_dims(kernel, axis=0)
-            pred_reshaped = [skimage.filters.rank.majority(pred_reshaped,
-                                    footprint=kernel)
-                            for pred_reshaped in pred_reshaped]
-            
         # Restore input dimensionality (especially see if we want to remove z dimension)
         data_list = [data] if not isinstance(data, list) else data
         pred_reshaped = [self._restore_dims(pred_reshaped[i], data_list[i].shape)
@@ -1309,6 +1310,22 @@ class ConvpaintModel:
                     order=1)
 
         return outputs_image
+
+    def _probas_to_classes(self, probas):
+        """
+        Convert probabilities to classes. Smoothen output if requested.
+        """
+        class_labels = self.classifier.classes_
+        max_prob = np.argmax(probas, axis=0)
+        seg = class_labels[max_prob]
+
+        # Smoothen the segmentation if desired
+        if self._param.seg_smoothening > 1:
+            kernel = skimage.morphology.disk(self._param.seg_smoothening)
+            kernel = np.expand_dims(kernel, axis=0)
+            seg = skimage.filters.rank.majority(seg, footprint=kernel)
+
+        return seg
 
     def _restore_dims(self, pred, original_shape):
         """
