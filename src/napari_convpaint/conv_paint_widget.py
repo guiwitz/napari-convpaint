@@ -754,8 +754,7 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            print("Training classifier...")
-            self.cp_model.train2(image_stack_norm, annots)
+            self.cp_model.train(image_stack_norm, annots)
     
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -912,6 +911,7 @@ class ConvPaintWidget(QWidget):
 
             # Predict image
             predicted_image = self.cp_model.segment(image)
+            print("pred:", predicted_image.shape)
             
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:

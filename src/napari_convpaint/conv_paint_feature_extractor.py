@@ -73,28 +73,14 @@ class FeatureExtractor:
         else:
             def_param = param.copy()
             
-        # FE params (encouraged to set)
+        # FE params
         def_param.fe_name= self.model_name
-        # param.fe_layers: list[str] = None
         def_param.fe_use_cuda = False
         def_param.fe_scalings = [1]
         def_param.fe_order = 0
         def_param.fe_use_min_features = False
 
-        # # General settings (NOTE: only set if shall be enforced by FE !)
-        # param.multi_channel_img: bool = None # use multichannel if image dimensions allow
-        # param.rgb_img: bool = None # use RGB image (note: should not be set, as the input defines this mode)
-        # param.normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
-        # param.image_downsample: int = None
-        # param.seg_smoothening: int = None
-        # param.tile_annotations: bool = None
-        # param.tile_image: bool = None
-        # # Classifier
-        # param.classifier: str = None
-        # # Classifier parameters
-        # param.clf_iterations: int = None
-        # param.clf_learning_rate: float = None
-        # param.clf_depth: int = None
+        # NOTE: Non-FE params should be set as default with caution
 
         return def_param
     
@@ -136,8 +122,9 @@ class FeatureExtractor:
 
     def gives_patched_features(self):
         return self.get_patch_size() > 1
-    
-        ### NEW METHODS
+
+
+### FEATURE EXTRACTION METHODS
 
     def get_feature_pyramid(self, data, param, patched=True):
 
@@ -241,7 +228,7 @@ class FeatureExtractor:
             # Given that we get single-channel images as input:
             features = self.extract_features_from_plane(image[:,z])
             all_features.append(features)
-        
+
         # Create a 4D array with the features first
         all_features = np.stack(all_features, axis=0)
         all_features = np.moveaxis(all_features, 1, 0)
@@ -264,47 +251,3 @@ class FeatureExtractor:
             The extracted features of the image. [nb_features, h, w]
         """
         raise NotImplementedError("Subclasses must implement get_features method.")
-    
-### OLD METHODS
-
-    def get_features_scaled(self, image, param, **kwargs):
-        """
-        Given a filter model and an image, extract features at different scales.
-
-        Parameters
-        ----------
-        image : 2d array
-            image to segment
-        param: Param
-            object containing the parameters for the feature extraction
-
-        Returns
-        -------
-        features : [nb_features x width x height]
-            return extracted features
-
-        """
-
-        if image.ndim == 2:
-            image = np.expand_dims(image, axis=0)
-
-        if param.image_downsample > 1:
-            # image = image[:, ::param.image_downsample, ::param.image_downsample]
-            image = scale_img(image, param.image_downsample)
-
-        features_all_scales = []
-        for s in param.fe_scalings:
-            # image_scaled = image[:, ::s, ::s]
-            image_scaled = scale_img(image, s)
-            features = self.get_features(image_scaled, order=param.fe_order, **kwargs) #features have shape [nb_features, width, height]
-            nb_features = features.shape[0]
-            features = skimage.transform.resize(
-                                image=features,
-                                output_shape=(nb_features, image.shape[-2], image.shape[-1]),
-                                preserve_range=True,
-                                order=param.fe_order)
-            
-            features_all_scales.append(features)
-        features_all_scales = np.concatenate(features_all_scales, axis=0)
-
-        return features_all_scales

@@ -13,16 +13,10 @@ class GaussianFeatures(FeatureExtractor):
     def get_description(self):
         return "Minimal model to easily and rapidly extract basic image features."
 
-    def get_features(self, image, **kwargs):
-        im_filter = skimage.filters.gaussian(image, sigma=self.sigma, channel_axis=0)
-        return im_filter
-
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
         param.fe_layers = []
         return param
-
-### NEW METHODS
 
     def extract_features_from_plane(self, image):
         

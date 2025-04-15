@@ -112,25 +112,10 @@ class ComboFeatures(FeatureExtractor):
         # So, the combo FE itself is not patched, even if it works with a patch_size to comply with the models
         return False
 
-### NEW METHODS
-
     def get_feature_pyramid(self, image, param, patched=False):
         def1 = self.model1.get_default_params(param)
         features1 = self.model1.get_feature_pyramid(image, def1, patched=False)
         def2 = self.model2.get_default_params(param)
         features2 = self.model2.get_feature_pyramid(image, def2, patched=False)
-        features = np.concatenate((features1, features2), axis=0)
-        # Since we get non-patched features, we set patch_size to 1 for later rescaling
-        return features
-
-### OLD METHODS
-    
-    def get_features_scaled(self, image, param):
-        '''Given an CxWxH image, extract features.
-        Returns features with dimensions nb_features x H x W'''
-        def1 = self.model2.get_default_params(param)
-        features1 = self.model2.get_features_scaled(image, def1)
-        def2 = self.model1.get_default_params(param)
-        features2 = self.model1.get_features_scaled(image, def2)
         features = np.concatenate((features1, features2), axis=0)
         return features

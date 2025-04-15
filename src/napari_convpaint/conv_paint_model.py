@@ -324,6 +324,9 @@ class ConvpaintModel:
         self._param = self.get_fe_defaults()
         self.set_params(no_warning=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
+
+### FE METHODS
+
     def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
         """
         Sets the model based on the given FE parameters.
@@ -411,26 +414,11 @@ class ConvpaintModel:
         Returns the keys of the feature extractor layers.
         """
         return self.fe_model.get_layer_keys()
-
-    def get_features_img(self, image):
-        """
-        Extracts features from an image using the Convpaint model's Parameters and feature extractor model.
-        Returns the extracted features with the spatial dimensions identical to the input image.
-
-        Parameters
-        ----------
-        image : np.ndarray
-            Image to extract features from
-        
-        Returns
-        -------
-        f_img : np.ndarray
-            Extracted features [nb_features, height, width]
-        """
-        features = self.fe_model.get_features_scaled(image=image, param=self._param)
-        return features
     
-    def train(self, image, annotations, use_rf=False, allow_writing_files=False):
+
+### USER METHODS FOR TRAINING, PREDICTION AND FEATURE EXTRACTION
+    
+    def train(self, image, annotations, extend_features=False, use_rf=False, allow_writing_files=False):
         """
         Trains the Convpaint model's classifier given an image and annotations.
         Uses the Parameter and the FeatureExtractor model to extract features.
@@ -449,11 +437,8 @@ class ConvpaintModel:
         CatBoostClassifier or RandomForestClassifier
             Trained classifier
         """
-        features, targets = self.get_features_current_layers(image, annotations)
-        self._train_classifier(features, targets, use_rf=use_rf, allow_writing_files=allow_writing_files)
-        if self.classifier is None:
-            raise ValueError('Training failed. No classifier was trained.')
-        return self.classifier
+        return self._train(image, annotations, extend_features=extend_features, use_rf=use_rf,
+                          allow_writing_files=allow_writing_files)
 
     def segment(self, image):
         """
@@ -496,9 +481,92 @@ class ConvpaintModel:
         probas = self.predict_probas(image)
         seg = self._probas_to_classes(probas)
         return probas, seg
+    
+    def get_feature_image(self, data, annotations=None, restore_input_form=True):
+        
+        # Check if we process annotations and if we have only a single image input
+        use_annots = annotations is not None
+        single_input = not isinstance(data, list)
+
+        # Run checks on the model to ensure that it is ready to be used
+        self._run_model_checks()
+
+        # Make sure data is a list of images with [C, Z, H, W] shape
+        data, annotations = self._prep_dims(data, annotations)
+        # Save the original data shapes for reshaping/rescaling later
+        self.original_shapes = [d.shape for d in data]
+
+        # Get the parameters for feature extraction
+        params_for_extract = self._enforce_fe_params(self._param)
+
+        # Downsample the images and annotations (if given)
+        data = [conv_paint_utils.scale_img(d, params_for_extract.image_downsample)
+                for d in data]
+        if use_annots:
+            annotations = [conv_paint_utils.scale_img(a,
+                                                      params_for_extract.image_downsample,
+                                                      use_labels=True)
+                           for a in annotations]
+        
+        # Get the correct padding size for the feature extraction    
+        padding = self._get_total_pad_size(params_for_extract)
+
+        # Pad the images and annotations with the correct padding size
+        data = [self._pad(d, padding) for d in data]
+        # Save the padded shapes for reshaping/rescaling later
+        self.padded_shapes = [d.shape for d in data]
+        if use_annots:
+            annotations = [self._pad(a, padding, use_labels=True) for a in annotations]
+
+        # Extract annotated planes and flatten them (treating as individual images)
+        if use_annots:
+            planes = [self._get_annot_planes(d, a) for d, a in zip(data, annotations)]
+            data = [plane for plane_tuple in planes for plane in plane_tuple[0]]
+            annotations = [plane for plane_tuple in planes for plane in plane_tuple[1]]
+
+        # Get annotated tiles (if enabled) and flatten them (treating as individual images)
+        if use_annots and params_for_extract.tile_annotations:
+            tiles = [self._tile_annot(d, a, padding)
+                     for d, a in zip(data, annotations)]
+            data = [tile for tile_tuple in tiles for tile in tile_tuple[0]]
+            annotations = [tile for tile_tuple in tiles for tile in tile_tuple[1]]
+
+        # Extract features from the images for each scaling in the pyramid
+        # For training, we want to "unpatch" the features to match the annotations
+        keep_patched = not use_annots
+        features = [self.fe_model.get_feature_pyramid(d, params_for_extract, patched=keep_patched)
+                    for d in data]
+        
+        # Return the raw features if required
+        if not restore_input_form:
+            if use_annots:
+                return features, annotations
+            else:
+                return features
+        
+        # Reshape the features to the original image shape
+        padded_shapes = self.padded_shapes
+        original_shapes = self.original_shapes
+        features = [self._restore_shape(features[i],
+                                       padded_shapes[i],
+                                       padding,
+                                       original_shapes[i],
+                                       class_preds=False)
+                    for i in range(len(features))]
+            
+        # Restore input dimensionality (especially see if we want to remove z dimension)
+        data_list = [data] if not isinstance(data, list) else data
+        features = [self._restore_dims(features[i], data_list[i].shape)
+                            for i in range(len(data_list))]
+
+        # If input was a single image, return the first (= only) features
+        if single_input:
+            return features[0]
+
+        return features
 
 
-    ### CLASSIFIER METHODS
+### CLASSIFIER METHODS
 
     def _train_classifier(self, features, targets, use_rf=False, allow_writing_files=False):
         """
@@ -576,61 +644,101 @@ class ConvpaintModel:
         self._param.classifier = None
 
 
-    ### OLD FE METHODS
+### BACKEND TRAINING AND PREDICTION METHODS
 
-    def _predict_image_old(self, image, return_proba=False):
-        # Pad Image
-        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
-        if image.ndim == 2:
-            image = np.pad(image, padding, mode='reflect')
-        elif image.ndim == 3:
-            image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='reflect')
-        elif image.ndim == 4:
-            image = np.pad(image, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='reflect')
+    def _train(self, data, annotations, extend_features=False, use_rf=False, allow_writing_files=False):
+
+        # Use get_feature_image to extract features and the suiting annotation parts
+        features, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False)
+
+        # Get the annotated pixels and targets, and concatenate each
+        f_t_tuples = [self._get_features_targets(f, a)
+                      for f, a in zip(features, annot_parts)]
+        features = [ft[0] for ft in f_t_tuples] # Create a list of features
+        targets = [ft[1] for ft in f_t_tuples] # Create a list of targets
+        features = np.concatenate(features, axis=0) # Concatenate the features into a single array
+        targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
+
+        # If we want to extend the features, we need to add the new to the existing features
+        if extend_features:
+            features, targets = self._extend_features(features, targets)
+
+        # Convert features to a DataFrame and targets to a Series
+        features = pd.DataFrame(features)
+        targets = pd.Series(targets)
+
+        # Train the classifier
+        self._train_classifier(features, targets,
+                               use_rf=use_rf, allow_writing_files=allow_writing_files)
+        
+        return self.classifier
+        
+    def reset_features(self):
+        """
+        Resets the features and targets of the model.
+        """
+        self.features = None
+        self.targets = None
+        self.num_trainings = 0
+
+    def _extend_features(self, features, targets):
+        """
+        Extend the features and targets of the model with new features and targets.
+        """
+        if self.features is None:
+            self.features = features
         else:
-            raise ValueError('Image must be 2D, 3D, or 4D.')
-
-        # Extract features
-        features = self.fe_model.get_features_scaled(image=image,param=self._param)
-        nb_features = features.shape[0] #[nb_features, width, height]
-
-        # Move features to last dimension and flatten
-        features = np.moveaxis(features, 0, -1)
-        features = np.reshape(features, (-1, nb_features)) # flatten
-        features_df = pd.DataFrame(features)
-
-        rows = np.floor(image.shape[-2] / self._param.image_downsample).astype(int)
-        cols = np.floor(image.shape[-1] / self._param.image_downsample).astype(int)
-
-        # Predict
-        # First reshape prediction to downsampled shape
-        if return_proba:
-            predictions = self.classifier.predict_proba(features_df)
-            predicted_image = np.reshape(predictions, [rows, cols, -1])
+            self.features = np.concatenate([self.features, features], axis=0)
+        if self.targets is None:
+            self.targets = targets
         else:
-            predictions = self.classifier.predict(features_df)
-            predicted_image = np.reshape(predictions, [rows, cols])
+            self.targets = np.concatenate([self.targets, targets], axis=0)
+        features = self.features
+        targets = self.targets
+        self.num_trainings += 1
 
-        # Then resize to original shape
-        if self._param.image_downsample > 1:
-            predicted_image = skimage.transform.resize(
-                image=predicted_image,
-                output_shape=(image.shape[-2], image.shape[-1]),
-                preserve_range=True, order=0)
-                # OLD: order=self._param.fe_order
+        return features, targets
 
-        # Remove padding and return
-        if return_proba:
-            predicted_image = predicted_image[..., padding:-padding, padding:-padding, :]
-            return predicted_image
-        else:
-            predicted_image = predicted_image[..., padding:-padding, padding:-padding]
-            predicted_image = predicted_image.astype(np.uint8)
-            if self._param.seg_smoothening > 1:
-                predicted_image = skimage.filters.rank.majority(predicted_image,
-                                    footprint=skimage.morphology.disk(self._param.seg_smoothening))
-            return predicted_image
-    
+    def _predict_image(self, data, return_proba=False, patched=True):
+
+        # Use get_feature_image to extract features
+        features = self.get_feature_image(data, restore_input_form=False)
+
+        # Predict pixels based on the features and classifier
+        # NOTE: We always first predict probabilities and then take the argmax
+        predictions = [self._clf_predict(f, return_proba=True)
+                       for f in features]
+        predictions = [np.moveaxis(pred, -1, 0) for pred in predictions]
+        
+        # Get the parameters that were used for feature extraction (for reshaping)
+        params_for_extract = self._enforce_fe_params(self._param)
+        padding = self._get_total_pad_size(params_for_extract)
+
+        # Reshape the predictions to the original image shape
+        padded_shapes = self.padded_shapes # Saved when extracting features
+        original_shapes = self.original_shapes # Saved when extracting features
+        pred_reshaped = [self._restore_shape(predictions[i],
+                                            padded_shapes[i],
+                                            padding,
+                                            original_shapes[i],
+                                            class_preds=False)
+                         for i in range(len(predictions))]
+        
+        # If we want classes, take the argmax of the probabilities
+        if not return_proba:
+            pred_reshaped = [self._probas_to_classes(p) for p in pred_reshaped]
+
+        # Restore input dimensionality (especially see if we want to remove z dimension)
+        data_list = [data] if not isinstance(data, list) else data
+        pred_reshaped = [self._restore_dims(pred_reshaped[i], data_list[i].shape)
+                            for i in range(len(data_list))]
+
+        # If input was a single image, return the first prediction
+        if not isinstance(data, list):
+            return pred_reshaped[0]
+
+        return pred_reshaped
+
     def _parallel_predict_image(self, image, return_proba=False, use_dask=False):
         """
         Given a filter model and a classifier, predict the class of 
@@ -670,6 +778,8 @@ class ConvpaintModel:
         nblocks_rows = image.shape[-2] // maxblock
         nblocks_cols = image.shape[-1] // maxblock
         margin = 50
+
+        image = self._prep_dims_single(image)[0]
 
         if return_proba:
             num_classes = self.classifier.classes_.shape[0]
@@ -763,311 +873,8 @@ class ConvpaintModel:
         
         return predicted_image_complete
 
-    def get_features_current_layers(self, image, annotations):        # ORIGINALLY FROM CONV_PAINT SCRIPT
-        """Given a potentially multidimensional image and a set of annotations,
-        extract multiscale features from multiple layers of a model.
-        
-        Parameters
-        ----------
-        image : np.ndarray
-            2D or 3D Image to extract features from. If 3D but annotations are 2D,
-            image is treated as multichannel and not image series
-        annotations : np.ndarray
-            2D, 3D Annotations (1,2) to extract features from
 
-        Given inside the ConvPaint class:
-            self.fe_model : feature extraction model
-                Model to extract features from the image
-            self._param.scalings : list of ints
-                Downsampling factors
-            self._param.order : int, optional
-                Interpolation order for low scale resizing, by default 0
-            self._param.use_min_features : bool, optional
-                Use minimal number of features, by default True
-            self._param.image_downsample : int, optional
-                Downsample image by this factor before extracting features, by default 1
-
-        Returns
-        -------
-        features : pandas DataFrame
-            Extracted features (rows are pixel, columns are features)
-        targets : pandas Series
-            Target values
-        """
-
-        if self.fe_model is None:
-            raise ValueError('Model must be provided. Define and set (or load) a model first.')
-
-        # get indices of first dimension of non-empty annotations. Gives t/z indices
-        if annotations.ndim == 3:
-            non_empty = np.unique(np.where(annotations > 0)[0])
-            if len(non_empty) == 0:
-                warnings.warn('No annotations found')
-                return None, None
-        elif annotations.ndim == 2:
-            non_empty = [0]
-        else:
-            raise Exception('Annotations must be 2D or 3D')
-
-        all_values = []
-        all_targets = []
-
-        # find maximal padding necessary
-        padding = self.fe_model.get_padding() * np.max(self._param.fe_scalings) * self._param.image_downsample
-
-        # iterating over non_empty iteraties of t/z for 3D data
-        for ind, t in enumerate(non_empty):
-
-            # PADDING
-            if annotations.ndim == 2:
-                if image.ndim == 3:
-                    current_image = np.pad(image, ((0,0), (padding,padding), (padding,padding)), mode='reflect')
-                else:
-                    current_image = np.pad(image, padding, mode='reflect')
-                current_annot = np.pad(annotations, padding, mode='constant')
-            else:
-                if image.ndim == 3:
-                    current_image = np.pad(image[t], padding, mode='reflect')
-                    current_annot = np.pad(annotations[t], padding, mode='constant')
-                elif image.ndim == 4:
-                    current_image = np.pad(image[:, t], ((0,0),(padding, padding),(padding, padding)), mode='reflect')
-                    current_annot = np.pad(annotations[t], padding, mode='constant')
-
-            # TILE ANNOTATIONS (applying the padding to each annotations part)
-            annot_regions = skimage.morphology.label(current_annot > 0)
-            if self._param.tile_annotations:
-                boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
-            else:
-                boxes = {'label': [1], 'bbox-0': [padding], 'bbox-1': [padding], 'bbox-2': [current_annot.shape[0]-padding], 'bbox-3': [current_annot.shape[1]-padding]}
-            for i in range(len(boxes['label'])):
-                # NOTE: This assumes that the image is already padded correctly, and the padded boxes cannot go out of bounds
-                # pad_size = self.fe_model.get_padding() # NOTE ROMAN: This is wrong; the padding should be scaled by the scaling factor and the check below should not be necessary !!!
-                pad_size = padding
-                x_min = boxes['bbox-0'][i]-pad_size
-                x_max = boxes['bbox-2'][i]+pad_size
-                y_min = boxes['bbox-1'][i]-pad_size
-                y_max = boxes['bbox-3'][i]+pad_size
-
-                # temporary check that bounds are not out of image
-                x_min = max(0, x_min)
-                x_max = min(current_image.shape[-2], x_max)
-                y_min = max(0, y_min)
-                y_max = min(current_image.shape[-1], y_max)
-
-                img_tile = current_image[...,
-                    x_min:x_max,
-                    y_min:y_max
-                ]
-                annot_tile = current_annot[
-                    x_min:x_max,
-                    y_min:y_max
-                ]
-                extracted_features = self.fe_model.get_features_scaled(image=img_tile, param=self._param)
-
-                if self._param.image_downsample > 1: # Downsample the ANNOTATION (img is done inside get_features_scaled)
-                    annot_tile = conv_paint_utils.scale_img(annot_tile, self._param.image_downsample, use_labels=True)
-                    # annot_tile = annot_tile[::self._param.image_downsample, :: self._param.image_downsample]
-
-                # EXTRACT TARGETED FEATURES
-                #from the [features, w, h] make a list of [features] with len nb_annotations
-                mask = annot_tile > 0
-                nb_features = extracted_features.shape[0]
-
-                extracted_features = np.moveaxis(extracted_features, 0, -1) #move [w,h,features]
-
-                extracted_features = extracted_features[mask]
-                all_values.append(extracted_features)
-
-                targets = annot_tile[annot_tile > 0]
-                targets = targets.flatten()
-                all_targets.append(targets)
-
-        # CONCATENATE FROM DIFFERENT TILES
-        all_values = np.concatenate(all_values, axis=0)
-        features = pd.DataFrame(all_values) # [pixels, features]
-
-        all_targets = np.concatenate(all_targets, axis=0)
-        targets = pd.Series(all_targets)
-
-        return features, targets
-
-### NEW METHODS
-
-    def train2(self, data, annotations, extend_features=False, use_rf=False, allow_writing_files=False):
-
-        # Use get_feature_image to extract features and the suiting annotation parts
-        features, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False)
-
-        # Get the annotated pixels and targets, and concatenate each
-        f_t_tuples = [self._get_features_targets(f, a)
-                      for f, a in zip(features, annot_parts)]
-        features = [ft[0] for ft in f_t_tuples] # Create a list of features
-        targets = [ft[1] for ft in f_t_tuples] # Create a list of targets
-        features = np.concatenate(features, axis=0) # Concatenate the features into a single array
-        targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
-
-        # If we want to extend the features, we need to add the new to the existing features
-        if extend_features:
-            features, targets = self._extend_features(features, targets)
-
-        # Convert features to a DataFrame and targets to a Series
-        features = pd.DataFrame(features)
-        targets = pd.Series(targets)
-
-        # Train the classifier
-        self._train_classifier(features, targets,
-                               use_rf=use_rf, allow_writing_files=allow_writing_files)
-        
-    def reset_features(self):
-        """
-        Resets the features and targets of the model.
-        """
-        self.features = None
-        self.targets = None
-        self.num_trainings = 0
-
-    def _extend_features(self, features, targets):
-        """
-        Extend the features and targets of the model with new features and targets.
-        """
-        if self.features is None:
-            self.features = features
-        else:
-            self.features = np.concatenate([self.features, features], axis=0)
-        if self.targets is None:
-            self.targets = targets
-        else:
-            self.targets = np.concatenate([self.targets, targets], axis=0)
-        print(features.shape, targets.shape)
-        features = self.features
-        targets = self.targets
-        print(features.shape, targets.shape)
-        self.num_trainings += 1
-
-        return features, targets
-
-    def _predict_image(self, data, return_proba=False, patched=True):
-
-        # Use get_feature_image to extract features
-        features = self.get_feature_image(data, restore_input_form=False)
-
-        # Predict pixels based on the features and classifier
-        # NOTE: We always first predict probabilities and then take the argmax
-        predictions = [self._clf_predict(f, return_proba=True)
-                       for f in features]
-        predictions = [np.moveaxis(pred, -1, 0) for pred in predictions]
-        
-        # Get the parameters that were used for feature extraction (for reshaping)
-        params_for_extract = self._enforce_fe_params(self._param)
-        padding = self._get_total_pad_size(params_for_extract)
-
-        # Reshape the predictions to the original image shape
-        padded_shapes = self.padded_shapes # Saved when extracting features
-        original_shapes = self.original_shapes # Saved when extracting features
-        pred_reshaped = [self._restore_shape(predictions[i],
-                                            padded_shapes[i],
-                                            padding,
-                                            original_shapes[i],
-                                            class_preds=False)
-                         for i in range(len(predictions))]
-        
-        # If we want classes, take the argmax of the probabilities
-        if not return_proba:
-            pred_reshaped = [self._probas_to_classes(p) for p in pred_reshaped]
-
-        # Restore input dimensionality (especially see if we want to remove z dimension)
-        data_list = [data] if not isinstance(data, list) else data
-        pred_reshaped = [self._restore_dims(pred_reshaped[i], data_list[i].shape)
-                            for i in range(len(data_list))]
-
-        # If input was a single image, return the first prediction
-        if not isinstance(data, list):
-            return pred_reshaped[0]
-
-        return pred_reshaped
-    
-    def get_feature_image(self, data, annotations=None, restore_input_form=True):
-        
-        # Check if we process annotations and if we have only a single image input
-        use_annots = annotations is not None
-        single_input = not isinstance(data, list)
-
-        # Run checks on the model to ensure that it is ready to be used
-        self._run_model_checks()
-
-        # Make sure data is a list of images with [C, Z, H, W] shape
-        data, annotations = self._prep_dims(data, annotations)
-        # Save the original data shapes for reshaping/rescaling later
-        self.original_shapes = [d.shape for d in data]
-
-        # Get the parameters for feature extraction
-        params_for_extract = self._enforce_fe_params(self._param)
-
-        # Downsample the images and annotations (if given)
-        data = [conv_paint_utils.scale_img(d, params_for_extract.image_downsample)
-                for d in data]
-        if use_annots:
-            annotations = [conv_paint_utils.scale_img(a,
-                                                      params_for_extract.image_downsample,
-                                                      use_labels=True)
-                           for a in annotations]
-        
-        # Get the correct padding size for the feature extraction    
-        padding = self._get_total_pad_size(params_for_extract)
-
-        # Pad the images and annotations with the correct padding size
-        data = [self._pad(d, padding) for d in data]
-        # Save the padded shapes for reshaping/rescaling later
-        self.padded_shapes = [d.shape for d in data]
-        if use_annots:
-            annotations = [self._pad(a, padding, use_labels=True) for a in annotations]
-
-        # Extract annotated planes and flatten them (treating as individual images)
-        if use_annots:
-            planes = [self._get_annot_planes(d, a) for d, a in zip(data, annotations)]
-            data = [plane for plane_tuple in planes for plane in plane_tuple[0]]
-            annotations = [plane for plane_tuple in planes for plane in plane_tuple[1]]
-
-        # Get annotated tiles (if enabled) and flatten them (treating as individual images)
-        if use_annots and params_for_extract.tile_annotations:
-            tiles = [self._tile_annot(d, a, padding)
-                     for d, a in zip(data, annotations)]
-            data = [tile for tile_tuple in tiles for tile in tile_tuple[0]]
-            annotations = [tile for tile_tuple in tiles for tile in tile_tuple[1]]
-
-        # Extract features from the images for each scaling in the pyramid
-        # For training, we want to "unpatch" the features to match the annotations
-        keep_patched = not use_annots
-        features = [self.fe_model.get_feature_pyramid(d, params_for_extract, patched=keep_patched)
-                    for d in data]
-        
-        # Return the raw features if required
-        if not restore_input_form:
-            if use_annots:
-                return features, annotations
-            else:
-                return features
-        
-        # Reshape the features to the original image shape
-        padded_shapes = self.padded_shapes
-        original_shapes = self.original_shapes
-        features = [self._restore_shape(features[i],
-                                       padded_shapes[i],
-                                       padding,
-                                       original_shapes[i],
-                                       class_preds=False)
-                    for i in range(len(features))]
-            
-        # Restore input dimensionality (especially see if we want to remove z dimension)
-        data_list = [data] if not isinstance(data, list) else data
-        features = [self._restore_dims(features[i], data_list[i].shape)
-                            for i in range(len(data_list))]
-
-        # If input was a single image, return the first (= only) features
-        if single_input:
-            return features[0]
-
-        return features
+### HELPER METHODS
 
     def _run_model_checks(self):
         """
@@ -1123,6 +930,7 @@ class ConvpaintModel:
         where the data is a list of images with [C, Z, H, W] shape,
         and the annotations are a list of images with [Z, H, W] shape.
         Assumes that a possible channels dimension is the first one.
+        Returns: img, annotations (= None if not given)
         """
         num_dims = img.ndim
         if num_dims == 2:
@@ -1185,7 +993,8 @@ class ConvpaintModel:
         # Calculate the final padding size
         return (fe_pad + fe_patch//2) * max_scale
 
-    def _pad(self, img, padding, use_labels=False):
+    @staticmethod
+    def _pad(img, padding, use_labels=False):
         """
         Pads the image with the padding size necessary for the feature extraction,
         given the feature extractor model and the parameters.
@@ -1197,8 +1006,9 @@ class ConvpaintModel:
             return np.pad(img, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
         else:
             return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='reflect')
-        
-    def _get_annot_planes(self, img, annot=None):
+    
+    @staticmethod
+    def _get_annot_planes(img, annot=None):
         """
         Extract the planes (of the z dimension) of the padded data and annotations
         where there is at least one annotation.
@@ -1219,7 +1029,8 @@ class ConvpaintModel:
 
         return img_planes, annot_planes
 
-    def _tile_annot(self, img, annot, padding):
+    @staticmethod
+    def _tile_annot(img, annot, padding):
         """
         Tile the image and annotations based on the annotations.
         Tile them into patches of the size of the annotations.
@@ -1248,26 +1059,26 @@ class ConvpaintModel:
             annot_tiles.append(annot_tile)
 
         return img_tiles, annot_tiles
-    
-    def _get_features_targets(self, features, targets):
+
+    @staticmethod
+    def _get_features_targets(features, annot):
         """
         Given a set of features and targets, extract the annotated pixels and targets,
         and concatenate each.
         """
         # Get the annotated pixels and targets
-        mask = targets > 0
+        mask = annot > 0
         features = np.moveaxis(features, 0, -1) #move [z, h, w, features]
         # Select only the pixels that are annotated
         features = features[mask]
-        targets = targets[mask]
+        annot = annot[mask] # Get the targets
 
-        return features, targets
+        return features, annot
     
     def _restore_shape(self, outputs, processed_shape, padding, original_shape, class_preds=False):
         """
         Reshape the outputs (prediction, probabilities, features) to the original image shape.
         """
-
         # Prepare the variables
         prep_z, prep_h, prep_w = processed_shape[-3:]
         if self.fe_model.gives_patched_features():

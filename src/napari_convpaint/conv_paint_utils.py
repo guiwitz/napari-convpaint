@@ -1,6 +1,4 @@
-from collections import OrderedDict
 import warnings
-
 import torch
 import numpy as np
 from scipy.stats import mode
@@ -10,12 +8,10 @@ import skimage.morphology as morph
 from joblib import Parallel, delayed
 import einops as ein
 #import xgboost as xgb
-
-
-from torch import nn
-from sklearn.model_selection import train_test_split
-
 from torch.nn.functional import interpolate as torch_interpolate
+
+
+### SCALING AND RESCALING
 
 def scale_img(image, scaling_factor, upscale=False, use_labels=False):
     """
@@ -142,130 +138,8 @@ def reduce_to_patch_multiple(input, patch_size):
     input = input[..., h_crop_top:h_idx_bottom, w_crop_left:w_idx_right]
     return input
 
-def pad_for_kernel(data_stack, effective_kernel_padding):
-    """
-    Pad a data stack (4D image or 3D annotation) to the kernel size.
-    Adds half the kernel size to each side of the data stack.
-    Takes into account the scale factor (for later pyramid scaling) for padding.
-    If kernel[0] is not None, also pad along the Z axis.
 
-    Parameters
-    ----------
-    data_stack : np.ndarray
-        Input data stack to be padded. Shape:
-        - [C, Z, H, W] for images (e.g., with multiple channels)
-        - [Z, H, W] for annotations
-    effective_kernel_padding : tuple of int
-        Effective padding for the kernel size, to be added to each side of the data stack.
-        Takes into account the scale factor for later pyramid scaling.
-
-    Returns
-    -------
-    padded_data : np.ndarray
-        Padded data stack with the same shape as the input plus padding.
-    """
-    if not isinstance(effective_kernel_padding, tuple) or len(effective_kernel_padding) != 3:
-        raise ValueError("kernel_size must be a tuple of three integers (Z, H, W), " +
-                         "whereas Z can be None.")
-    
-    # Get padding for each dimension
-    z_pad, h_pad, w_pad = effective_kernel_padding
-
-    # Create padding tuples
-    if data_stack.ndim == 4:  # [C, Z, H, W] for images
-        padding = ((0, 0), (z_pad, z_pad), (h_pad, h_pad), (w_pad, w_pad))
-        mode = 'reflect'
-    elif data_stack.ndim == 3:  # [Z, H, W] for annotations
-        padding = ((z_pad, z_pad), (h_pad, h_pad), (w_pad, w_pad))
-        mode = 'constant'
-    else:
-        raise ValueError("Invalid data_stack dimensions. Expected 3D or 4D array.")
-
-    # Apply padding
-    padded_data = np.pad(data_stack, padding, mode=mode)
-
-    return padded_data
-
-def pad_to_patch(data_stack, effective_patch_size):
-    """
-    Pad an image and annotation stack to the next multiple of patch size.
-    Takes into account the scale factor (for later pyramid scaling) for padding.
-    If kernel[0] is not None, also pad along the Z axis.
-
-    Parameters
-    ----------
-    data_stack : np.ndarray
-        Input data stack to be padded. Shape:
-        - [C, Z, H, W] for images (e.g., with multiple channels)
-        - [Z, H, W] for annotations
-    effective_patch_size : tuple of int
-        Patch size, to a multiple of which shall be padded
-        Takes into account the scale factor for later pyramid scaling.
-
-    Returns
-    -------
-    padded_data : np.ndarray
-        Padded data stack with the same shape as the input plus padding.
-    """
-    # Compute padding
-    z_pad, h_pad, w_pad = compute_patch_padding(data_stack.shape, effective_patch_size)
-
-    # Split padding evenly (add extra padding to the end if padding is odd)
-    z_pad_front, z_pad_back = z_pad // 2, z_pad - z_pad // 2
-    h_pad_front, h_pad_back = h_pad // 2, h_pad - h_pad // 2
-    w_pad_front, w_pad_back = w_pad // 2, w_pad - w_pad // 2
-
-    # Create padding tuples
-    if data_stack.ndim == 4:  # [C, Z, H, W] for images
-        padding = ((0, 0), (z_pad_front, z_pad_back), (h_pad_front, h_pad_back), (w_pad_front, w_pad_back))
-        mode = 'reflect'
-    elif data_stack.ndim == 3:  # [Z, H, W] for annotations
-        padding = ((z_pad_front, z_pad_back), (h_pad_front, h_pad_back), (w_pad_front, w_pad_back))
-        mode = 'constant'
-
-    # Apply padding
-    padded_data = np.pad(data_stack, padding, mode=mode)
-
-    return padded_data
-
-def compute_patch_padding(data_stack_shape, effective_patch_size):
-    """
-    Compute the padding required to make the data stack a multiple of the patch size.
-    Takes into account the scale factor (for later pyramid scaling) for padding.
-    """
-    if not isinstance(effective_patch_size, tuple) or len(effective_patch_size) != 3:
-        raise ValueError("patch_size must be a tuple of three integers (Z, H, W), " +
-                         "whereas Z can be None.")
-    
-    # Extract dimensions
-    if len(data_stack_shape) == 4:  # [C, Z, H, W] for images
-        _, z_dim, h_dim, w_dim = data_stack_shape
-    elif len(data_stack_shape) == 3:  # [Z, H, W] for annotations
-        z_dim, h_dim, w_dim = data_stack_shape
-    else:
-        raise ValueError("Invalid data_stack dimensions. Expected 3D or 4D array.")
-    
-    # Compute padding for each dimension
-    patch_z, patch_h, patch_w = effective_patch_size
-    z_pad = (patch_z - (z_dim % patch_z)) % patch_z if patch_z is not None else 0
-    h_pad = (patch_h - (h_dim % patch_h)) % patch_h
-    w_pad = (patch_w - (w_dim % patch_w)) % patch_w
-
-    return z_pad, h_pad, w_pad
-
-def pre_process_stack(data_stack, input_scaling, effective_kernel_padding, effective_patch_size):
-    # Scale input
-    scaled_stack = scale_img(data_stack, input_scaling)
-    # Pad images and annots; take into account maximum scaling for later pyramid scaling
-    padded_stack = scaled_stack
-    if effective_kernel_padding is not None:
-        padded_stack = pad_for_kernel(padded_stack, effective_kernel_padding)
-    if effective_patch_size is not None:
-        padded_stack = pad_to_patch(padded_stack, effective_patch_size)
-    return padded_stack
-
-def tile_annots_3D(img_stack, annot_stack, effective_kernel_padding, effective_patch_size): # TODO: IMPLEMENT
-    return img_stack, annot_stack
+### DEVICE & NORMALIZATION
 
 def get_device(use_cuda=None):
     if torch.cuda.is_available() and (use_cuda==True):
@@ -316,7 +190,6 @@ def normalize_image(image, image_mean, image_std):
 
     return arr_norm
     
-
 def compute_image_stats(image, ignore_n_first_dims=None):
     """
     Compute mean and standard deviation of a numpy array with 2-4 dimensions.
@@ -359,139 +232,7 @@ def compute_image_stats(image, ignore_n_first_dims=None):
     return image_mean, image_std
 
 
-
-def parallel_predict_image(image, model, classifier, param, use_dask=False):
-    """
-    Given a filter model and a classifier, predict the class of 
-    each pixel in an image.
-
-    Parameters
-    ----------
-    image: 2d array
-        image to segment
-    model: Hookmodel
-        model to extract features from
-    classifier: CatBoostClassifier
-        classifier to use for prediction
-    scalings: list of ints
-        downsampling factors
-    order: int
-        interpolation order for low scale resizing
-    use_min_features: bool
-        if True, use the minimum number of features per layer
-    image_downsample: int, optional
-        downsample image by this factor before extracting features, by default 1
-    use_dask: bool
-        if True, use dask for parallel processing
-
-    Returns
-    -------
-    predicted_image: 2d array
-        predicted image with classes
-
-    """
-    
-    maxblock = 1000
-    nblocks_rows = image.shape[-2] // maxblock
-    nblocks_cols = image.shape[-1] // maxblock
-    margin = 50
-
-    predicted_image_complete = np.zeros(image.shape[-2:], dtype=(np.uint8))
-    
-    if use_dask:
-        from dask.distributed import Client
-        import dask
-        dask.config.set({'distributed.worker.daemon': False})
-        client = Client()
-        processes = []
-
-    min_row_ind_collection = []
-    min_col_ind_collection = []
-    max_row_ind_collection = []
-    max_col_ind_collection = []
-    new_max_col_ind_collection = []
-    new_max_row_ind_collection = []
-    new_min_col_ind_collection = []
-    new_min_row_ind_collection = []
-
-    for row in range(nblocks_rows+1):
-        for col in range(nblocks_cols+1):
-            #print(f'row {row}/{nblocks_rows}, col {col}/{nblocks_cols}')
-            max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
-            max_col = np.min([image.shape[-1], (col+1)*maxblock+margin])
-            min_row = np.max([0, row*maxblock-margin])
-            min_col = np.max([0, col*maxblock-margin])
-
-            min_row_ind = 0
-            new_min_row_ind = 0
-            if min_row > 0:
-                min_row_ind = min_row + margin
-                new_min_row_ind = margin
-            min_col_ind = 0
-            new_min_col_ind = 0
-            if min_col > 0:
-                min_col_ind = min_col + margin
-                new_min_col_ind = margin
-
-            max_col = (col+1)*maxblock+margin
-            max_col_ind = np.min([min_col_ind+maxblock,image.shape[-1]])
-            new_max_col_ind = new_min_col_ind + (max_col_ind-min_col_ind)
-            if max_col > image.shape[-1]:
-                max_col = image.shape[-1]
-
-            max_row = (row+1)*maxblock+margin
-            max_row_ind = np.min([min_row_ind+maxblock,image.shape[-2]])
-            new_max_row_ind = new_min_row_ind + (max_row_ind-min_row_ind)
-            if max_row > image.shape[-2]:
-                max_row = image.shape[-2]
-
-            image_block = image[..., min_row:max_row, min_col:max_col]
-
-            if use_dask:
-                processes.append(client.submit(
-                    model.predict_image,
-                    image=image_block,
-                    classifier=classifier,
-                    param=param))
-                
-                
-                min_row_ind_collection.append(min_row_ind)
-                min_col_ind_collection.append(min_col_ind)
-                max_row_ind_collection.append(max_row_ind)
-                max_col_ind_collection.append(max_col_ind)
-                new_max_col_ind_collection.append(new_max_col_ind)
-                new_max_row_ind_collection.append(new_max_row_ind)
-                new_min_col_ind_collection.append(new_min_col_ind)
-                new_min_row_ind_collection.append(new_min_row_ind)
-
-            else:
-                predicted_image = model.predict_image(
-                    image=image_block,
-                    classifier=classifier,
-                    param=param
-                )
-                crop_pred = predicted_image[
-                    new_min_row_ind: new_max_row_ind,
-                    new_min_col_ind: new_max_col_ind]
-
-                predicted_image_complete[min_row_ind:max_row_ind, min_col_ind:max_col_ind] = crop_pred.astype(np.uint8)
-
-    if use_dask:
-        for k in range(len(processes)):
-            future = processes[k]
-            out = future.result()
-            future.cancel()
-            del future
-            predicted_image_complete[
-                min_row_ind_collection[k]:max_row_ind_collection[k],
-                min_col_ind_collection[k]:max_col_ind_collection[k]] = out.astype(np.uint8)
-        client.close()
-    
-    return predicted_image_complete
-
-rot_model = None
-
-
+### ANNOTATION HANDLING (optional)
 
 def get_balanced_mask(ref_mask, tgt_mask):
     """
@@ -515,7 +256,6 @@ def get_balanced_mask(ref_mask, tgt_mask):
     tgt_idx = tgt_idx[0:ref_mask.sum()]  # subsample
     tgt_mask_balanced[tgt_idx[:, 0], tgt_idx[:, 1]] = True
     return tgt_mask_balanced
-
 
 def get_annotation_regions(annotation, d_edge=1):
     """
@@ -582,7 +322,6 @@ def get_annotation_regions(annotation, d_edge=1):
         'bg_balanced': bg_balanced
     }
     return masks
-
 
 def extract_annotated_pixels(features, annotation, full_annotation=True):
     """
