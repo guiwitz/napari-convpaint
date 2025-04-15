@@ -103,7 +103,12 @@ class ConvpaintModel:
         ValueError
             If more than one of alias, model_path, param, or fe_name is provided.
         """
+        # Initialize parameters and features
         self._param = Param()
+        self.features = None
+        self.targets = None
+        self.num_trainings = 0
+
         # Initialize the dictionary of all available models
         if not ConvpaintModel.ALL_MODELS_TYPES_DICT:
             ConvpaintModel._init_models_dict()
@@ -877,7 +882,7 @@ class ConvpaintModel:
 
 ### NEW METHODS
 
-    def train2(self, data, annotations, use_rf=False, allow_writing_files=False):
+    def train2(self, data, annotations, extend_features=False, use_rf=False, allow_writing_files=False):
 
         # Use get_feature_image to extract features and the suiting annotation parts
         features, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False)
@@ -885,10 +890,14 @@ class ConvpaintModel:
         # Get the annotated pixels and targets, and concatenate each
         f_t_tuples = [self._get_features_targets(f, a)
                       for f, a in zip(features, annot_parts)]
-        features = [ft[0] for ft in f_t_tuples]
-        targets = [ft[1] for ft in f_t_tuples]
-        features = np.concatenate(features, axis=0)
-        targets = np.concatenate(targets, axis=0)
+        features = [ft[0] for ft in f_t_tuples] # Create a list of features
+        targets = [ft[1] for ft in f_t_tuples] # Create a list of targets
+        features = np.concatenate(features, axis=0) # Concatenate the features into a single array
+        targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
+
+        # If we want to extend the features, we need to add the new to the existing features
+        if extend_features:
+            features, targets = self.extend_features(features, targets)
 
         # Convert features to a DataFrame and targets to a Series
         features = pd.DataFrame(features)
@@ -897,6 +906,34 @@ class ConvpaintModel:
         # Train the classifier
         self._train_classifier(features, targets,
                                use_rf=use_rf, allow_writing_files=allow_writing_files)
+        
+    def reset_features(self):
+        """
+        Resets the features and targets of the model.
+        """
+        self.features = None
+        self.targets = None
+        self.num_trainings = 0
+
+    def extend_features(self, features, targets):
+        """
+        Extend the features and targets of the model with new features and targets.
+        """
+        if self.features is None:
+            self.features = features
+        else:
+            self.features = np.concatenate([self.features, features], axis=0)
+        if self.targets is None:
+            self.targets = targets
+        else:
+            self.targets = np.concatenate([self.targets, targets], axis=0)
+        print(features.shape, targets.shape)
+        features = self.features
+        targets = self.targets
+        print(features.shape, targets.shape)
+        self.num_trainings += 1
+
+        return features, targets
 
     def predict2(self, data, return_proba=False, patched=True):
 
