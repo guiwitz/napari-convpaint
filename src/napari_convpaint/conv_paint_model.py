@@ -416,7 +416,7 @@ class ConvpaintModel:
         return self.fe_model.get_layer_keys()
     
 
-### USER METHODS FOR TRAINING, PREDICTION AND FEATURE EXTRACTION
+### USER METHODS FOR TRAINING, PREDICTION
     
     def train(self, image, annotations, extend_features=False, use_rf=False, allow_writing_files=False):
         """
@@ -451,10 +451,8 @@ class ConvpaintModel:
         image : np.ndarray
             Image to segment
         """
-        if self._param.tile_image:
-            return self._parallel_predict_image(image, return_proba=False, use_dask=False)
-        else:
-            return self._predict_image(image, return_proba=False)
+        seg = self._predict(image, add_seg=True)[1]
+        return seg
 
     def predict_probas(self, image):
         """
@@ -472,27 +470,25 @@ class ConvpaintModel:
         np.ndarray
             Predicted probabilities of the classes of the pixels in the image
         """
-        if self._param.tile_image:
-            return self._parallel_predict_image(image, return_proba=True, use_dask=False)
-        else:
-            return self._predict_image(image, return_proba=True)
+        probas = self._predict(image, add_seg=False)
+        return probas
+    
 
-    def predict(self, image):
-        probas = self.predict_probas(image)
-        seg = self._probas_to_classes(probas)
-        return probas, seg
+### FEATURE EXTRACTION
     
     def get_feature_image(self, data, annotations=None, restore_input_form=True):
         
         # Check if we process annotations and if we have only a single image input
         use_annots = annotations is not None
-        single_input = not isinstance(data, list)
+        single_input = isinstance(data, np.ndarray) or isinstance(data, torch.Tensor)
+        input_shapes = [data.shape] if single_input else [d.shape for d in data]
 
         # Run checks on the model to ensure that it is ready to be used
         self._run_model_checks()
 
         # Make sure data is a list of images with [C, Z, H, W] shape
         data, annotations = self._prep_dims(data, annotations)
+
         # Save the original data shapes for reshaping/rescaling later
         self.original_shapes = [d.shape for d in data]
 
@@ -510,7 +506,6 @@ class ConvpaintModel:
         
         # Get the correct padding size for the feature extraction    
         padding = self._get_total_pad_size(params_for_extract)
-
         # Pad the images and annotations with the correct padding size
         data = [self._pad(d, padding) for d in data]
         # Save the padded shapes for reshaping/rescaling later
@@ -555,9 +550,8 @@ class ConvpaintModel:
                     for i in range(len(features))]
             
         # Restore input dimensionality (especially see if we want to remove z dimension)
-        data_list = [data] if not isinstance(data, list) else data
-        features = [self._restore_dims(features[i], data_list[i].shape)
-                            for i in range(len(data_list))]
+        features = [self._restore_dims(features[i], input_shapes[i])
+                            for i in range(len(data))]
 
         # If input was a single image, return the first (= only) features
         if single_input:
@@ -603,7 +597,7 @@ class ConvpaintModel:
 
         return self.classifier
     
-    def _clf_predict(self, features, return_proba=False):
+    def _clf_predict(self, features, return_proba=True):
         """
         Uses the trained classifier to predict classes based on features of the image.
         Returns an image containing the most probable class of each pixel, if return_proba is False.
@@ -698,10 +692,47 @@ class ConvpaintModel:
         self.num_trainings += 1
 
         return features, targets
+    
+    def _predict(self, data, add_seg=False):
 
-    def _predict_image(self, data, return_proba=False, patched=True):
+        # Check if we process annotations and if we have only a single image input
+        single_input = isinstance(data, np.ndarray) or isinstance(data, torch.Tensor)
+        input_shapes = [data.shape] if single_input else [d.shape for d in data]
+
+
+        # Make sure data is a list of images with [C, Z, H, W] shape
+
+        data, _ = self._prep_dims(data)
+
+
+        # Get class probabilities
+        if self._param.tile_image:
+            probas = [self._parallel_predict_image(d, return_proba=True, use_dask=False)
+                      for d in data]
+        else:
+            probas = self._predict_image(data, return_proba=True) # Can handle lists
+
+        # Restore input dimensionality (especially see if we want to remove z dimension)
+        probas = [self._restore_dims(probas[i], input_shapes[i])
+                            for i in range(len(data))]
+
+        # Determine what to return
+        if add_seg:
+            seg = [self._probas_to_classes(p) for p in probas]
+            if single_input:
+                return probas[0], seg[0]
+            else:
+                return probas, seg
+        else:
+            if single_input:
+                return probas[0]
+            else:
+                return probas
+
+    def _predict_image(self, data, return_proba=True):
 
         # Use get_feature_image to extract features
+
         features = self.get_feature_image(data, restore_input_form=False)
 
         # Predict pixels based on the features and classifier
@@ -728,18 +759,13 @@ class ConvpaintModel:
         if not return_proba:
             pred_reshaped = [self._probas_to_classes(p) for p in pred_reshaped]
 
-        # Restore input dimensionality (especially see if we want to remove z dimension)
-        data_list = [data] if not isinstance(data, list) else data
-        pred_reshaped = [self._restore_dims(pred_reshaped[i], data_list[i].shape)
-                            for i in range(len(data_list))]
-
         # If input was a single image, return the first prediction
-        if not isinstance(data, list):
+        if isinstance(data, np.ndarray) or isinstance(data, torch.Tensor):
             return pred_reshaped[0]
 
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=False, use_dask=False):
+    def _parallel_predict_image(self, image, return_proba=True, use_dask=False):
         """
         Given a filter model and a classifier, predict the class of 
         each pixel in an image.
@@ -893,16 +919,24 @@ class ConvpaintModel:
         Handles both single images and lists of images.
         """
         # Ensure data and annotations are lists
-        if not isinstance(data, list):
+        if isinstance(data, np.ndarray) or isinstance(data, torch.Tensor):
             img_list = [data]
-        else:
+        elif isinstance(data, tuple):
+            img_list = list(data)
+        elif isinstance(data, list):
             img_list = data
+        else:
+            raise ValueError('Data must be a numpy array, torch tensor, or a list/tuple of images.')
         if annotations is None:
             annot_list = [None] * len(img_list)
-        elif not isinstance(annotations, list):
+        elif isinstance(data, np.ndarray) or isinstance(data, torch.Tensor):
             annot_list = [annotations]
-        else:
+        elif isinstance(data, tuple):
+            annot_list = list(annotations)
+        elif isinstance(data, list):
             annot_list = annotations
+        else:
+            raise ValueError('Annotations must be a numpy array, torch tensor, or a list/tuple of images.')
 
         # Check if the lengths of the data and annotations lists are equal
         if len(img_list) != len(annot_list):
@@ -921,7 +955,7 @@ class ConvpaintModel:
             if img.shape[0] != prep_imgs[0].shape[0]:
                 raise ValueError(f'Image {i} has different number of channels than the first image.')
 
-        return prep_imgs, prep_annots
+        return list(prep_imgs), list(prep_annots)
         
     def _prep_dims_single(self, img, annotations=None):
         """
@@ -1147,7 +1181,7 @@ class ConvpaintModel:
         is_3d_multi = is_3d and (self._param.multi_channel_img or self._param.rgb_img)
         # if is 2d or 3D with multiple channels (including RGB), we remove the z dimension
         if is_2d or is_3d_multi:
-            if pred.shape[0] != 1:
+            if pred.shape[-3] != 1:
                 raise ValueError('Prediction shape does not match original shape.')
             # [Z,H,W] for prediction, [proba/F,Z,H,W] for probabilities and features
             pred = np.squeeze(pred, axis=-3)
