@@ -754,7 +754,8 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            self.cp_model.train(image_stack_norm, annots)
+            print("Training classifier...")
+            self.cp_model.train2(image_stack_norm, annots)
     
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -910,10 +911,7 @@ class ConvPaintWidget(QWidget):
                 image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
             # Predict image
-            if self.cp_model.get_param("tile_image"):
-                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
-            else:
-                predicted_image = self.cp_model.segment(image)
+            predicted_image = self.cp_model.segment(image)
             
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -962,10 +960,7 @@ class ConvPaintWidget(QWidget):
                 image = image_stack_norm[:, step]
 
             # Predict the current step
-            if self.cp_model.get_param("tile_image"): # NOTE: We could also move this condition to the cp model
-                predicted_image = self.cp_model.parallel_predict_image(image, use_dask=False)
-            else:
-                predicted_image = self.cp_model.segment(image)
+            predicted_image = self.cp_model.segment(image)
 
             # Update segmentation layer
             self.viewer.layers['segmentation'].data[step] = predicted_image
@@ -1532,9 +1527,9 @@ class ConvPaintWidget(QWidget):
         img_shape = self.viewer.layers[self.selected_channel].data.shape
         if data_dims in ['2D', '2D_RGB']:
             spatial_dims_size = img_shape[0] * img_shape[1]
-        elif data_dims in ['3D_single', '3D_RGB']:
+        elif data_dims in ['3D_single', '3D_RGB', '3D_multi']:
             spatial_dims_size = img_shape[1] * img_shape[2]
-        else: # 3D_multi, 4D
+        else: # 4D
             spatial_dims_size = img_shape[2] * img_shape[3]
         return spatial_dims_size > self.spatial_dim_info_thresh
 

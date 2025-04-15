@@ -56,12 +56,7 @@ class ComboFeatures(FeatureExtractor):
         super().__init__(model_name=model_name, use_cuda=use_cuda)
         
         self.model1, self.model2 = self.model
-        ps1 = self.model1.get_patch_size()
-        ps2 = self.model2.get_patch_size()
-        self.patch_size = abs(ps1 * ps2) // gcd(ps1, ps2) # = lcm(ps1, ps2)
-        p1 = self.model1.get_padding()
-        p2 = self.model2.get_padding()
-        self.padding = max(p1, p2)
+        self.feature_extraction = False
 
         for fe in self.model:
             if fe.model is None:
@@ -100,12 +95,42 @@ class ComboFeatures(FeatureExtractor):
         param.tile_annotations = False
         return param
     
+    def get_padding(self):
+        p1 = self.model1.get_padding()
+        p2 = self.model2.get_padding()
+        self.padding = max(p1, p2)
+        return self.padding
+    
+    def get_patch_size(self):
+        ps1 = self.model1.get_patch_size()
+        ps2 = self.model2.get_patch_size()
+        self.patch_size = abs(ps1 * ps2) // gcd(ps1, ps2) # = lcm(ps1, ps2)
+        return self.patch_size
+    
+    def gives_patched_features(self):
+        # Since we want to combine, we always rescale to image size, even if the models are patched
+        # So, the combo FE itself is not patched, even if it works with a patch_size to comply with the models
+        return False
+
+### NEW METHODS
+
+    def get_feature_pyramid(self, image, param, patched=False):
+        def1 = self.model1.get_default_params(param)
+        features1 = self.model1.get_feature_pyramid(image, def1, patched=False)
+        def2 = self.model2.get_default_params(param)
+        features2 = self.model2.get_feature_pyramid(image, def2, patched=False)
+        features = np.concatenate((features1, features2), axis=0)
+        # Since we get non-patched features, we set patch_size to 1 for later rescaling
+        return features
+
+### OLD METHODS
+    
     def get_features_scaled(self, image, param):
         '''Given an CxWxH image, extract features.
         Returns features with dimensions nb_features x H x W'''
         def1 = self.model2.get_default_params(param)
-        dino_features = self.model2.get_features_scaled(image, def1)
+        features1 = self.model2.get_features_scaled(image, def1)
         def2 = self.model1.get_default_params(param)
-        vgg_features = self.model1.get_features_scaled(image, def2)
-        features = np.concatenate((dino_features, vgg_features), axis=0)
+        features2 = self.model1.get_features_scaled(image, def2)
+        features = np.concatenate((features1, features2), axis=0)
         return features

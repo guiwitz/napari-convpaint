@@ -16,7 +16,6 @@ class CellposeFeatures(FeatureExtractor):
 
         super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
         self.patch_size = 8
-        self.padding = self.patch_size
 
     @staticmethod
     def create_model(model_name):
@@ -36,6 +35,66 @@ class CellposeFeatures(FeatureExtractor):
         param.fe_order = 0
         param.tile_annotations = False
         return param
+    
+    def get_num_input_channels(self):
+        return [2]
+    
+### NEW METHODS
+
+    def extract_features_from_plane(self, image):
+
+        image_expanded = np.expand_dims(image, axis=0)
+        tensor = torch.from_numpy(image_expanded).float()
+
+        if self.model.mkldnn:
+            tensor = tensor.to_mkldnn()
+        T0 = self.model.downsample(tensor)
+        if self.model.mkldnn:
+            style = self.model.make_style(T0[-1].to_dense())
+        else:
+            style = self.model.make_style(T0[-1])
+        style0 = style
+        if not self.model.style_on:
+            style = style * 0
+        T1 = self.model.upsample(style, T0, self.model.mkldnn)
+        T1 = self.model.output(T1)
+        if self.model.mkldnn:
+            T0 = [t0.to_dense() for t0 in T0]
+            T1 = T1.to_dense()
+
+        w_img,h_img = image.shape[-2:]
+
+        out_t = []
+        #append the output tensors from T0
+        for t in T0[:3]:
+            t = t.detach().numpy()[0]
+            f,w,h = t.shape[-3:]
+            if (w,h != w_img,h_img):
+                t = skimage.transform.resize(
+                        image=t,
+                        output_shape=(f, w_img, h_img),
+                        preserve_range=True, order=0)
+            out_t.append(t)
+
+        #append the output tensor from T1 (gradients and cell probability)
+        t = T1.detach().numpy()[0]
+        f,w,h = t.shape[-3:]
+        if (w,h != w_img,h_img):
+            t = skimage.transform.resize(
+                    image=t,
+                    output_shape=(f, w_img, h_img),
+                    preserve_range=True, order=0)
+        out_t.append(t)
+
+        #append the original image
+        out_t.append(image)
+        
+        #combine the tensors
+        out_t = np.concatenate(out_t, axis=0)
+
+        return out_t
+
+### OLD METHODS
 
     def get_features(self, img, **kwargs):
         """
@@ -44,12 +103,11 @@ class CellposeFeatures(FeatureExtractor):
         if img.ndim > 2:
             features = self.get_features_multichannel(img, **kwargs)
         else:
-            features = self.extract_features(img, **kwargs)
+            features = self.get_features_onetwo_ch(img, **kwargs)
 
         return features
-        
-    
-    def extract_features(self, image, **kwargs):
+
+    def get_features_onetwo_ch(self, image, **kwargs):
         """
         Extracts features from the image using the Cellpose model.
         Assumes that the image is single or two channels.
@@ -129,7 +187,7 @@ class CellposeFeatures(FeatureExtractor):
         """
         # Loop over channels, extract features and concatenate them
         for ch_idx in range(image.shape[0]):
-            channel_features = self.extract_features(image[ch_idx], **kwargs)
+            channel_features = self.get_features_onetwo_ch(image[ch_idx], **kwargs)
             if ch_idx == 0:
                 features = channel_features
             else:

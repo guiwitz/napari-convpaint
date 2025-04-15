@@ -75,15 +75,32 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
         # scaled_img = median_filter(stacked_blocks, size=(1, scaling_factor, 1, scaling_factor)).reshape(
         #     *image.shape[:-2], slice_size[0] // scaling_factor, slice_size[1] // scaling_factor)
     else:
+        classes_before = np.unique(image)
         # For labels, take the majority (max count) along the scaling dimensions
         scaled_img = mode(stacked_blocks, axis=(-3, -1)).mode
+        classes_after = np.unique(scaled_img)
+        # Check if the classes have changed after downscaling
+        if len(classes_before) != len(classes_after):
+            warnings.warn(f"Classes have changed after downscaling from {classes_before} to {classes_after}.")
     return scaled_img
 
-def rescale_features(image, output_shape, order=1):
+def rescale_features(feature_img, target_shape, order=1):
     """
-    Rescale an image to the specified output size.
+    Rescale an image to the specified target size. target_shape is a tuple of (H, W).
     """
-    return skimage.transform.resize(image, output_shape, order=order, mode='reflect', preserve_range=True)
+    output_shape = (feature_img.shape[0], target_shape[1], target_shape[2], target_shape[3])
+
+    if feature_img.shape == output_shape:
+        return feature_img
+    
+    if isinstance(feature_img, torch.Tensor):
+        # If the input is a PyTorch tensor, use the faster torch interpolation
+        int_mode = 'bilinear' if order > 0 else 'nearest'
+        align_corners = False if order > 0 else None
+        return torch_interpolate(feature_img, size=output_shape[2:],
+                                  mode=int_mode, align_corners=align_corners)
+    else:
+        return skimage.transform.resize(feature_img, output_shape, order=order, mode='reflect', preserve_range=True)
 
 def rescale_class_labels(label_img, output_shape):
     """
@@ -91,11 +108,39 @@ def rescale_class_labels(label_img, output_shape):
     """
     return skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
 
-def rescale_probs(label_prob_img, output_shape, order=0):
+def rescale_outputs(output_img, output_shape, order=0):
     """
-    Rescale a class probability image to the specified output size.
+    Rescale a class probability or feature image to the specified output size.
     """
-    return skimage.transform.resize(label_prob_img, output_shape, order=order, mode='reflect', preserve_range=True)
+    return skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
+
+def reduce_to_patch_multiple(input, patch_size):
+    """
+    Reduces the input to the patch size multiple.
+    Assumes that the input has spatial dimensions in last two dimensions.
+    """
+    if patch_size == 1:
+        return input
+    # Get the patch size from the feature extractor model
+    patch_size = patch_size
+    # Get spatial dimensions
+    h, w = input.shape[-2:]
+    # What is the next smaller multiple of the patch size?
+    new_h = (h // patch_size) * patch_size
+    new_w = (w // patch_size) * patch_size
+    # If the input is already a multiple of the patch size, return it
+    if new_h == h and new_w == w:
+        return input
+    # Otherwise, reduce the input to the patch size multiple
+    h_crop_top = (h - new_h)//2
+    w_crop_left = (w - new_w)//2
+    h_crop_bottom = h - new_h - h_crop_top
+    # Make sure we can also handle crops of size 0
+    h_idx_bottom = -h_crop_bottom if h_crop_bottom > 0 else None
+    w_crop_right = w - new_w - w_crop_left
+    w_idx_right = -w_crop_right if w_crop_right > 0 else None
+    input = input[..., h_crop_top:h_idx_bottom, w_crop_left:w_idx_right]
+    return input
 
 def pad_for_kernel(data_stack, effective_kernel_padding):
     """

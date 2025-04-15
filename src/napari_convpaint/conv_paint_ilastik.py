@@ -82,3 +82,13 @@ class IlastikFeatures(FeatureExtractor):
         param = super().get_default_params(param=param)
         param.fe_layers = []
         return param
+
+### NEW METHODS
+
+    def extract_features_from_plane(self, image, filter_set=FILTER_SET):
+        
+        # Given that we get single-channel images as input:
+        features = filter_set.transform(image[0]) # Ilastik wants 2D
+        features = np.moveaxis(features, -1, 0)
+
+        return features

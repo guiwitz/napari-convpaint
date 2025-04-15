@@ -166,6 +166,29 @@ class Hookmodel(FeatureExtractor):
             if curr_layer == latest_layer:
                 break
         return max_kernel_size
+    
+    def get_num_input_channels(self):
+        return [self.named_modules[0][1].in_channels]
+    
+    def extract_features_new(self, image):
+        # Convert image to numpy array and ensure correct data type
+        image = np.asarray(image, dtype=np.float32)
+
+        self.outputs = []
+        with torch.no_grad():
+            # Treat z as batch dimension (temprorarily)
+            ch_torch = torch.tensor(np.moveaxis(image, 1, 0))
+            try:
+                _ = self(ch_torch) # Forward pass through the model
+            except AssertionError as ea:
+                pass # Stop at hook
+            except Exception as ex:
+                raise ex
+            
+        # Move the z dimension back to the second position (and features to first)
+        outputs = [o.permute(1, 0, 2, 3) for o in self.outputs]
+
+        return outputs
 
     def __call__(self, tensor_image):
         tensor_image_dev = tensor_image.to(self.device)
@@ -193,6 +216,9 @@ class Hookmodel(FeatureExtractor):
             else:
                 # print(f"registering hook for layer {selected_layers[ind]}")
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
+
+
+### OLD METHODS
 
     def get_features_scaled(self, image, param:Param):
         """Given an image and a set of annotations, extract multiscale features
@@ -305,16 +331,17 @@ class Hookmodel(FeatureExtractor):
                     except Exception as ex:
                         raise ex
 
-                    for im in self.outputs:
-                        if image.shape[1:3] != im.shape[2:4]:
-                            im = torch_interpolate(im, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
+                    for output in self.outputs:
+                        if image.shape[1:3] != output.shape[2:4]:
+                            output = torch_interpolate(output, size=image.shape[1:3], mode=int_mode, align_corners=align_corners)
                             '''out_np = skimage.transform.resize(
                                 image=out_np,
                                 output_shape=(1, out_np.shape[1], image.shape[1], image.shape[2]),
                                 preserve_range=True, order=order)'''
 
-                        out_np = im.cpu().detach().numpy()
+                        out_np = output.cpu().detach().numpy()
                         # if padding > 0:
                         #     out_np = out_np[:, :, padding:-padding, padding:-padding]
                         all_scales.append(out_np)
+
         return all_scales
