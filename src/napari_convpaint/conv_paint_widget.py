@@ -910,7 +910,6 @@ class ConvPaintWidget(QWidget):
                 image = normalize_image(image=image, image_mean=image_mean, image_std=image_std)
 
             # Predict image
-            print("widget:", type(image), image.shape)
             predicted_image = self.cp_model.segment(image)
             
             # Update segmentation layer

@@ -1162,12 +1162,13 @@ class ConvpaintModel:
         """
         class_labels = self.classifier.classes_
         max_prob = np.argmax(probas, axis=0)
-        seg = class_labels[max_prob]
+        seg = class_labels[max_prob].astype(np.uint8)
 
         # Smoothen the segmentation if desired
         if self._param.seg_smoothening > 1:
             kernel = skimage.morphology.disk(self._param.seg_smoothening)
-            kernel = np.expand_dims(kernel, axis=0)
+            if seg.ndim == 3: # 3D image --> add z dimension to kernel
+                kernel = np.expand_dims(kernel, axis=0)
             seg = skimage.filters.rank.majority(seg, footprint=kernel)
 
         return seg
