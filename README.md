@@ -18,11 +18,13 @@ This napari plugin can be used to segment objects or structures in images based 
 
 ## Installation
 
-You can install `napari-convpaint` via [pip]
+You can install `napari-convpaint` via [pip]:
 
     pip install napari-convpaint
 
-To install latest development version :
+*Note: If you are running into an error that vispy requires a certain C++ version, but you want to avoid this, you can install vispy via `conda install vispy` and then install `napari-convpaint` via `pip` to avoid this.*
+
+To install the latest development version:
 
     pip install git+https://github.com/guiwitz/napari-convpaint.git
 
