@@ -39,7 +39,7 @@ class CellposeFeatures(FeatureExtractor):
     def get_num_input_channels(self):
         return [2]
 
-    def extract_features_from_plane(self, image):
+    def get_features_from_plane(self, image):
 
         image_expanded = np.expand_dims(image, axis=0)
         tensor = torch.from_numpy(image_expanded).float()

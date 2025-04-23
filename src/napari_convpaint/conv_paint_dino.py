@@ -58,7 +58,7 @@ class DinoFeatures(FeatureExtractor):
         param.fe_scalings = [1]
         return param
 
-    def extract_features_new(self, image, **kwargs):
+    def get_features(self, image, **kwargs):
         
         # Prepare the image (normalize etc.)
         image_tensor = self.prep_img(image)

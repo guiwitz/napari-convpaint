@@ -29,7 +29,7 @@ class Hookmodel(FeatureExtractor):
     layers : list of str or int, optional
         List of layer keys (if string) or indices (int) to extract features from, by default None
 
-    Attributes
+    Attributes:
     ----------
     model : torch model
         Model to extract features from
@@ -170,7 +170,7 @@ class Hookmodel(FeatureExtractor):
     def get_num_input_channels(self):
         return [self.named_modules[0][1].in_channels]
     
-    def extract_features_new(self, image):
+    def get_features(self, image):
         # Convert image to numpy array and ensure correct data type
         image = np.asarray(image, dtype=np.float32)
 

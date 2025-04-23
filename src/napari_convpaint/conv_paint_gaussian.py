@@ -18,7 +18,7 @@ class GaussianFeatures(FeatureExtractor):
         param.fe_layers = []
         return param
 
-    def extract_features_from_plane(self, image):
+    def get_features_from_plane(self, image):
         
         # Given that we get single-channel images as input:
         features = skimage.filters.gaussian(image, sigma=self.sigma, channel_axis=0)

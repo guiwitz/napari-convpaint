@@ -18,7 +18,7 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
     Downscale an image by averaging over non-overlapping blocks of the specified size.
     OR Upscale by repeating the pixels.
     
-    Parameters
+    Parameters:
     ----------
     image : np.ndarray
         Input array to be downscaled. Must have spatial dimensions as the last two dimensions.
@@ -29,8 +29,8 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
     use_labels : bool
         If True, use the mode (majority) instead of the median for downscaling labels.
 
-    Returns
-    -------
+    Returns:
+    ----------
     downscaled_img / upscaled_img : np.ndarray
         Downscaled array or upscaled array.
     """
@@ -83,6 +83,20 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
 def rescale_features(feature_img, target_shape, order=1):
     """
     Rescale an image to the specified target size. target_shape is a tuple of (H, W).
+
+    Parameters:
+    ----------
+    feature_img : np.ndarray or torch.Tensor
+        Input image to be rescaled. Must have spatial dimensions as the last two dimensions.
+    target_shape : tuple of int
+        Target size to rescale the image to. Must be a tuple of (H, W).
+    order : int
+        Order of the spline interpolation. Default is 1 (bilinear interpolation).
+
+    Returns:
+    ----------
+    rescaled_img : np.ndarray or torch.Tensor
+        Rescaled image.
     """
     output_shape = (feature_img.shape[0], target_shape[1], target_shape[2], target_shape[3])
 
@@ -101,19 +115,58 @@ def rescale_features(feature_img, target_shape, order=1):
 def rescale_class_labels(label_img, output_shape):
     """
     Rescale a class label image to the specified output size.
+
+    Parameters:
+    ----------
+    label_img : np.ndarray
+        Input label image to be rescaled. Must have spatial dimensions as the last two dimensions.
+    output_shape : tuple of int
+        Target size to rescale the image to. Must be a tuple of (H, W).
+    
+    Returns:
+    ----------
+    rescaled_label_img : np.ndarray
+        Rescaled label image.
     """
-    return skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
+    rescaled_label_img = skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
+    return rescaled_label_img
 
 def rescale_outputs(output_img, output_shape, order=0):
     """
     Rescale a class probability or feature image to the specified output size.
+
+    Parameters:
+    ----------
+    output_img : np.ndarray
+        Class probabilities or feature image to be rescaled.
+        Must have spatial dimensions as the last two dimensions.
+    output_shape : tuple of int
+        Target size to rescale the image to. Must be a tuple of (H, W).
+
+    Returns:
+    ----------
+    rescaled_output : np.ndarray
+        Rescaled class probability or feature image.
     """
-    return skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
+    rescaled_output = skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
+    return rescaled_output
 
 def reduce_to_patch_multiple(input, patch_size):
     """
     Reduces the input to the patch size multiple.
     Assumes that the input has spatial dimensions in last two dimensions.
+
+    Parameters:
+    ----------
+    input : np.ndarray
+        Input array to be reduced. Must have spatial dimensions as the last two dimensions.
+    patch_size : int
+        Patch size to reduce the input to.
+
+    Returns:
+    ----------
+    reduced_input : np.ndarray
+        Reduced input array.
     """
     if patch_size == 1:
         return input
@@ -139,9 +192,162 @@ def reduce_to_patch_multiple(input, patch_size):
     return input
 
 
+### PADDING, TILING & ANNOTATION EXTRACTION
+
+def pad(img, padding, use_labels=False):
+    """
+    Pads the image with the padding size given.
+    The padding is done with the 'reflect' mode for images and 'constant' for annotations.
+    Dimensions are assumed [C, Z, H, W] and [Z, H, W] for images and annotations, respectively.
+
+    Parameters:
+    ----------
+    img : np.ndarray
+        Input image to be padded. Must have spatial dimensions as the last two dimensions.
+    padding : int
+        Padding size to be added to the image.
+    use_labels : bool
+        If True, use constant padding for labels. Default is False.
+
+    Returns:
+    ----------
+    padded_img : np.ndarray
+        Padded image.
+    """
+    # Pad the image with the padding size
+    if use_labels:
+        return np.pad(img, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
+    else:
+        return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='reflect')
+
+def get_annot_planes(img, annot=None):
+    """
+    Extracts the planes (of the z dimension) of the padded data and annotations
+    where there is at least one annotation.
+    Dimensions are assumed [C, Z, H, W] and [Z, H, W] for images and annotations, respectively.
+
+    Parameters:
+    ----------
+    img : np.ndarray
+        Input image to extract planes from. Must have spatial dimensions as the last two dimensions.
+    annot : np.ndarray, optional
+        Input annotation to extract planes from. Must have spatial dimensions as the last two dimensions.
+        If None, all image planes and no annotation planes are returned.
+
+    Returns:
+    ----------
+    img_planes : list of np.ndarray
+        List of image planes that contain annotations. If annot is None, all image planes are returned.
+    annot_planes : list of np.ndarray or None
+        List of annotation planes from the input annotation. If annot is None, None is returned.
+    """
+    if annot is None:
+        img_planes = [img[:, z:z+1] for z in range(img.shape[1])]
+        return img_planes, None
+    
+    non_empty = np.unique(np.where(annot > 0)[0])
+    if len(non_empty) == 0:
+        warnings.warn('No annotations found')
+        return None, None
+    
+    # Extract the planes of the image and annotations
+    img_planes = [img[:,z:z+1] for z in non_empty] # images have a channels dimension
+    annot_planes = [annot[z:z+1] for z in non_empty] # annotations do not have a channels dimension
+
+    return img_planes, annot_planes
+
+def tile_annot(img, annot, padding):
+    """
+    Tile the image and annotations into patches of the size of the annotations.
+    Takes a number of pixels equal to 'padding' more than the bounding box of the annotation.
+    Dimensions are assumed [C, Z, H, W] and [Z, H, W] for images and annotations, respectively.
+
+    Parameters:
+    ----------
+    img : np.ndarray
+        Input image to be tiled. Must have spatial dimensions as the last two dimensions.
+    annot : np.ndarray
+        Input annotation to use for tiling. Must have spatial dimensions as the last two dimensions.
+    padding : int
+        Padding size to be added to the bounding box of the annotation.
+
+    Returns:
+    ----------
+    img_tiles : list of np.ndarray
+        List of image tiles that contain the annotations.
+    annot_tiles : list of np.ndarray
+        List of annotation tiles that contain the annotations.
+    """
+    # Find the bounding boxes of the annotations
+    annot_regions = skimage.morphology.label(annot > 0)
+    boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+
+    # Create lists to store the tiles
+    img_tiles = []
+    annot_tiles = []
+
+    for i in range(len(boxes['label'])):
+        # Get the bounding box of the annotation
+        x_min = boxes['bbox-1'][i] - padding
+        x_max = boxes['bbox-4'][i] + padding
+        y_min = boxes['bbox-2'][i] - padding
+        y_max = boxes['bbox-5'][i] + padding
+
+        # Pad the image and annotations with the correct padding size
+        img_tile = img[..., x_min:x_max, y_min:y_max]
+        annot_tile = annot[..., x_min:x_max, y_min:y_max]
+
+        img_tiles.append(img_tile)
+        annot_tiles.append(annot_tile)
+
+    return img_tiles, annot_tiles
+
+def get_features_targets(features, annot):
+    """
+    Given a set of features and targets, extract the annotated pixels and targets,
+    and concatenate each.
+
+    Parameters:
+    ----------
+    features : np.ndarray
+        Input features to extract. Must have spatial dimensions as the last two dimensions.
+    annot : np.ndarray
+        Input annotation to use for extraction. Must have spatial dimensions as the last two dimensions.
+    
+    Returns:
+    ----------
+    features : np.ndarray
+        Extracted features from the input features. Shape is (num_pixels, num_features).
+    annot : np.ndarray
+        Extracted targets from the input annotation. Shape is (num_pixels,).
+    """
+    # Get the annotated pixels and targets
+    mask = annot > 0
+    features = np.moveaxis(features, 0, -1) #move [z, h, w, features]
+    # Select only the pixels that are annotated
+    features = features[mask]
+    annot = annot[mask] # Get the targets
+
+    return features, annot
+
+
 ### DEVICE & NORMALIZATION
 
 def get_device(use_cuda=None):
+    """
+    Get the device to use for PyTorch operations.
+    If CUDA is available, use the first available GPU. If MPS is available, use it.
+
+    Parameters:
+    ----------
+    use_cuda : bool, optional
+        If True, use CUDA if available. If False, use CPU. Default is None.
+
+    Returns:
+    ----------
+    device : torch.device
+        The device to use for PyTorch operations.
+    """
     if torch.cuda.is_available() and (use_cuda==True):
         device = torch.device('cuda:0')  # use first available GPU
     elif torch.backends.mps.is_available() and (use_cuda==True): #check if mps is available
@@ -160,7 +366,7 @@ def normalize_image(image, image_mean, image_std):
     each channel is normalized independently. If there are multiple time or z frames, 
     they are normalized together.
 
-    Parameters
+    Parameters:
     ----------
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
@@ -169,8 +375,8 @@ def normalize_image(image, image_mean, image_std):
     image_std : float or nd.array
         Standard deviation of the input array along non-channel dimensions.
         
-    Returns
-    -------
+    Returns:
+    ----------
     arr_norm : np.ndarray
         Normalized array.
 
@@ -197,7 +403,7 @@ def compute_image_stats(image, ignore_n_first_dims=None):
     If the array has multiple channels (determined by the first_dim_is_channel option), 
     each channel is normalized independently. Channels can only be the first dimension of the array.
 
-    Parameters
+    Parameters:
     ----------
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
@@ -206,8 +412,8 @@ def compute_image_stats(image, ignore_n_first_dims=None):
         For example if the input array has 3 dimensions CHW and ignore_n_first_dims=1, the mean
         and standard deviation will be computed for each channel C.
         
-    Returns
-    -------
+    Returns:
+    ----------
     image_mean : float or nd.array
         Mean of the input array along non-channel dimensions
     image_std : float or nd.array
@@ -237,15 +443,15 @@ def compute_image_stats(image, ignore_n_first_dims=None):
 def get_balanced_mask(ref_mask, tgt_mask):
     """
     Given two masks, subsample the second one to have the same number of pixels as the first one.
-    Parameters
+    Parameters:
     ----------
     ref_mask: np.ndarray
         2d boolean reference mask
     tgt_mask: np.ndarray
         2d boolean target mask
 
-    Returns
-    -------
+    Returns:
+    ----------
     tgt_mask_balanced: 2d boolean np.ndarray
         target mask sub-sampled to have at most the same number of pixels as the reference mask
     """
@@ -269,15 +475,15 @@ def get_annotation_regions(annotation, d_edge=1):
     6. background: complement of 4.+5.,
     7. 6. subsampled to at most as many pixels as in 4.
 
-    Parameters
+    Parameters:
     ----------
     annotation: 2d np.ndarray
         annotation image, 1 is background, 2,3,... are foreground classes
     d_edge: int
         dilation factor for edge, by default 1
 
-    Returns
-    -------
+    Returns:
+    ----------
     masks: dictionary of 2d boolean np.ndarray
         masks for each of the regions described above ('fg', 'not_fg', 'not_fg_balanced',
          'signal', 'edge', 'bg', 'bg_balanced')
@@ -330,7 +536,7 @@ def extract_annotated_pixels(features, annotation, full_annotation=True):
     otherwise, select all pixels in annotations (values 2,3...; assumes 1 added to the original [0-bg, 1,2...signal
     annotation values]). targets set for signal: class_id=2, the same number of background pixels class_id=1,
     and the edge pixels class_id=3
-    Parameters
+    Parameters:
     ----------
     features: 3D np.ndarray (CHW)
         features extracted from image
@@ -343,8 +549,8 @@ def extract_annotated_pixels(features, annotation, full_annotation=True):
             Default True
 
 
-    Returns
-    -------
+    Returns:
+    ----------
     features: 2D np.ndarray (pixel, features)
         features extracted from image
     annotation: 1D np.ndarray (pixel)
