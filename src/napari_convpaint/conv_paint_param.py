@@ -15,9 +15,9 @@ class Param:
         classifier : str
             path to the classifier model
         multi_channel_img : bool = None
-            if the image dimensions allow, use multichannel NOTE: Needs overthinking
+            interpret the first dimension as channels
         rgb_img : bool
-            if True, RGB images are used
+            used to signal to the model that the image is RGB
         normalize : int
             normalization mode
             1: no normalization, 2: normalize stack, 3: normalize each image
@@ -53,8 +53,8 @@ class Param:
     classifier: str = None
 
     # Image processing parameters
-    multi_channel_img: bool = None
-    rgb_img: bool = None
+    multi_channel_img: bool = None # Interpret the first dimension as channels
+    rgb_img: bool = None # Used to signal to the model that the image is RGB
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
 
     # Acceleration parameters

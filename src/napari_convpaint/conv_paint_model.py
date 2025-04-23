@@ -207,8 +207,8 @@ class ConvpaintModel:
         def_param = Param()
 
         # Image processing parameters
-        def_param.multi_channel_img = False
-        def_param.rgb_img = False
+        def_param.multi_channel_img = False # Interpret the first dimension as channels
+        def_param.rgb_img = False # Used to signal to the model that the image is RGB
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Acceleration parameters
