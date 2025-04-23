@@ -344,8 +344,7 @@ class ConvpaintModel:
             with open(pkl_path, 'wb') as f:
                 data = {
                     'classifier': self.classifier,
-                    'param': self._param,
-                    'model_state': self.fe_model.state_dict() if hasattr(self.fe_model, 'state_dict') else None
+                    'param': self._param
                 }
                 pickle.dump(data, f)
 
@@ -376,11 +375,7 @@ class ConvpaintModel:
         self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
         self._param = new_param.copy()
         self.classifier = data['classifier']
-        if 'model_state' in data:
-            self.fe_model_state = data['model_state']
-            if hasattr(self.fe_model, 'load_state_dict'): # TODO: CHECK IF THIS MAKES SENSE
-                self.fe_model.load_state_dict(data['model_state'])
-    
+
     def _load_yml(self, yml_path):
         """
         Loads the model from a yml file.
@@ -405,12 +400,11 @@ class ConvpaintModel:
     def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
         """
         Sets the model based on the given FE parameters.
-        Creates new feature extracture, and resets the model state and classifier.
+        Creates new feature extracture, and resets the classifier.
         Only intended for internal use at model initiation.
         """
 
         # Reset the model and classifier
-        self.fe_model_state = None
         self.reset_classifier()
 
         # Check if we need to create a new FE model
@@ -848,6 +842,10 @@ class ConvpaintModel:
         of the original image, without the channel dimension,
         but with the class dimension (for class probabilities) added first.
         """
+
+        # Check if there is a trained classifier
+        if self.classifier is None:
+            raise ValueError('No trained classifier found.')
 
         # Check if we process annotations and if we have only a single image input
         single_input = isinstance(data, np.ndarray) or isinstance(data, torch.Tensor)
