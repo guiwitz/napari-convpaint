@@ -322,8 +322,8 @@ class ConvpaintModel:
     def save(self, model_path, create_pkl=True, create_yml=True):
         """
         Saves the model to a pkl an/or yml file.
-        The pkl file includes the classifier, the param object, and the
-        state of the feature extractor model.
+        The pkl file includes the classifier and the param object, as well as the
+        features and targets (from continuous training).
         The yml file includes only the parameters of the model.
 
         Parameters:
@@ -344,7 +344,8 @@ class ConvpaintModel:
             with open(pkl_path, 'wb') as f:
                 data = {
                     'classifier': self.classifier,
-                    'param': self._param
+                    'param': self._param,
+                    'features_targets': (self.features, self.targets),
                 }
                 pickle.dump(data, f)
 
@@ -375,6 +376,7 @@ class ConvpaintModel:
         self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
         self._param = new_param.copy()
         self.classifier = data['classifier']
+        self.features, self.targets = data['features_targets']
 
     def _load_yml(self, yml_path):
         """
