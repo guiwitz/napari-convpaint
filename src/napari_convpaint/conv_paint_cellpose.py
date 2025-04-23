@@ -3,7 +3,6 @@ import numpy as np
 from .conv_paint_utils import get_device
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
-import pandas as pd
 from cellpose import models
 import warnings
 

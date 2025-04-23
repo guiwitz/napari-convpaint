@@ -1,6 +1,4 @@
 import numpy as np
-import pandas as pd
-import skimage
 import torch
 from .conv_paint_param import Param
 from .conv_paint_utils import scale_img, rescale_features, reduce_to_patch_multiple
@@ -28,11 +26,13 @@ class FeatureExtractor:
         self.patch_size = 1
         self.num_input_channels = [1]
 
+        # Make sure only one method of providing the model is used
+        if model is not None and model_name is not None:
+            raise ValueError('Please provide either a model or a model_name, not both.')
+        
         # USE PROVIDED MODEL IF AVAILABLE
         if model is not None:
-            assert model_name is None, 'model_name must be None if model is not None'
             self.model = model
-
         # ELSE CREATE MODEL
         else:
             self.model = self.create_model(model_name)

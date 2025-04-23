@@ -4,7 +4,6 @@ from catboost import CatBoostClassifier
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 import warnings
-import pandas as pd
 import skimage
 import torch
 
@@ -764,14 +763,13 @@ class ConvpaintModel:
         # Move features to last dimension and flatten
         features = np.moveaxis(features, 0, -1)
         features = np.reshape(features, (-1, nb_features)) # flatten
-        features_df = pd.DataFrame(features)
 
         # Predict
         if return_proba:
-            predictions = self.classifier.predict_proba(features_df)
+            predictions = self.classifier.predict_proba(features)
             predictions = np.moveaxis(predictions, -1, 0) # [nb_classes, width*height]
         else:
-            predictions = self.classifier.predict(features_df)
+            predictions = self.classifier.predict(features)
 
         return predictions
 
@@ -804,10 +802,6 @@ class ConvpaintModel:
         # If we want to extend the features, we need to add the new to the existing features
         if extend_features:
             features, targets = self._extend_features(features, targets)
-
-        # Convert features to a DataFrame and targets to a Series
-        features = pd.DataFrame(features)
-        targets = pd.Series(targets)
 
         # Train the classifier
         self._clf_train(features, targets,

@@ -2,8 +2,6 @@ import torch
 import numpy as np
 from .conv_paint_utils import get_device, scale_img
 from .conv_paint_feature_extractor import FeatureExtractor
-import skimage
-import pandas as pd
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
 

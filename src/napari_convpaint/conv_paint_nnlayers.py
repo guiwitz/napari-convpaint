@@ -1,15 +1,10 @@
-from collections import OrderedDict
-
 import numpy as np
-import pandas as pd
-import skimage
 import torch
 from torch import nn
 from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
 from .conv_paint_utils import get_device, scale_img
 from .conv_paint_feature_extractor import FeatureExtractor
-from .conv_paint_param import Param
 
 
 AVAILABLE_MODELS = ['vgg16', 'efficient_netb0', 'convnext']
