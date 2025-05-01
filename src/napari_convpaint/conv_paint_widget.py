@@ -949,7 +949,19 @@ class ConvPaintWidget(QWidget):
         # Start training
         image_stack_norm = self._get_data_channel_first_norm(img)
         annot = annot.data
-        
+        if self.keep_training:
+            img_name = self._get_selected_img().name
+            if img_name in self.features_annots.keys():
+                # Annotations are just the new ones where we don't already have an annot (same image, same class labeled)
+                annot = ConvPaintWidget.remove_duplicates_from_all(annot, self.features_annots, img_name)
+                if np.sum(annot > 0) == 0:
+                    warnings.warn('No new pixels labeled. Training not performed.')
+                    return
+                else:
+                    self.features_annots[self.selected_channel].append(annot.copy())
+            else:
+                # If we don't have any features yet, just add the new annotations
+                self.features_annots[self.selected_channel] = [annot.copy()]
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
@@ -2025,6 +2037,8 @@ class ConvPaintWidget(QWidget):
         """Reset the training features."""
         self.cp_model.reset_features()
         self._update_training_counts()
+        # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
+        self.features_annots = {}
 
     def add_layer_with_unique_name(self, layer_data, base_name='Image Layer', labels=False):
         # Check if the layer already exists
@@ -2112,3 +2126,17 @@ class ConvPaintWidget(QWidget):
         self._reset_predict_buttons()
         # self.save_model_btn.setEnabled(True)
         self._set_model_description()
+
+    @staticmethod
+    def remove_duplicates_from_all(new_annot, existing_annotations, image_name):
+        """
+        Remove overlapping labels from new_annot based on all annotations already stored for the image.
+        """
+        cleaned = new_annot.copy()
+
+        for existing in existing_annotations.get(image_name, []):
+            assert cleaned.shape == existing.shape, "Annotation shapes must match"
+            duplicate_mask = (cleaned == existing) & (cleaned != 0)
+            cleaned[duplicate_mask] = 0
+
+        return cleaned
