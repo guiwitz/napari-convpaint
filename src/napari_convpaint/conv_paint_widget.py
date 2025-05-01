@@ -365,65 +365,75 @@ class ConvPaintWidget(QWidget):
         # === ADVANCED TAB ===
 
         # Create group boxes
-        self.advanced_settings_group = VHGroup('Annotation layers handling', orientation='G')
+        self.advanced_labels_group = VHGroup('Annotation layers handling', orientation='G')
         self.advanced_training_group = VHGroup('Continuous training', orientation='G')
         # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
         self.advanced_prediction_group = VHGroup('Output', orientation='G')
 
         # Add groups to the tab
-        self.tabs.add_named_tab('Advanced', self.advanced_settings_group.gbox)
+        self.tabs.add_named_tab('Advanced', self.advanced_labels_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_training_group.gbox)
         # self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_prediction_group.gbox)
+
+        # Text to warn the user about their responsibility
+        self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.")
+        self.advanved_labels_note.setWordWrap(True)
+        self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
 
         # Checkbox to turn off automatic addition of annot/segmentation layers
         self.check_auto_add_layers = QCheckBox('Auto add layers')
         self.check_auto_add_layers.setToolTip('Automatically add annotation and segmentation layers when selecting images')
         self.check_auto_add_layers.setChecked(self.auto_add_layers)
-        self.advanced_settings_group.glayout.addWidget(self.check_auto_add_layers, 0, 0, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.check_auto_add_layers, 1, 0, 1, 1)
 
         # Checkbox for keeping old layers
         self.check_keep_layers = QCheckBox('Keep old layers')
         self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
         self.check_keep_layers.setChecked(self.keep_layers)
-        self.advanced_settings_group.glayout.addWidget(self.check_keep_layers, 0, 1, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.check_keep_layers, 1, 1, 1, 1)
 
         # Textbox to define the prefix for the annotation layers
         self.text_annot_prefix = QtWidgets.QLineEdit()
         self.text_annot_prefix.setText('annot_')
         self.text_annot_prefix.setToolTip('Prefix for annotation layers to be used for training')
-        self.advanced_settings_group.glayout.addWidget(QLabel('Annotation prefix'), 1, 0, 1, 1)
-        self.advanced_settings_group.glayout.addWidget(self.text_annot_prefix, 1, 1, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(QLabel('Annotation prefix'), 2, 0, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.text_annot_prefix, 2, 1, 1, 1)
         # Ensure both columns are stretched equally
-        self.advanced_settings_group.glayout.setColumnStretch(0, 1)
-        self.advanced_settings_group.glayout.setColumnStretch(1, 1)
+        self.advanced_labels_group.glayout.setColumnStretch(0, 1)
+        self.advanced_labels_group.glayout.setColumnStretch(1, 1)
 
         # Button for adding annotation layers for selected images
         self.btn_add_all_annot_layers = QPushButton('Add for selected')
         self.btn_add_all_annot_layers.setToolTip('Add annotation layers for selected image layers')
-        self.advanced_settings_group.glayout.addWidget(self.btn_add_all_annot_layers, 2, 0, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 3, 0, 1, 1)
 
         # Checkbox for auto-selecting annotation layers
         self.check_auto_select_annot = QCheckBox('Auto-select annotation layers')
         self.check_auto_select_annot.setToolTip('Automatically select annotation layers when selecting images')
         self.check_auto_select_annot.setChecked(self.auto_select_annot)
-        self.advanced_settings_group.glayout.addWidget(self.check_auto_select_annot, 2, 1, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.check_auto_select_annot, 3, 1, 1, 1)
+
+        # Text to warn the user about their responsibility
+        self.advanved_training_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the channels of images are compatible.")
+        self.advanved_training_note.setWordWrap(True)
+        self.advanced_training_group.glayout.addWidget(self.advanved_training_note, 0, 0, 1, 2)
 
         # Checkbox for continuous training
         self.check_keep_training = QCheckBox('Continuous training')
         self.check_keep_training.setToolTip('Save, and use combined features in memory for training')
         self.check_keep_training.setChecked(self.keep_training)
-        self.advanced_training_group.glayout.addWidget(self.check_keep_training, 0, 0, 1, 1)
+        self.advanced_training_group.glayout.addWidget(self.check_keep_training, 1, 0, 1, 1)
 
         # Label for number of trainings performed
         self.label_training_count = QLabel('')
         self._update_training_counts()
-        self.advanced_training_group.glayout.addWidget(self.label_training_count, 0, 1, 1, 1)
+        self.advanced_training_group.glayout.addWidget(self.label_training_count, 1, 1, 1, 1)
 
         # Reset training button
         self.btn_reset_training = QPushButton('Reset continuous training')
         self.btn_reset_training.setToolTip('Clear training history and restart training counter')
-        self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 1, 0, 1, 2)
+        self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 2, 0, 1, 2)
 
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
@@ -946,9 +956,11 @@ class ConvPaintWidget(QWidget):
         self.current_model_path = 'in training'
         self._set_model_description()
 
-        # Start training
+        # Get the image data and normalize it; also get the annotations
         image_stack_norm = self._get_data_channel_first_norm(img)
         annot = annot.data
+
+        # If continuous training is activated, filter the annotations to only include new ones
         if self.keep_training:
             img_name = self._get_selected_img().name
             if img_name in self.features_annots.keys():
@@ -962,6 +974,8 @@ class ConvPaintWidget(QWidget):
             else:
                 # If we don't have any features yet, just add the new annotations
                 self.features_annots[self.selected_channel] = [annot.copy()]
+        
+        # Start training
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
