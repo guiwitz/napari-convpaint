@@ -138,10 +138,10 @@ class ConvPaintWidget(QWidget):
         # Add elements to "Layer selection" group
         # Image layer (widget for selecting the layer to segment)
         self.image_layer_selection_widget = create_widget(annotation=napari.layers.Image, label='Pick image')
-        self.image_layer_selection_widget.reset_choices()
+        self._update_image_layers()
         # Annotation layer
         self.annotation_layer_selection_widget = create_widget(annotation=napari.layers.Labels, label='Pick annotation')
-        self.annotation_layer_selection_widget.reset_choices()
+        self._update_annotation_layers()
         # Add widgets to layout
         self.layer_selection_group.glayout.addWidget(QLabel('Image layer'), 0,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.image_layer_selection_widget.native, 0,1,1,1)
@@ -267,7 +267,7 @@ class ConvPaintWidget(QWidget):
 
         # Add "FE architecture" combo box to FE group
         self.qcombo_fe_type = QComboBox()
-        self.qcombo_fe_type.addItems(sorted(ConvpaintModel.get_all_fe_models().keys()))
+        self.qcombo_fe_type.addItems(sorted(ConvpaintModel.get_fe_models_types().keys()))
         self.qcombo_fe_type.setToolTip('Select architecture of feature extraction model.')
         num_items = self.qcombo_fe_type.count()
         self.qcombo_fe_type.setMaxVisibleItems(num_items) # Make sure the dropdown shows all items
@@ -365,15 +365,15 @@ class ConvPaintWidget(QWidget):
         # === ADVANCED TAB ===
 
         # Create group boxes
-        self.advanced_settings_group = VHGroup('Settings', orientation='G')
-        self.advanced_training_group = VHGroup('Continuous Training', orientation='G')
-        self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
-        self.advanced_prediction_group = VHGroup('Prediction', orientation='G')
+        self.advanced_settings_group = VHGroup('Annotation layers handling', orientation='G')
+        self.advanced_training_group = VHGroup('Continuous training', orientation='G')
+        # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
+        self.advanced_prediction_group = VHGroup('Output', orientation='G')
 
         # Add groups to the tab
         self.tabs.add_named_tab('Advanced', self.advanced_settings_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_training_group.gbox)
-        self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)
+        # self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_prediction_group.gbox)
 
         # Checkbox to turn off automatic addition of annot/segmentation layers
@@ -387,6 +387,33 @@ class ConvPaintWidget(QWidget):
         self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
         self.check_keep_layers.setChecked(self.keep_layers)
         self.advanced_settings_group.glayout.addWidget(self.check_keep_layers, 0, 1, 1, 1)
+
+        # Textbox to define the prefix for the annotation layers
+        self.text_annot_prefix = QtWidgets.QLineEdit()
+        self.text_annot_prefix.setText('annot_')
+        self.text_annot_prefix.setToolTip('Prefix for annotation layers to be used for training')
+        self.advanced_settings_group.glayout.addWidget(QLabel('Annotation prefix'), 1, 0, 1, 1)
+        self.advanced_settings_group.glayout.addWidget(self.text_annot_prefix, 1, 1, 1, 1)
+        # Ensure both columns are stretched equally
+        self.advanced_settings_group.glayout.setColumnStretch(0, 1)
+        self.advanced_settings_group.glayout.setColumnStretch(1, 1)
+
+        # Button for adding annotation layers for selected images
+        self.btn_add_all_annot_layers = QPushButton('Add for selected')
+        self.btn_add_all_annot_layers.setToolTip('Add annotation layers for selected image layers')
+        self.advanced_settings_group.glayout.addWidget(self.btn_add_all_annot_layers, 2, 0, 1, 2)
+
+        # Checkbox for auto-selecting annotation layers
+        self.check_auto_select_annot = QCheckBox('Auto-select annotation layers')
+        self.check_auto_select_annot.setToolTip('Automatically select annotation layers when selecting images')
+        self.check_auto_select_annot.setChecked(self.auto_select_annot)
+        self.advanced_settings_group.glayout.addWidget(self.check_auto_select_annot, 3, 0, 1, 1)
+
+        # Checkbox for syncing labels layers
+        self.check_sync_labels = QCheckBox('Sync labels layers')
+        self.check_sync_labels.setToolTip('Automatically syncronize annotation and segmentation layers (cmaps and class names)')
+        self.check_sync_labels.setChecked(self.sync_labels)
+        self.advanced_settings_group.glayout.addWidget(self.check_sync_labels, 3, 1, 1, 1)
 
         # Checkbox for continuous training
         self.check_keep_training = QCheckBox('Continuous training')
@@ -404,25 +431,10 @@ class ConvPaintWidget(QWidget):
         self.btn_reset_training.setToolTip('Clear training history and restart training counter')
         self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 1, 0, 1, 2)
 
-        # Textbox to define the prefix for the annotation layers
-        self.text_annot_prefix = QtWidgets.QLineEdit()
-        self.text_annot_prefix.setText('annot_')
-        self.text_annot_prefix.setToolTip('Prefix for annotation layers to be used for training')
-        self.advanced_multifile_group.glayout.addWidget(QLabel('Annotation prefix'), 0, 0, 1, 1)
-        self.advanced_multifile_group.glayout.addWidget(self.text_annot_prefix, 0, 1, 1, 1)
-        # Ensure both columns are stretched equally
-        self.advanced_multifile_group.glayout.setColumnStretch(0, 1)
-        self.advanced_multifile_group.glayout.setColumnStretch(1, 1)
-
-        # Button for adding annotation layers for selected images
-        self.btn_add_all_annot_layers = QPushButton('Add annotation layers')
-        self.btn_add_all_annot_layers.setToolTip('Add annotation layers for selected image layers')
-        self.advanced_multifile_group.glayout.addWidget(self.btn_add_all_annot_layers, 1, 0, 1, 1)
-
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
         self.btn_train_on_selected.setToolTip('Train using selected layers beginning with "annotations')
-        self.advanced_multifile_group.glayout.addWidget(self.btn_train_on_selected, 1, 1, 1, 1)
+        # self.advanced_multifile_group.glayout.addWidget(self.btn_train_on_selected, 1, 1, 1, 1)
 
         # Checkbox for adding probabilities
         self.check_add_probas = QCheckBox('Add probabilities')
@@ -476,7 +488,7 @@ class ConvPaintWidget(QWidget):
         # class_label_text.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%)")#; font-style: italic")
         self.class_labels_layout.addWidget(class_label_text, 0, 0, 1, 10)
         # Create the class labels
-        self._create_class_labels()
+        self._create_default_class_labels()
         # Add an "add class" and a "remove class" button
         self.add_class_btn = QPushButton('Add class')
         self.add_class_btn.clicked.connect(self._on_add_class_label)
@@ -494,7 +506,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.setColumnStretch(5, 1)
         self.tabs.add_named_tab('Class labels', self.class_labels_widget)
 
-    def _create_class_labels(self):
+    def _create_default_class_labels(self):
         # Start with default class labels
         self.class_labels = [QtWidgets.QLineEdit() for _ in self.initial_labels]
         self.class_icons = [QtWidgets.QLabel() for _ in self.initial_labels]
@@ -505,7 +517,17 @@ class ConvPaintWidget(QWidget):
             self.class_labels_layout.addWidget(self.class_labels[i], i+1, 1, 1, 9)
         # Update icons if possible
         self._update_class_icons()
-    
+        # Reset the list of synced labels
+        self.annot_layers = []
+        self.seg_layers = []
+        if self.annotation_layer_selection_widget.value is not None:
+            # Get the labels layers
+            self.annot_layers.append(self.annotation_layer_selection_widget.value)
+        if "segmentation" in self.viewer.layers:
+            self.seg_layers.append(self.viewer.layers["segmentation"])
+        # Update the class labels in the layers
+        self._update_class_labels()
+
     def _on_add_class_label(self):
         new_label = QtWidgets.QLineEdit()
         self.class_labels.append(new_label)
@@ -532,11 +554,20 @@ class ConvPaintWidget(QWidget):
     def _on_remove_class_label(self, event=None):
         last_label = len(self.class_labels)
         if last_label > 2:
-            if self.annotation_layer_selection_widget.value is not None:
-                label_img = self.annotation_layer_selection_widget.value.data
-                self.annotation_layer_selection_widget.value.data[label_img == last_label] = 0
-                # Update the layer to show changes immediately
-                self.annotation_layer_selection_widget.value.refresh()
+            # If sync_labels is enabled, remove the last label from all layers memorized as annotation layers
+            if self.sync_labels:
+                annots_to_del = self.annot_layers
+            # Otherwise, remove the last label from the selected annotation layer only
+            else:
+                annots_to_del = [self.annotation_layer_selection_widget.value]
+            # Remove the last label from the class labels list
+            for layer in annots_to_del:
+                if layer is not None and layer.name in self.viewer.layers:
+                    # Get the label image and remove the last label from it
+                    label_img = layer.data
+                    label_img[label_img == last_label] = 0
+                    # Update the layer to show changes immediately
+                    layer.refresh()
             self.class_labels[-1].deleteLater()
             self.class_icons[-1].deleteLater()
             self.class_labels.pop()
@@ -556,7 +587,7 @@ class ConvPaintWidget(QWidget):
             col = cmap.map(class_num)
             pixmap = self.get_pixmap(col)
             self.class_icons[class_num-1].setPixmap(pixmap)
-            self.class_icons[class_num-1].mousePressEvent = lambda event: self.set_annot_label_class(class_num, event)
+            self.class_icons[class_num-1].mousePressEvent = lambda event: self._set_all_labels_classes(class_num, event)
         else:
             for i, _ in enumerate(self.class_labels):
                 cl = i+1
@@ -564,17 +595,20 @@ class ConvPaintWidget(QWidget):
                 pixmap = self.get_pixmap(col)
                 self.class_icons[i].setPixmap(pixmap)
                 # Bind clicking on the icon to selecting the label
-                self.class_icons[i].mousePressEvent = lambda event, idx=i: self.set_annot_label_class(idx+1, event)
+                self.class_icons[i].mousePressEvent = lambda event, idx=i: self._set_all_labels_classes(idx+1, event)
+
+    def _set_all_labels_classes(self, x, event=None):
+        labels_layers = self._get_labels_layers()
+        # Set the selected label for all annotation and segmentation layers
+        for l in labels_layers:
+            if l is not None and l.name in self.viewer.layers:
+                self.viewer.layers[l.name].selected_label = x
 
     def _update_class_labels(self, event=None):
         label_names = ["No label"] + [label.text() for label in self.class_labels]
         props = {"Class": label_names}
-        if self.annotation_layer_selection_widget.value is not None:
-           self.annotation_layer_selection_widget.value.properties = props
-        if 'segmentation' in self.viewer.layers:
-           self.viewer.layers['segmentation'].properties = props
-        # Update all annotations layers that were added for multifile training
-        for l in self.annot_layer_list:
+        labels_layers = self._get_labels_layers()
+        for l in labels_layers:
             if l is not None and l.name in self.viewer.layers:
                 self.viewer.layers[l.name].properties = props
 
@@ -627,8 +661,11 @@ class ConvPaintWidget(QWidget):
             annot_layer.mode = 'paint'
             self.viewer.layers.selection.active = None
             self.viewer.layers.selection.active = annot_layer
-        if 'segmentation' in self.viewer.layers:
-            self.viewer.layers['segmentation']. selected_label = x
+        # Also change the selected label for all (not selected) annotation layers and segmentation layers
+        labels_layers = self._get_labels_layers()
+        for l in labels_layers:
+            if l is not None and l.name in self.viewer.layers:
+                self.viewer.layers[l.name].selected_label = x
 
 ### Define the connections between the widget elements
 
@@ -636,14 +673,14 @@ class ConvPaintWidget(QWidget):
 
         # Reset layer choices in dropdown when layers are renamed; also bind this behaviour to inserted layers
         for layer in self.viewer.layers:
-            layer.events.name.connect(self.image_layer_selection_widget.reset_choices)
+            layer.events.name.connect(self._update_image_layers)
         self.viewer.layers.events.inserted.connect(self._on_insert_layer)
 
         # === HOME TAB ===
 
         # Reset layer choices in dropdowns when napari layers are added or removed
-        for layer_widget_reset in [self.annotation_layer_selection_widget.reset_choices,
-                                   self.image_layer_selection_widget.reset_choices]:
+        for layer_widget_reset in [self._update_annotation_layers,
+                                   self._update_image_layers]:
             self.viewer.layers.events.inserted.connect(layer_widget_reset)
             self.viewer.layers.events.removed.connect(layer_widget_reset)
 
@@ -731,12 +768,15 @@ class ConvPaintWidget(QWidget):
             self, 'auto_add_layers', self.check_auto_add_layers.isChecked()))
         self.check_keep_layers.stateChanged.connect(lambda: setattr(
             self, 'keep_layers', self.check_keep_layers.isChecked()))
+        self.btn_add_all_annot_layers.clicked.connect(self._on_add_all_annot_layers)
+        self.check_auto_select_annot.stateChanged.connect(lambda: setattr(
+            self, 'auto_select_annot', self.check_auto_select_annot.isChecked()))
+        self.check_sync_labels.stateChanged.connect(lambda: setattr(
+            self, 'sync_labels', self.check_sync_labels.isChecked()))
 
         self.check_keep_training.stateChanged.connect(lambda: setattr(
             self, 'keep_training', self.check_keep_training.isChecked()))
         self.btn_reset_training.clicked.connect(self._reset_train_features)
-
-        self.btn_add_all_annot_layers.clicked.connect(self._on_add_all_annot_layers)
         self.btn_train_on_selected.clicked.connect(self._on_train_on_selected)
 
         self.check_add_probas.stateChanged.connect(lambda: setattr(
@@ -750,8 +790,8 @@ class ConvPaintWidget(QWidget):
     def _on_insert_layer(self, event=None):
         """Bind the update of layer choices in dropdowns to the renaming of inserted layers."""
         layer = event.value
-        layer.events.name.connect(self.image_layer_selection_widget.reset_choices)
-        layer.events.name.connect(self.annotation_layer_selection_widget.reset_choices)
+        layer.events.name.connect(self._update_image_layers)
+        layer.events.name.connect(self._update_annotation_layers)
 
     # Layer selection
 
@@ -760,6 +800,7 @@ class ConvPaintWidget(QWidget):
         # If it is the same layer, do nothing
         if self.selected_channel == self.image_layer_selection_widget.native.currentText():
             return
+        
         # Otherwise, update the selected channel and reset the radio buttons
         initial_add_layers_flag = self.add_layers_flag # Save initial state of add_layers_flag
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
@@ -774,7 +815,6 @@ class ConvPaintWidget(QWidget):
             # Add empty layers and save old data tag for next addition
             if self.auto_add_layers:
                 self._add_empty_layers()
-                self._set_old_data_tag()
             # Activate button to add annotation and segmentation layers
             self.add_layers_btn.setEnabled(True)
             # Give info if image is very large to use "tile image"
@@ -782,6 +822,44 @@ class ConvPaintWidget(QWidget):
                 show_info('Image is very large. Consider using tiling.')
         else:
             self.add_layers_btn.setEnabled(False)
+
+        # If the option is activated, select annotation layer according to the prefix and image name
+        if self.auto_select_annot:
+
+            # Get the prefix for the annotation layers
+            annot_prefix = self.text_annot_prefix.text()
+            # Set the name of the annotations accordingly
+            annot_name = f"{annot_prefix}{self.selected_channel}"
+            # Check if there are fitting labels layers present in the viewer
+            found_layers = [layer.name for layer in self.viewer.layers
+                            if isinstance(layer, napari.layers.Labels)
+                            and layer.name[:len(annot_name)] == annot_name]
+            if "annotations" in self.viewer.layers and isinstance(self.viewer.layers["annotations"], napari.layers.Labels):
+                # If there is a layer with the name "annotations", set it as the annotation layer
+                annot_name = "annotations"
+            elif len(found_layers) > 0:
+                if len(found_layers) > 1:
+                    show_info('Multiple annotation layers found. The first one (alphabetically) is chosen.')
+                # Sort and take first one
+                found_layers.sort()
+                annot_name = found_layers[0]
+            else:
+                show_info('No annotation layer found. Please create one.')
+                return
+
+            self.viewer.layers.selection.active = self.viewer.layers[annot_name]
+            self.annotation_layer_selection_widget.value = self.viewer.layers[annot_name]
+            self.viewer.layers[annot_name].mode = 'paint'
+            self.viewer.layers[annot_name].brush_size = self.default_brush_size
+            self._on_select_annot()
+
+            # Hide all layers except the image and the annotation layer
+            for layer in self.viewer.layers:
+                if layer.name != self.selected_channel and layer.name != annot_name:
+                    layer.visible = False
+                else:
+                    layer.visible = True
+
         # Allow other methods again to add layers if that was the case before
         self.add_layers_flag = initial_add_layers_flag
 
@@ -804,6 +882,41 @@ class ConvPaintWidget(QWidget):
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
         self._add_empty_layers(event, force_add)
+
+    def _sync_cmaps(self, event=None):
+        """Update class icons and segmentation colormap when annotation colormap changes."""
+        if self.cmap_flag:
+            return
+        
+        # Determine which layer triggered the event
+        source_layer = None
+        if event is not None:
+            source_layer = event.source  # This should be the layer object
+        
+        labels_layers = self._get_labels_layers()
+        if source_layer is None and labels_layers:
+            # If no event is provided, use the first label layer as the source
+            # This allows to sync new layers to eventually existing ones
+            source_layer = labels_layers[0]
+    
+        self.cmap_flag = True
+
+        # Get the new colormap to apply to all other label layers
+        new_cmap = source_layer.colormap.copy()
+
+        for layer in labels_layers:
+            if layer != source_layer:
+                layer.colormap = new_cmap
+
+        self._update_class_icons()
+
+        self.cmap_flag = False
+
+    def _connect_all_cmaps(self):
+        """Connect colormap changes for all annotation layers."""
+        labels_layers = self._get_labels_layers()
+        for l in labels_layers:
+            l.events.colormap.connect(self._sync_cmaps)
 
     def _on_change_annot_cmap(self, event=None):
         """Update class icons and segmentation colormap when annotation colormap changes."""
@@ -927,7 +1040,7 @@ class ConvPaintWidget(QWidget):
             all_features = np.concatenate(all_features, axis=0)
             all_targets = np.concatenate(all_targets, axis=0)
 
-            self.cp_model._train_classifier(all_features, all_targets)
+            self.cp_model._clf_train(all_features, all_targets)
 
             self.current_model_path = 'trained, unsaved'
             self.trained = True
@@ -1180,7 +1293,6 @@ class ConvPaintWidget(QWidget):
         if (self.add_layers_flag # Add layers only if not triggered from layer selection
             and self.auto_add_layers): # and if auto_add_layers is checked
             self._add_empty_layers()
-            self._set_old_data_tag()
         # Reset the features for continuous training
         self._reset_train_features()
 
@@ -1212,6 +1324,8 @@ class ConvPaintWidget(QWidget):
         self.check_auto_seg.setChecked(self.auto_seg) # Adjust the button in the widget
         self.check_auto_add_layers.setChecked(self.auto_add_layers) # Adjust the button in the widget
         self.check_keep_layers.setChecked(self.keep_layers) # Adjust the button in the widget
+        self.check_auto_select_annot.setChecked(self.auto_select_annot) # Adjust the button in the widget
+        self.check_sync_labels.setChecked(self.sync_labels) # Adjust the button in the widget
         self.check_keep_training.setChecked(self.keep_training) # Adjust the button in the widget
         self.check_add_probas.setChecked(self.add_probas) # Adjust the button in the widget
         # Reset the model description
@@ -1254,7 +1368,10 @@ class ConvPaintWidget(QWidget):
         self.auto_add_layers = True # Automatically add layers when a new image is selected
         self.keep_layers = False # Keep old layers when adding new ones
         self.keep_training = False # Extend features for subsequent training
-        self.annot_layer_list = [] # List of annotation layers
+        self.auto_select_annot = False # Automatically select annotation layer based on image name
+        self.sync_labels = True # Sync colormaps and names of annotation and segmentation layers
+        self.annot_layers = [] # List of annotation layers
+        self.seg_layers = [] # List of segmentation layers
         self.add_probas = False # Add a layer with class probabilities
 
 
@@ -1384,7 +1501,7 @@ class ConvPaintWidget(QWidget):
                 setattr(new_param, attr, val) # Set the default value in the param object
         if adjusted_params: show_info(f'The feature extractor adjusted the parameters {adjusted_params}')
 
-        # Create a new model (with a new classifier and model_state)
+        # Create a new model (with a new classifier)
         self.cp_model = ConvpaintModel(param=new_param)
         self._reset_clf()
         # Reset the features for continuous training
@@ -1404,9 +1521,9 @@ class ConvPaintWidget(QWidget):
 
     def _add_empty_layers(self, event=None, force_add=True):
         """Add annotation and prediction layers to viewer. If the layer already exists,
-        remove it and add a new one. If the widget is used as third party (self.third_party=True),
-        no layer is added if it didn't exist before, unless force_add=True (e.g. when the user click
-        on the add layer button)"""
+        remove it (or rename and keep it if specified in self.keep_layers) and add a new one.
+        If the widget is used as third party (self.third_party=True), no layer is added if it didn't exist before,
+        unless force_add=True (e.g. when the user click on the add layer button)"""
 
         img = self._get_selected_img(check=True)
         if img is None:
@@ -1416,7 +1533,7 @@ class ConvPaintWidget(QWidget):
         layer_shape = self._get_annot_shape(img)
 
         if self.keep_layers:
-            self._create_annot_seg_copies()
+            self._rename_annot_seg_for_backup()
 
         # Add segmentation layer; do this first, so that the annotation layer is on top
         segmentation_exists = 'segmentation' in self.viewer.layers
@@ -1428,8 +1545,11 @@ class ConvPaintWidget(QWidget):
                 data=np.zeros((layer_shape), dtype=np.uint8),
                 name='segmentation'
                 )
+            # Add it to the list of layers where class labels shall be updated
+            if self.sync_labels:
+                self.seg_layers.append(self.viewer.layers['segmentation'])
     
-        # Add annotation layer
+        # Add annotation layer; do this second, so that the annotation layer is on top
         annotation_exists = 'annotations' in self.viewer.layers
         if annotation_exists:
             self.viewer.layers.remove('annotations')
@@ -1439,6 +1559,9 @@ class ConvPaintWidget(QWidget):
                 data=np.zeros((layer_shape), dtype=np.uint8),
                 name='annotations'
                 )
+            # Add it to the list of layers where class labels shall be updated
+            if self.sync_labels:
+                self.annot_layers.append(self.viewer.layers['annotations'])
         
         # Activate the annotation layer, select it in the dropdown and activate paint mode
         if 'annotations' in self.viewer.layers:
@@ -1446,28 +1569,41 @@ class ConvPaintWidget(QWidget):
             self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
             self.viewer.layers['annotations'].mode = 'paint'
             self.viewer.layers['annotations'].brush_size = self.default_brush_size
-        
-        # Connect colormap events in new layers
-        labels_layer = self.annotation_layer_selection_widget.value
-        labels_layer.events.colormap.connect(self._on_change_annot_cmap)
-        seg_layer = self.viewer.layers['segmentation']
-        seg_layer.events.colormap.connect(self._on_change_seg_cmap)
 
+        # Connect colormap events in new layers
+        # labels_layer = self.annotation_layer_selection_widget.value
+        # labels_layer.events.colormap.connect(self._on_change_annot_cmap)
+        # seg_layer = self.viewer.layers['segmentation']
+        # seg_layer.events.colormap.connect(self._on_change_seg_cmap)
+        
         # Update class labels
         self._update_class_labels()
+        # Sync all labels layers (annotations and segmentation) between each other
+        self._connect_all_cmaps()
 
-    def _create_annot_seg_copies(self):
+        # Save data tag, to be able to rename these layers later
+        self._set_old_data_tag()
+
+    def _rename_annot_seg_for_backup(self):
         """Create copies of the annotations and segmentation layers."""
+        # Use the prefix if one is saved, else use "annot_"
+        prefix = self.text_annot_prefix.text()
+        prefix = prefix if prefix != '' else 'annot_'
+        # Rename the layers to avoid overwriting them
         if 'annotations' in self.viewer.layers:
-            self.viewer.add_labels(
-                data=self.viewer.layers['annotations'].data.copy(),
-                name=f'annotations_{self.old_data_tag}'
-                )
+            full_name = f'{prefix}{self.old_data_tag}'
+            self.viewer.layers['annotations'].name = full_name
+            # Add it to the list of layers where class labels shall be updated
+            if self.sync_labels:
+                self.annot_layers.append(self.viewer.layers[full_name])
+        # Same for segmentation layer
+        prefix_seg = 'seg_'
         if 'segmentation' in self.viewer.layers:
-            self.viewer.add_labels(
-                data=self.viewer.layers['segmentation'].data.copy(),
-                name=f'segmentation_{self.old_data_tag}'
-                )
+            full_name = f'{prefix_seg}{self.old_data_tag}'
+            self.viewer.layers['segmentation'].name = full_name
+            # Add it to the list of layers where class labels shall be updated
+            if self.sync_labels:
+                self.seg_layers.append(self.viewer.layers[full_name])
 
     def _reset_radio_data_dim_choices(self):
         """Set radio buttons active/inactive depending on selected image type.
@@ -1647,6 +1783,7 @@ class ConvPaintWidget(QWidget):
         if 'segmentation' not in layer_names:
             data = self._get_selected_img()
             layer_shape = self._get_annot_shape(data)
+            # Create a new segmentation layer with the same shape as the image
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8), name='segmentation'
                 )
@@ -1866,6 +2003,37 @@ class ConvPaintWidget(QWidget):
         problem = (annot is None or img is None
                    or annot.data.shape != self._get_annot_shape(img))
         return not problem
+
+    def _update_image_layers(self):
+        """"Update the image layers in the viewer sorted by their names."""
+        # Update the choices in the image layer selection widget
+        self.image_layer_selection_widget.reset_choices()
+
+        # Sort them
+        # img_layer_list = [layer for layer in self.viewer.layers
+        #                   if isinstance(layer, napari.layers.Image)]
+        img_layer_list = [layer for layer in self.image_layer_selection_widget.choices
+                          if isinstance(layer, napari.layers.Image)]
+        img_layer_list.sort(key=lambda x: x.name)
+        # self.image_layer_selection_widget.choices = [] # reset; seems necessary to allow sorting
+        # self.image_layer_selection_widget.choices = img_layer_list
+        return img_layer_list
+
+    def _update_annotation_layers(self):
+        """"Update the annotation layers in the viewer sorted by their names."""
+        # Update the choices in the annotation layer selection widget
+        self.annotation_layer_selection_widget.reset_choices()
+
+        # Sort them
+        # annot_layer_list = [layer for layer in self.viewer.layers
+        #                     if isinstance(layer, napari.layers.Labels)]
+        annot_layer_list = [layer for layer in self.annotation_layer_selection_widget.choices
+                            if isinstance(layer, napari.layers.Labels)]
+        annot_layer_list.sort(key=lambda x: x.name)
+        # self.annotation_layer_selection_widget.choices = [] # reset; seems necessary to allow sorting
+        # self.annotation_layer_selection_widget.choices = annot_layer_list
+        return annot_layer_list
+
     
 ### ADVANCED TAB
     
@@ -1882,16 +2050,16 @@ class ConvPaintWidget(QWidget):
 
     def add_layer_with_unique_name(self, layer_data, base_name='Image Layer', labels=False):
         # Check if the layer already exists
-        existing_layers = [layer for layer in self.viewer.layers if base_name in layer.name]
-        
-        # Determine a new name
-        if existing_layers:
-            # Find the highest number already used
-            max_num = max([int(layer.name.split(' ')[-1]) if layer.name.split(' ')[-1].isdigit() else 0
-                           for layer in existing_layers], default=0)
-            new_name = f"{base_name} {max_num + 1}"
-        else:
-            new_name = base_name
+        existing_layers = [layer.name for layer in self.viewer.layers]
+        new_name = base_name
+        exists = new_name in existing_layers
+
+        # If the layer already exists, find a unique name
+        num = 1
+        while exists:
+            new_name = f"{base_name} [{num}]"
+            num += 1
+            exists = new_name in existing_layers
 
         # Add the new layer
         if labels:
@@ -1899,32 +2067,46 @@ class ConvPaintWidget(QWidget):
         else:
             self.viewer.add_image(layer_data, name=new_name)
 
+        return new_name
+
     def _on_add_all_annot_layers(self):
-        img_layer_list = list(self.viewer.layers.selection)
+        # Get the selected image layers in the order they are in the widget
+        img_layer_list = [layer for layer in self.viewer.layers
+                          if layer in self.viewer.layers.selection][::-1]
         prefix = self.text_annot_prefix.text()
         for img in img_layer_list[::-1]: # reverse to have annot for first img on top
             layer_shape = self._get_annot_shape(img)
             layer_name = f'{prefix}{img.name}'
             data = np.zeros((layer_shape), dtype=np.uint8)
-            self.add_layer_with_unique_name(data, layer_name, labels=True)
-            labels_layer = self.viewer.layers[layer_name]
+            new_layer_name = self.add_layer_with_unique_name(data, layer_name, labels=True)
+            labels_layer = self.viewer.layers[new_layer_name]
             # Set the annotation layer to paint mode
             labels_layer.mode = 'paint'
             labels_layer.brush_size = self.default_brush_size
             # Connect colormap events in new layers
             labels_layer.events.colormap.connect(self._on_change_annot_cmap)
-            self.annot_layer_list.append(labels_layer)
+            if self.sync_labels:
+                self.annot_layers.append(labels_layer)
         # Update class labels
         self._update_class_labels()
+        # Sync all labels layers (annotations and segmentation) between each other
+        self._connect_all_cmaps()
+        # Sync the new labels' cmaps with the existing ones
+        self._sync_cmaps()
 
     def _on_train_on_selected(self):
+        # Get selected layers (arbitrary order) and sort them by their names
         layer_list = list(self.viewer.layers.selection)
-        # Sort them by their names
         layer_list.sort(key=lambda x: x.name)
+        # Get the image and annotation layers based on the prefix
         prefix = self.text_annot_prefix.text()
         prefix_len = len(prefix)
-        annot_list = [layer for layer in layer_list if layer.name[:prefix_len] == prefix]
-        img_list = [layer for layer in layer_list if not layer.name[:prefix_len] == prefix]
+        annot_list = [layer for layer in layer_list
+                      if layer.name[:prefix_len] == prefix
+                      and isinstance(layer, napari.layers.Labels)]
+        img_list = [layer for layer in layer_list
+                    if not layer.name[:prefix_len] == prefix
+                    and isinstance(layer, napari.layers.Image)]
         # NOTE: Checks are technically not necessary here, as it is done in the CPModel
         if len(annot_list) == 0 or len(img_list) == 0 or len(annot_list) != len(img_list):
             warnings.warn('Please select images and corresponding annotation layers')
@@ -1953,3 +2135,11 @@ class ConvPaintWidget(QWidget):
         self._reset_predict_buttons()
         # self.save_model_btn.setEnabled(True)
         self._set_model_description()
+
+    def _get_labels_layers(self):
+        # Depending on the option checkbox, get all annotation layers or only the selected one
+        all_annots = self.annot_layers.copy() if self.sync_labels else [self.annotation_layer_selection_widget.value]
+        # Similar for Segmentation layers
+        all_segs = self.seg_layers.copy() if self.sync_labels else [self.viewer.layers['segmentation']] if 'segmentation' in self.viewer.layers else []
+        # Return combined list of all annotation and segmentation layers
+        return all_annots + all_segs
