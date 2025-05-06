@@ -148,19 +148,19 @@ class ConvPaintWidget(QWidget):
         self.layer_selection_group.glayout.addWidget(QLabel('Annotation layer'), 1,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.annotation_layer_selection_widget.native, 1,1,1,1)
         # Add button for adding annotation/segmentation layers
-        self.add_layers_btn = QPushButton('Add annotations/segmentation layers')
+        self.add_layers_btn = QPushButton('Add annotation layer')
         self.add_layers_btn.setEnabled(True)
         self.layer_selection_group.glayout.addWidget(self.add_layers_btn, 2,0,1,2)
 
         # Add buttons for "Image Processing" group
         # Radio buttons for "Data Dimensions"
         self.button_group_channels = QButtonGroup()
-        self.radio_single_channel = QRadioButton('Single channel image/stack')
+        self.radio_single_channel = QRadioButton('Single channel image')
         self.radio_single_channel.setToolTip('2D images or 3D images where additional dimension is NOT channels')
         self.radio_multi_channel = QRadioButton('Multichannel image')
         self.radio_multi_channel.setToolTip('Images with an additional channel dimension')
         self.radio_rgb = QRadioButton('RGB image')
-        self.radio_rgb.setToolTip('Use this option with images displayed as RGB')
+        self.radio_rgb.setToolTip('This option is used with images displayed as RGB')
         self.radio_single_channel.setChecked(True)
         self.channel_buttons = [self.radio_single_channel, self.radio_multi_channel, self.radio_rgb]
         for x in self.channel_buttons: x.setEnabled(False)
@@ -226,7 +226,7 @@ class ConvPaintWidget(QWidget):
         self.spin_downsample.setMinimum(1)
         self.spin_downsample.setMaximum(10)
         self.spin_downsample.setValue(1)
-        self.spin_downsample.setToolTip('Reduce image size for faster computing.')
+        self.spin_downsample.setToolTip('Reduce image size for faster computing (output is rescaled to original size).')
         self.acceleration_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
         self.acceleration_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
         # "Smoothen output" spinbox
@@ -240,12 +240,12 @@ class ConvPaintWidget(QWidget):
         # "Tile annotations" checkbox
         self.check_tile_annotations = QCheckBox('Tile annotations for training')
         self.check_tile_annotations.setChecked(False)
-        self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\nDisable for models that extract long range features (e.g. DINO)!')
+        self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\nDisable for models that extract long range features (e.g. DINO).')
         self.acceleration_group.glayout.addWidget(self.check_tile_annotations, 0,0,1,1)
         # "Tile image" checkbox
         self.check_tile_image = QCheckBox('Tile image for segmentation')
         self.check_tile_image.setChecked(False)
-        self.check_tile_image.setToolTip('Tile image to reduce memory usage.\nTake care when using models that extract long range features (e.g. DINO).')
+        self.check_tile_image.setToolTip('Tile image to reduce memory usage.\nUse with care when using models that extract long range features (e.g. DINO).')
         self.acceleration_group.glayout.addWidget(self.check_tile_image, 0,1,1,1)
 
         # === MODEL TAB ===
@@ -377,7 +377,8 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Advanced', self.advanced_prediction_group.gbox)
 
         # Text to warn the user about their responsibility
-        self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.")
+        self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.\n")
+        self.advanved_labels_note.setStyleSheet("font-size: 12px; color: rgba(120, 120, 120, 70%); font-style: italic")
         self.advanved_labels_note.setWordWrap(True)
         self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
 
@@ -393,35 +394,36 @@ class ConvPaintWidget(QWidget):
         self.check_keep_layers.setChecked(self.keep_layers)
         self.advanced_labels_group.glayout.addWidget(self.check_keep_layers, 1, 1, 1, 1)
 
-        # Textbox to define the prefix for the annotation layers
-        self.text_annot_prefix = QtWidgets.QLineEdit()
-        self.text_annot_prefix.setText('annot_')
-        self.text_annot_prefix.setToolTip('Prefix for annotation layers to be used for training')
-        self.advanced_labels_group.glayout.addWidget(QLabel('Annotation prefix'), 2, 0, 1, 1)
-        self.advanced_labels_group.glayout.addWidget(self.text_annot_prefix, 2, 1, 1, 1)
-        # Ensure both columns are stretched equally
-        self.advanced_labels_group.glayout.setColumnStretch(0, 1)
-        self.advanced_labels_group.glayout.setColumnStretch(1, 1)
-
         # Button for adding annotation layers for selected images
         self.btn_add_all_annot_layers = QPushButton('Add for selected')
         self.btn_add_all_annot_layers.setToolTip('Add annotation layers for selected image layers')
-        self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 3, 0, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 2, 0, 1, 1)
 
         # Checkbox for auto-selecting annotation layers
         self.check_auto_select_annot = QCheckBox('Auto-select annotation layers')
         self.check_auto_select_annot.setToolTip('Automatically select annotation layers when selecting images')
         self.check_auto_select_annot.setChecked(self.auto_select_annot)
-        self.advanced_labels_group.glayout.addWidget(self.check_auto_select_annot, 3, 1, 1, 1)
+        self.advanced_labels_group.glayout.addWidget(self.check_auto_select_annot, 2, 1, 1, 1)
+
+        # Textbox to define the prefix for the annotation layers; NOTE: DISABLED FOR NOW
+        # self.text_annot_prefix = QtWidgets.QLineEdit()
+        # self.text_annot_prefix.setText('annot_')
+        # self.text_annot_prefix.setToolTip('Prefix for annotation layers to be used for training')
+        # self.advanced_labels_group.glayout.addWidget(QLabel('Annotation prefix'), 2, 0, 1, 1)
+        # self.advanced_labels_group.glayout.addWidget(self.text_annot_prefix, 2, 1, 1, 1)
+        # Ensure both columns are stretched equally
+        self.advanced_labels_group.glayout.setColumnStretch(0, 1)
+        self.advanced_labels_group.glayout.setColumnStretch(1, 1)
 
         # Text to warn the user about their responsibility
-        self.advanved_training_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the channels of images are compatible.")
-        self.advanved_training_note.setWordWrap(True)
-        self.advanced_training_group.glayout.addWidget(self.advanved_training_note, 0, 0, 1, 2)
+        self.advanced_training_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the channels of images are compatible.\n")
+        self.advanced_training_note.setStyleSheet("font-size: 12px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        self.advanced_training_note.setWordWrap(True)
+        self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 2)
 
         # Checkbox for continuous training
         self.check_keep_training = QCheckBox('Continuous training')
-        self.check_keep_training.setToolTip('Save, and use combined features in memory for training')
+        self.check_keep_training.setToolTip('Save and use combined features in memory for training')
         self.check_keep_training.setChecked(self.keep_training)
         self.advanced_training_group.glayout.addWidget(self.check_keep_training, 1, 0, 1, 1)
 
@@ -438,13 +440,18 @@ class ConvPaintWidget(QWidget):
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
         self.btn_train_on_selected.setToolTip('Train using selected layers beginning with "annotations')
-        # self.advanced_multifile_group.glayout.addWidget(self.btn_train_on_selected, 1, 1, 1, 1)
+        # self.advanced_multifile_group.glayout.addWidget(self.btn_train_on_selected, 1, 1, 1, 1) # NOTE: TURNED OFF FOR NOW
 
         # Checkbox for adding probabilities
-        self.check_add_probas = QCheckBox('Add probabilities')
-        self.check_add_probas.setToolTip('Add an additional layer with class probabilities when segmenting')
+        self.check_add_seg = QCheckBox('Segmentation')
+        self.check_add_seg.setToolTip('Add a layer with the predicted segmentation as output (= highest class probability)')
+        self.check_add_seg.setChecked(self.add_seg)
+        self.advanced_prediction_group.glayout.addWidget(self.check_add_seg, 0, 0, 1, 1)
+
+        self.check_add_probas = QCheckBox('Probabilities')
+        self.check_add_probas.setToolTip('Add a layer with class probabilities as output')
         self.check_add_probas.setChecked(self.add_probas)
-        self.advanced_prediction_group.glayout.addWidget(self.check_add_probas, 0, 0, 1, 1)
+        self.advanced_prediction_group.glayout.addWidget(self.check_add_probas, 0, 1, 1, 1)
 
         # === PROJECT TAB (MULTIFILE) ===
 
@@ -547,24 +554,26 @@ class ConvPaintWidget(QWidget):
         new_icon = QtWidgets.QLabel()
         self.class_icons.append(new_icon)
         self.class_labels_layout.addWidget(new_icon, len(self.class_labels), 0)
-        if self.annotation_layer_selection_widget.value is not None:
-            self._update_class_icons(len(self.class_labels))
-            self._update_class_labels()
+        # Update the icon with the color of the last label and all class labels
+        self._update_class_icons(len(self.class_labels))
+        self._update_class_labels()
         # Move the add, remove and reset buttons one down
         self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
         self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
         self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
     
     def _on_remove_class_label(self, event=None):
-        last_label = len(self.class_labels)
-        if last_label > 2:
+        last_label_idx = len(self.class_labels)
+        if last_label_idx > 2:
+            # Remove the annotations from all annotation layers
             for layer in self.annot_layers:
                 if layer is not None and layer.name in self.viewer.layers:
-                    # Get the label image and remove the last label from it
+                    # Get the annotations image and remove the last label from it
                     label_img = layer.data
-                    label_img[label_img == last_label] = 0
+                    label_img[label_img == last_label_idx] = 0
                     # Update the layer to show changes immediately
                     layer.refresh()
+            # Remove the last label and icon from the layout
             self.class_labels[-1].deleteLater()
             self.class_icons[-1].deleteLater()
             self.class_labels.pop()
@@ -572,6 +581,7 @@ class ConvPaintWidget(QWidget):
             self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
             self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
             self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+            # Update the icons and class labels
             self._update_class_labels()
         else:
             show_info('You need at least two classes.')
@@ -579,12 +589,15 @@ class ConvPaintWidget(QWidget):
     def _update_class_icons(self, class_num=None, event=None):
         if self.annotation_layer_selection_widget.value is None:
             return
+        # Get the colormap from the annotation layer
         cmap = self.annotation_layer_selection_widget.value.colormap.copy()
+        # Set the colormap to the annotation layer
         if class_num is not None:
             col = cmap.map(class_num)
             pixmap = self.get_pixmap(col)
             self.class_icons[class_num-1].setPixmap(pixmap)
             self.class_icons[class_num-1].mousePressEvent = lambda event: self._set_all_labels_classes(class_num, event)
+        # Update all icons with the colors of the class labels
         else:
             for i, _ in enumerate(self.class_labels):
                 cl = i+1
@@ -595,12 +608,14 @@ class ConvPaintWidget(QWidget):
                 self.class_icons[i].mousePressEvent = lambda event, idx=i: self._set_all_labels_classes(idx+1, event)
 
     def _set_all_labels_classes(self, x, event=None):
+        # For all annotations and segmentation layers added previously, set the selected label to x
         labels_layers = self.annot_layers + self.seg_layers
         for l in labels_layers:
             if l is not None and l.name in self.viewer.layers:
                 self.viewer.layers[l.name].selected_label = x
 
     def _update_class_labels(self, event=None):
+        # For all annotation and segmentation layers, set the class labels (= layer property) to the ones defined in the widget
         label_names = ["No label"] + [label.text() for label in self.class_labels]
         props = {"Class": label_names}
         labels_layers = self.annot_layers + self.seg_layers
@@ -773,6 +788,8 @@ class ConvPaintWidget(QWidget):
         self.btn_reset_training.clicked.connect(self._reset_train_features)
         self.btn_train_on_selected.clicked.connect(self._on_train_on_selected)
 
+        self.check_add_seg.stateChanged.connect(lambda: setattr(
+            self, 'add_seg', self.check_add_seg.isChecked()))
         self.check_add_probas.stateChanged.connect(lambda: setattr(
             self, 'add_probas', self.check_add_probas.isChecked()))
 
@@ -800,7 +817,7 @@ class ConvPaintWidget(QWidget):
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         img = self._get_selected_img()
         if img is not None:
-            self.add_layers_flag = False # Turn off layer creation, since we do it below
+            self.add_layers_flag = False # Turn off layer creation, instead we do it manually below
             # Set radio buttons depending on selected image type
             self._reset_radio_data_dim_choices()
             self._reset_radio_norm_choices()
@@ -825,9 +842,9 @@ class ConvPaintWidget(QWidget):
             # Set the name of the annotations accordingly
             annot_name = f"{annot_prefix}{self.selected_channel}"
             # Check if there are fitting labels layers present in the viewer
-            found_layers = [layer.name for layer in self.viewer.layers
-                            if isinstance(layer, napari.layers.Labels)
-                            and layer.name[:len(annot_name)] == annot_name]
+            found_layers = [layer.name for layer in self.viewer.layers # Take all layers
+                            if isinstance(layer, napari.layers.Labels) # that are labels layers
+                            and layer.name[:len(annot_name)] == annot_name] # and start with the prefix
             if "annotations" in self.viewer.layers and isinstance(self.viewer.layers["annotations"], napari.layers.Labels):
                 # If there is a layer with the name "annotations", set it as the annotation layer
                 annot_name = "annotations"
@@ -868,9 +885,8 @@ class ConvPaintWidget(QWidget):
         self._on_change_annot_cmap()
         self._update_class_labels()
         if self.image_layer_selection_widget.value is not None:
-            labels = self.annotation_layer_selection_widget.value
             img = self.image_layer_selection_widget.value
-            if not self._approve_annotation_layer_shape(labels, img):
+            if not self._approve_annotation_layer_shape(labels_layer, img):
                 warnings.warn('Annotation layer has wrong shape for the selected data')
 
     def _on_add_annot_seg_layers(self, event=None, force_add=True):
@@ -879,6 +895,8 @@ class ConvPaintWidget(QWidget):
 
     def _sync_cmaps(self, event=None):
         """Update class icons and segmentation colormap when annotation colormap changes."""
+
+        # Avoid infinite loop when changing colormaps
         if self.cmap_flag:
             return
         
@@ -892,7 +910,8 @@ class ConvPaintWidget(QWidget):
             # If no event is provided, use the first label layer as the source
             # This allows to sync new layers to eventually existing ones
             source_layer = labels_layers[0]
-    
+
+        # Make sure we are not in a loop
         self.cmap_flag = True
 
         # Get the new colormap to apply to all other label layers
@@ -904,6 +923,7 @@ class ConvPaintWidget(QWidget):
 
         self._update_class_icons()
 
+        # Turn off the flag to allow for new events
         self.cmap_flag = False
 
     def _connect_all_cmaps(self):
@@ -914,33 +934,45 @@ class ConvPaintWidget(QWidget):
 
     def _on_change_annot_cmap(self, event=None):
         """Update class icons and segmentation colormap when annotation colormap changes."""
-        if (self.cmap_flag or
-            (event is not None and event.source != self.annotation_layer_selection_widget.value)):
+        if (self.cmap_flag or # Avoid infinite loop
+            (event is not None and event.source != self.annotation_layer_selection_widget.value)): # Only triggers of annotation layer
             return
+        
+        # Make sure we are not in a loop
         self.cmap_flag = True
+
         if 'segmentation' in self.viewer.layers:
             self.viewer.layers['segmentation'].colormap = self.annotation_layer_selection_widget.value.colormap.copy()
             self._update_class_icons()
+
+        # Turn off the flag to allow for new events
         self.cmap_flag = False
 
     def _on_change_seg_cmap(self, event=None):
         """Update annotation colormap when segmentation colormap changes."""
-        if (self.cmap_flag or
-            (event is not None and event.source != self.viewer.layers['segmentation'])):
+        if (self.cmap_flag or # Avoid infinite loop
+            (event is not None and event.source != self.viewer.layers['segmentation'])): # Only triggers of segmentation layer
             return
+        
+        # Make sure we are not in a loop
         self.cmap_flag = True
+
         if 'segmentation' in self.viewer.layers:
             self.annotation_layer_selection_widget.value.colormap = self.viewer.layers['segmentation'].colormap.copy()
             self._update_class_icons()
+        
+        # Turn off the flag to allow for new events
         self.cmap_flag = False
 
     # Train
 
     def _on_train(self, event=None):
         """Given a set of new annotations, update the CatBoost classifier."""
+
         # Get the data
         img = self._get_selected_img(check=True)
         annot = self.annotation_layer_selection_widget.value
+
         # Check if annotations of at least 2 classes are present
         unique_labels = np.unique(annot.data)
         unique_labels = unique_labels[unique_labels != 0]
@@ -948,6 +980,7 @@ class ConvPaintWidget(QWidget):
             and self.keep_training == False
             and self.cp_model.num_trainings == 0):
             raise Exception('You need annotations for at least foreground and background')
+
         # Check if annotations layer has correct shape for the chosen data type
         if not self._approve_annotation_layer_shape(annot, img):
             raise Exception('Annotation layer has wrong shape for the chosen data')
@@ -993,8 +1026,9 @@ class ConvPaintWidget(QWidget):
         self.current_model_path = 'trained, unsaved'
         self.trained = True
         self._reset_predict_buttons()
-        # self.save_model_btn.setEnabled(True)
         self._set_model_description()
+
+        # Automatically segment the image if the option is activated
         if self.auto_seg:
             self._on_predict()
 
@@ -1069,19 +1103,10 @@ class ConvPaintWidget(QWidget):
     def _on_predict(self, event=None):
         """Predict the segmentation of the currently viewed frame based 
         on a classifier trained with annotations"""
-        # Perform checks as preparation for prediction
-
-        # NOTE: Do this in cp_model instead
-        # if self.cp_model.fe_model is None:
-        #     raise Exception('You have to define and load a model first')
         
-        # if self.cp_model.classifier is None:
-        #     self._on_train()
-
-        self._check_create_prediction_layer()
+        # Perform checks as preparation for prediction
         img = self._get_selected_img(check=True)
-
-        if self.image_mean is None:
+        if self.image_mean is None or self.image_std is None:
             self._get_image_stats(img)
 
         # Start prediction
@@ -1097,42 +1122,30 @@ class ConvPaintWidget(QWidget):
 
             # Get image data and stats depending on the data dim and norm mode
             norm_mode = self.cp_model.get_param("normalize")
-            if data_dims in ['2D', '2D_RGB', '3D_multi']:
-                image_plane = self._get_data_channel_first(img)
+            img = self._get_data_channel_first(img)
+            if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
+                image_plane = img
                 if norm_mode != 1:
                     image_mean = self.image_mean
                     image_std = self.image_std
 
-            if data_dims == '3D_single':
+            if data_dims == '3D_single': # Stack dim is first (no channels)
                 step = self.viewer.dims.current_step[0]
-                image_plane = img.data[step]
-                if norm_mode == 2: # over stack (only 1 value in stack dim)
+                image_plane = img[step]
+                if norm_mode == 2: # over stack (only 1 value in stack dim; 1, 1, 1)
                     image_mean = self.image_mean
                     image_std = self.image_std
-                if norm_mode == 3: # by image (use values for current step)
+                if norm_mode == 3: # by image (use values for current step; N, 1, 1)
                     image_mean = self.image_mean[step]
                     image_std = self.image_std[step]
-            
-            if data_dims == '3D_RGB':
-                step = self.viewer.dims.current_step[0]
-                # NOTE: stats are calculated directly on layer data which has ZHWC
-                if norm_mode == 2: # over stack (only 1 value in stack dim)
-                    image_mean = self.image_mean[0] 
-                    image_std = self.image_std[0]
-                if norm_mode == 3: # by image (use values for current step)
-                    image_mean = self.image_mean[step]
-                    image_std = self.image_std[step]
-                image_plane = img.data[step]
-                image_plane = np.moveaxis(image_plane, -1, 0)
 
-            if data_dims == '4D':
-                # for 4D, channel is always first, t/z second
+            if data_dims in ['4D', '3D_RGB']: # Stack dim is second (channels first)
                 step = self.viewer.dims.current_step[1]
-                image_plane = img.data[:, step]
-                if norm_mode == 2: # over stack (only 1 value in stack dim)
-                    image_mean = self.image_mean[:,0,::]
-                    image_std = self.image_std[:,0,::]
-                if norm_mode == 3: # by image (use values for current step)
+                image_plane = img[:, step]
+                if norm_mode == 2: # over stack (only 1 value in stack dim; C, 1, 1, 1)
+                    image_mean = self.image_mean[:,0]
+                    image_std = self.image_std[:,0]
+                if norm_mode == 3: # by image (use values for current step; C, N, 1, 1)
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
             
@@ -1142,29 +1155,31 @@ class ConvPaintWidget(QWidget):
 
             # Predict image
             probas, segmentation = self.cp_model._predict(image_plane, add_seg=True)
-            
-            # Update segmentation layer
-            if data_dims in ['2D', '2D_RGB', '3D_multi']:
-                self.viewer.layers['segmentation'].data = segmentation
-            else: # 3D_single, 4D, 3D_RGB
-                 # seg has no channel dim -> z is first
-                self.viewer.layers['segmentation'].data[step] = segmentation
-            self.viewer.layers['segmentation'].refresh()
-
-            # Add probabilities if enabled
-            if self.add_probas:
-                num_classes = probas.shape[:1]
-                spatial_dims = self.viewer.layers['segmentation'].data.shape
-                probas_img = np.zeros(num_classes+spatial_dims, dtype=np.float32)
-                if data_dims in ['2D', '2D_RGB', '3D_multi']:
-                    probas_img = probas
-                else: # 3D_single, 4D, 3D_RGB
-                    probas_img[:, step] = probas
-                self.add_layer_with_unique_name(probas_img, base_name='Class probabilities')
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(False)
+            self.viewer.window._status_bar._toggle_activity_dock(False)            
+
+        self._check_create_prediction_layer()
+
+        # Update segmentation layer
+        if data_dims in ['2D', '2D_RGB', '3D_multi']:
+            self.viewer.layers['segmentation'].data = segmentation
+        else: # 3D_single, 4D, 3D_RGB
+                # seg has no channel dim -> z is first
+            self.viewer.layers['segmentation'].data[step] = segmentation
+        self.viewer.layers['segmentation'].refresh()
+
+        # Add probabilities if enabled
+        if self.add_probas:
+            num_classes = probas.shape[:1]
+            spatial_dims = self.viewer.layers['segmentation'].data.shape
+            probas_img = np.zeros(num_classes+spatial_dims, dtype=np.float32)
+            if data_dims in ['2D', '2D_RGB', '3D_multi']:
+                probas_img = probas
+            else: # 3D_single, 4D, 3D_RGB
+                probas_img[:, step] = probas
+            self.add_layer_with_unique_name(probas_img, base_name='Class probabilities')
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
@@ -1331,12 +1346,14 @@ class ConvPaintWidget(QWidget):
         self._reset_model()
         # Reset the widget attributes and the according buttons
         self._reset_attributes()
-        self.check_auto_seg.setChecked(self.auto_seg) # Adjust the button in the widget
-        self.check_auto_add_layers.setChecked(self.auto_add_layers) # Adjust the button in the widget
-        self.check_keep_layers.setChecked(self.keep_layers) # Adjust the button in the widget
-        self.check_auto_select_annot.setChecked(self.auto_select_annot) # Adjust the button in the widget
-        self.check_keep_training.setChecked(self.keep_training) # Adjust the button in the widget
-        self.check_add_probas.setChecked(self.add_probas) # Adjust the button in the widget
+        # Adjust the buttons in the widget
+        self.check_auto_seg.setChecked(self.auto_seg) 
+        self.check_auto_add_layers.setChecked(self.auto_add_layers)
+        self.check_keep_layers.setChecked(self.keep_layers)
+        self.check_auto_select_annot.setChecked(self.auto_select_annot)
+        self.check_keep_training.setChecked(self.keep_training)
+        self.check_add_seg.setChecked(self.add_seg)
+        self.check_add_probas.setChecked(self.add_probas)
         # Reset the model description
         self._set_model_description()
         # Reset labels names
@@ -1380,6 +1397,7 @@ class ConvPaintWidget(QWidget):
         self.auto_select_annot = False # Automatically select annotation layer based on image name
         self.annot_layers = [] # List of annotation layers
         self.seg_layers = [] # List of segmentation layers
+        self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
 
 
@@ -1594,7 +1612,7 @@ class ConvPaintWidget(QWidget):
         """Create copies of the annotations and segmentation layers."""
         # Use the prefix if one is saved, else use "annot_"
         prefix = self.text_annot_prefix.text()
-        prefix = prefix if prefix != '' else 'annot_'
+        prefix = prefix if prefix != '' else 'annotations_'
         # Rename the layers to avoid overwriting them
         if 'annotations' in self.viewer.layers:
             full_name = f'{prefix}{self.old_data_tag}'
@@ -1943,42 +1961,51 @@ class ConvPaintWidget(QWidget):
         """Get data from selected channel. Output has channel (if present) in 
         first position and is normalized."""
         image_stack = self._get_data_channel_first(img)
-        if self.image_mean is None:
+
+        # If stats are not set, compute them
+        if self.image_mean is None or self.image_std is None:
             self._get_image_stats(img)
+
         # Normalize image
         if self.cp_model.get_param("normalize") != 1:
             image_stack = normalize_image(
                 image=image_stack,
                 image_mean=self.image_mean,
                 image_std=self.image_std)
+    
         return image_stack
 
     def _get_image_stats(self, img):
         """Get image stats depending on the normalization settings and data dimensions."""
+        
         # If no image is selected, set stats to None
         if img is None:
             self.image_mean, self.image_std = None, None
             return
 
-        # put channels in format (C, T/Z, H, W)
+        # Assure to have channels dimension first, get the data_dims and normalization mode
         data = self._get_data_channel_first(img)
         data_dims = self._get_data_dims(img)
         norm_mode = self.cp_model.get_param("normalize")
 
-        if norm_mode == 2: # normalize over stack
+        # Compute image stats depending on the normalization mode
+        if norm_mode == 2: # normalize over stack --> only keep channels dimension
             if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]:
+                # 3D multi/2D_RGB or 4D/3D_RGB --> (C,1,1) or (C,1,1,1)
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
                     ignore_n_first_dims=1) # ignore channels dimension, but norm over stack
-            else: # 2D or 3D_single
+            else:
+                # 2D or 3D_single --> (1,1) or (1,1,1)
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
                     ignore_n_first_dims=None) # for 3D_single, norm over stack
 
-        elif norm_mode == 3: # normalize by image
+        elif norm_mode == 3: # normalize by image --> keep channels and plane dimensions
             # also takes into account CXY case (3D multi-channel image) as first dim is dropped
             self.image_mean, self.image_std = compute_image_stats(
-                image=data, ignore_n_first_dims=data.ndim-2) # ignore all but the spatial dimensions
+                image=data, ignore_n_first_dims=data.ndim-2) # ignore all but the plane dimensions
+            # --> 2D (1,1) or 3D (single, multi) or 2D_RGB (N/C,1,1) or 4D/3D_RGB (C,N,1,1)
 
     def _get_data_dims(self, img):
         """Get data dimensions. Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
@@ -2012,16 +2039,17 @@ class ConvPaintWidget(QWidget):
         """"Update the image layers in the viewer sorted by their names."""
         # Update the choices in the image layer selection widget
         self.image_layer_selection_widget.reset_choices()
+        # self.image_layer_selection_widget.refresh_choices()
 
         # Sort them
         # img_layer_list = [layer for layer in self.viewer.layers
         #                   if isinstance(layer, napari.layers.Image)]
-        img_layer_list = [layer for layer in self.image_layer_selection_widget.choices
-                          if isinstance(layer, napari.layers.Image)]
-        img_layer_list.sort(key=lambda x: x.name)
+        # img_layer_list = [layer for layer in self.image_layer_selection_widget.choices
+        #                   if isinstance(layer, napari.layers.Image)]
+        # img_layer_list.sort(key=lambda x: x.name)
         # self.image_layer_selection_widget.choices = [] # reset; seems necessary to allow sorting
-        # self.image_layer_selection_widget.choices = img_layer_list
-        return img_layer_list
+        # self.image_layer_selection_widget.choices = [(layer.name, layer) for layer in img_layer_list]
+        # return img_layer_list
 
     def _update_annotation_layers(self):
         """"Update the annotation layers in the viewer sorted by their names."""
@@ -2031,12 +2059,12 @@ class ConvPaintWidget(QWidget):
         # Sort them
         # annot_layer_list = [layer for layer in self.viewer.layers
         #                     if isinstance(layer, napari.layers.Labels)]
-        annot_layer_list = [layer for layer in self.annotation_layer_selection_widget.choices
-                            if isinstance(layer, napari.layers.Labels)]
-        annot_layer_list.sort(key=lambda x: x.name)
+        # annot_layer_list = [layer for layer in self.annotation_layer_selection_widget.choices
+        #                     if isinstance(layer, napari.layers.Labels)]
+        # annot_layer_list.sort(key=lambda x: x.name)
         # self.annotation_layer_selection_widget.choices = [] # reset; seems necessary to allow sorting
-        # self.annotation_layer_selection_widget.choices = annot_layer_list
-        return annot_layer_list
+        # self.annotation_layer_selection_widget.choices = [(layer.name, layer) for layer in annot_layer_list]
+        # return annot_layer_list
 
     
 ### ADVANCED TAB
