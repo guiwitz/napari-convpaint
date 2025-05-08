@@ -365,7 +365,7 @@ class ConvPaintWidget(QWidget):
         # === ADVANCED TAB ===
 
         # Create group boxes
-        self.advanced_labels_group = VHGroup('Annotation layers handling', orientation='G')
+        self.advanced_labels_group = VHGroup('Layers handling', orientation='G')
         self.advanced_training_group = VHGroup('Continuous training', orientation='G')
         # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
         self.advanced_prediction_group = VHGroup('Output', orientation='G')
@@ -383,14 +383,14 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
 
         # Checkbox to turn off automatic addition of annot/segmentation layers
-        self.check_auto_add_layers = QCheckBox('Auto add layers')
-        self.check_auto_add_layers.setToolTip('Automatically add annotation and segmentation layers when selecting images')
+        self.check_auto_add_layers = QCheckBox('Auto add annotations')
+        self.check_auto_add_layers.setToolTip('Automatically add annotation layer when selecting images')
         self.check_auto_add_layers.setChecked(self.auto_add_layers)
         self.advanced_labels_group.glayout.addWidget(self.check_auto_add_layers, 1, 0, 1, 1)
 
         # Checkbox for keeping old layers
         self.check_keep_layers = QCheckBox('Keep old layers')
-        self.check_keep_layers.setToolTip('Keep old annotation and segmentation layers when creating new ones.')
+        self.check_keep_layers.setToolTip('Keep old annotation and output layers when creating new ones.')
         self.check_keep_layers.setChecked(self.keep_layers)
         self.advanced_labels_group.glayout.addWidget(self.check_keep_layers, 1, 1, 1, 1)
 
@@ -400,7 +400,7 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 2, 0, 1, 1)
 
         # Checkbox for auto-selecting annotation layers
-        self.check_auto_select_annot = QCheckBox('Auto-select annotation layers')
+        self.check_auto_select_annot = QCheckBox('Auto-select annotation layer')
         self.check_auto_select_annot.setToolTip('Automatically select annotation layers when selecting images')
         self.check_auto_select_annot.setChecked(self.auto_select_annot)
         self.advanced_labels_group.glayout.addWidget(self.check_auto_select_annot, 2, 1, 1, 1)
@@ -442,12 +442,13 @@ class ConvPaintWidget(QWidget):
         self.btn_train_on_selected.setToolTip('Train using selected layers beginning with "annotations')
         # self.advanced_multifile_group.glayout.addWidget(self.btn_train_on_selected, 1, 1, 1, 1) # NOTE: TURNED OFF FOR NOW
 
-        # Checkbox for adding probabilities
+        # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
         self.check_add_seg.setToolTip('Add a layer with the predicted segmentation as output (= highest class probability)')
         self.check_add_seg.setChecked(self.add_seg)
         self.advanced_prediction_group.glayout.addWidget(self.check_add_seg, 0, 0, 1, 1)
 
+        # Checkbox for adding probabilities
         self.check_add_probas = QCheckBox('Probabilities')
         self.check_add_probas.setToolTip('Add a layer with class probabilities as output')
         self.check_add_probas.setChecked(self.add_probas)
@@ -534,8 +535,8 @@ class ConvPaintWidget(QWidget):
         if self.annotation_layer_selection_widget.value is not None:
             # Get the labels layers
             self.annot_layers.append(self.annotation_layer_selection_widget.value)
-        if "segmentation" in self.viewer.layers:
-            self.seg_layers.append(self.viewer.layers["segmentation"])
+        if self.seg_prefix in self.viewer.layers:
+            self.seg_layers.append(self.viewer.layers[self.seg_prefix])
         # Update the class labels in the layers
         self._update_class_labels()
 
@@ -654,14 +655,14 @@ class ConvPaintWidget(QWidget):
 
     def toggle_prediction(self, event=None):
         """Hide/unhide prediction layer."""
-        if not 'segmentation' in self.viewer.layers:
+        if not self.seg_prefix in self.viewer.layers:
             return
-        if self.viewer.layers['segmentation'].visible == False:
-            self.viewer.layers['segmentation'].visible = True
+        if self.viewer.layers[self.seg_prefix].visible == False:
+            self.viewer.layers[self.seg_prefix].visible = True
             self.viewer.layers.selection.active = None
-            self.viewer.layers.selection.active = self.viewer.layers['segmentation']
+            self.viewer.layers.selection.active = self.viewer.layers[self.seg_prefix]
         else:
-            self.viewer.layers['segmentation'].visible = False
+            self.viewer.layers[self.seg_prefix].visible = False
 
     def set_annot_label_class(self, x, event=None):
         """Set the label class of the annotation layer."""
@@ -705,7 +706,7 @@ class ConvPaintWidget(QWidget):
         # Change input layer selection when choosing a new image layer in dropdown
         self.image_layer_selection_widget.changed.connect(self._delayed_on_select_layer)
         self.annotation_layer_selection_widget.changed.connect(self._on_select_annot)
-        self.add_layers_btn.clicked.connect(self._on_add_annot_seg_layers)
+        self.add_layers_btn.clicked.connect(self._on_add_annot_layer)
 
         # Image Processing; only trigger from buttons that are activated (checked)
         self.radio_single_channel.toggled.connect(lambda checked: 
@@ -769,8 +770,8 @@ class ConvPaintWidget(QWidget):
         if self.annotation_layer_selection_widget.value is not None:
             labels_layer = self.annotation_layer_selection_widget.value
             labels_layer.events.colormap.connect(self._on_change_annot_cmap)
-        if 'segmentation' in self.viewer.layers:
-            seg_layer = self.viewer.layers['segmentation']
+        if self.seg_prefix in self.viewer.layers:
+            seg_layer = self.viewer.layers[self.seg_prefix]
             seg_layer.events.colormap.connect(self._on_change_seg_cmap)
 
         ### === ADVANCED TAB ===
@@ -825,7 +826,9 @@ class ConvPaintWidget(QWidget):
             self._get_image_stats(img)
             # Add empty layers and save old data tag for next addition
             if self.auto_add_layers:
-                self._add_empty_layers()
+                self._add_empty_annot()
+            # Set flag that new outputs need to be generated (and not planes of the old ones populated)
+            self.new_outputs = True
             # Activate button to add annotation and segmentation layers
             self.add_layers_btn.setEnabled(True)
             # Give info if image is very large to use "tile image"
@@ -836,47 +839,52 @@ class ConvPaintWidget(QWidget):
 
         # If the option is activated, select annotation layer according to the prefix and image name
         if self.auto_select_annot:
-
-            # Get the prefix for the annotation layers
-            annot_prefix = self.text_annot_prefix.text()
-            # Set the name of the annotations accordingly
-            annot_name = f"{annot_prefix}{self.selected_channel}"
-            # Check if there are fitting labels layers present in the viewer
-            found_layers = [layer.name for layer in self.viewer.layers # Take all layers
-                            if isinstance(layer, napari.layers.Labels) # that are labels layers
-                            and layer.name[:len(annot_name)] == annot_name] # and start with the prefix
-            if "annotations" in self.viewer.layers and isinstance(self.viewer.layers["annotations"], napari.layers.Labels):
-                # If there is a layer with the name "annotations", set it as the annotation layer
-                annot_name = "annotations"
-            elif len(found_layers) > 0:
-                if len(found_layers) > 1:
-                    show_info('Multiple annotation layers found. The first one (alphabetically) is chosen.')
-                # Sort and take first one
-                found_layers.sort()
-                annot_name = found_layers[0]
-            else:
-                show_info('No annotation layer found. Please create one.')
-                return
-
-            self.viewer.layers.selection.active = self.viewer.layers[annot_name]
-            self.annotation_layer_selection_widget.value = self.viewer.layers[annot_name]
-            self.viewer.layers[annot_name].mode = 'paint'
-            self.viewer.layers[annot_name].brush_size = self.default_brush_size
-            self._on_select_annot()
-
-            # Hide all layers except the image and the annotation layer
-            for layer in self.viewer.layers:
-                if layer.name != self.selected_channel and layer.name != annot_name:
-                    layer.visible = False
-                else:
-                    layer.visible = True
+            self._auto_select_annot_layer()
 
         # Allow other methods again to add layers if that was the case before
         self.add_layers_flag = initial_add_layers_flag
 
+        # Check if finally a suited annotation layer is selected
+        labels_layer = self.annotation_layer_selection_widget.value
+        if not self._approve_annotation_layer_shape(labels_layer, img):
+            warnings.warn('Annotation layer has wrong shape for the selected data')
+
     def _delayed_on_select_layer(self, event=None):
         """Delay the selection of the image layer to allow for napari operations to happen first."""
         QTimer.singleShot(100, lambda: self._on_select_layer())
+
+    def _auto_select_annot_layer(self):
+        # Set the name of the annotations accordingly
+        annot_name = f"{self.annot_prefix}_{self.selected_channel}"
+        # Check if there are fitting labels layers present in the viewer
+        found_layers = [layer.name for layer in self.viewer.layers # Take all layers
+                        if isinstance(layer, napari.layers.Labels) # that are labels layers
+                        and layer.name[:len(annot_name)] == annot_name] # and start with the prefix
+        if self.annot_prefix in self.viewer.layers and isinstance(self.viewer.layers[self.annot_prefix], napari.layers.Labels):
+            # If there is a layer with the name "annotations", set it as the annotation layer
+            annot_name = self.annot_prefix
+        elif len(found_layers) > 0:
+            if len(found_layers) > 1:
+                show_info('Multiple annotation layers found. The first one (alphabetically) is chosen.')
+            # Sort and take first one
+            found_layers.sort()
+            annot_name = found_layers[0]
+        else:
+            show_info('No annotation layer found. Please create one.')
+            return
+
+        self.viewer.layers.selection.active = self.viewer.layers[annot_name]
+        self.annotation_layer_selection_widget.value = self.viewer.layers[annot_name]
+        self.viewer.layers[annot_name].mode = 'paint'
+        self.viewer.layers[annot_name].brush_size = self.default_brush_size
+        self._on_select_annot()
+
+        # Hide all layers except the image and the annotation layer
+        for layer in self.viewer.layers:
+            if layer.name != self.selected_channel and layer.name != annot_name:
+                layer.visible = False
+            else:
+                layer.visible = True
 
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
@@ -889,9 +897,9 @@ class ConvPaintWidget(QWidget):
             if not self._approve_annotation_layer_shape(labels_layer, img):
                 warnings.warn('Annotation layer has wrong shape for the selected data')
 
-    def _on_add_annot_seg_layers(self, event=None, force_add=True):
+    def _on_add_annot_layer(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
-        self._add_empty_layers(event, force_add)
+        self._add_empty_annot(event, force_add)
 
     def _sync_cmaps(self, event=None):
         """Update class icons and segmentation colormap when annotation colormap changes."""
@@ -941,8 +949,8 @@ class ConvPaintWidget(QWidget):
         # Make sure we are not in a loop
         self.cmap_flag = True
 
-        if 'segmentation' in self.viewer.layers:
-            self.viewer.layers['segmentation'].colormap = self.annotation_layer_selection_widget.value.colormap.copy()
+        if self.seg_prefix in self.viewer.layers:
+            self.viewer.layers[self.seg_prefix].colormap = self.annotation_layer_selection_widget.value.colormap.copy()
             self._update_class_icons()
 
         # Turn off the flag to allow for new events
@@ -951,14 +959,14 @@ class ConvPaintWidget(QWidget):
     def _on_change_seg_cmap(self, event=None):
         """Update annotation colormap when segmentation colormap changes."""
         if (self.cmap_flag or # Avoid infinite loop
-            (event is not None and event.source != self.viewer.layers['segmentation'])): # Only triggers of segmentation layer
+            (event is not None and event.source != self.viewer.layers[self.seg_prefix])): # Only triggers of segmentation layer
             return
         
         # Make sure we are not in a loop
         self.cmap_flag = True
 
-        if 'segmentation' in self.viewer.layers:
-            self.annotation_layer_selection_widget.value.colormap = self.viewer.layers['segmentation'].colormap.copy()
+        if self.seg_prefix in self.viewer.layers:
+            self.annotation_layer_selection_widget.value.colormap = self.viewer.layers[self.seg_prefix].colormap.copy()
             self._update_class_icons()
         
         # Turn off the flag to allow for new events
@@ -1160,26 +1168,35 @@ class ConvPaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)            
 
-        self._check_create_prediction_layer()
+        # Add segmentation layer if enabled
+        if self.add_seg:
+            # Check if we need to create a new segmentation layer
+            self._check_create_segmentation_layer()
+            # Set the flag to False, so we don't create a new layer every time
+            self.new_outputs = False
 
-        # Update segmentation layer
-        if data_dims in ['2D', '2D_RGB', '3D_multi']:
-            self.viewer.layers['segmentation'].data = segmentation
-        else: # 3D_single, 4D, 3D_RGB
+            # Update segmentation layer
+            if data_dims in ['2D', '2D_RGB', '3D_multi']:
+                self.viewer.layers[self.seg_prefix].data = segmentation
+            else: # 3D_single, 4D, 3D_RGB
                 # seg has no channel dim -> z is first
-            self.viewer.layers['segmentation'].data[step] = segmentation
-        self.viewer.layers['segmentation'].refresh()
+                self.viewer.layers[self.seg_prefix].data[step] = segmentation
+            self.viewer.layers[self.seg_prefix].refresh()
 
         # Add probabilities if enabled
         if self.add_probas:
+            # Check if we need to create a new probabilities layer
             num_classes = probas.shape[:1]
-            spatial_dims = self.viewer.layers['segmentation'].data.shape
-            probas_img = np.zeros(num_classes+spatial_dims, dtype=np.float32)
+            self._check_create_probas_layer(num_classes)
+            # Set the flag to False, so we don't create a new layer every time
+            self.new_outputs = False
+
+            # Update probabilities layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
-                probas_img = probas
+                self.viewer.layers[self.proba_prefix].data = probas
             else: # 3D_single, 4D, 3D_RGB
-                probas_img[:, step] = probas
-            self.add_layer_with_unique_name(probas_img, base_name='Class probabilities')
+                self.viewer.layers[self.proba_prefix].data[:, step] = probas
+            self.viewer.layers[self.proba_prefix].refresh()
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
@@ -1189,12 +1206,24 @@ class ConvPaintWidget(QWidget):
         data_dims = self._get_data_dims(img)
         if data_dims not in ['3D_single', '3D_RGB', '4D']:
             raise Exception(f'Image stack has wrong dimensionality {data_dims}')
-                    
-        self._check_create_prediction_layer()
+        
+        # Create the necessary layers if they are not already present
+        if self.add_seg:
+            self._check_create_segmentation_layer()
+            # Set the flag to False, so we don't create a new layer every time
+            self.new_outputs = False
+        if self.add_probas:
+            # Check if we need to create a new probabilities layer
+            num_classes = self.cp_model.get_param('num_classes')
+            self._check_create_probas_layer(num_classes)
+            # Set the flag to False, so we don't create a new layer every time
+            self.new_outputs = False
 
+        # Get image stats if not already done
         if self.image_mean is None:
             self._get_image_stats(img)
 
+        # Start prediction
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
@@ -1204,7 +1233,6 @@ class ConvPaintWidget(QWidget):
         
         # Step through the stack and predict each image
         num_steps = image_stack_norm.shape[-3]
-        all_probas = []
         for step in progress(range(num_steps)):
             if data_dims == '3D_single':
                 image = image_stack_norm[step]
@@ -1213,16 +1241,13 @@ class ConvPaintWidget(QWidget):
 
             # Predict the current step
             probas, seg = self.cp_model._predict(image, add_seg=True)
+
+            if self.add_seg:
+                self.viewer.layers[self.seg_prefix].data[step] = seg
+                self.viewer.layers[self.seg_prefix].refresh()
             if self.add_probas:
-                all_probas.append(probas)
-
-            # Update segmentation layer
-            self.viewer.layers['segmentation'].data[step] = seg
-        self.viewer.layers['segmentation'].refresh()
-
-        if self.add_probas:
-            all_probas = np.stack(all_probas, axis=-3) # Add z-dim for 3D/4D
-            self.add_layer_with_unique_name(all_probas, base_name='Class probabilities')
+                self.viewer.layers[self.proba_prefix].data[...,step,:,:] = probas
+                self.viewer.layers[self.proba_prefix].refresh()
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1317,9 +1342,11 @@ class ConvPaintWidget(QWidget):
         self._reset_radio_norm_choices()
         if (self.add_layers_flag # Add layers only if not triggered from layer selection
             and self.auto_add_layers): # and if auto_add_layers is checked
-            self._add_empty_layers()
+            self._add_empty_annot()
         # Reset the features for continuous training
         self._reset_train_features()
+        # Set flag that new outputs need to be generated (and not planes of the old ones populated)
+        self.new_outputs = True
 
     def _on_norm_changed(self):
         """Set the normalization options based on radio buttons,
@@ -1388,17 +1415,23 @@ class ConvPaintWidget(QWidget):
         # self.selected_channel = None
         # Plugin options and attributes
         self.auto_seg = True # Automatically segment after training
-        self.old_data_tag = "None" # Tag for the data before layers are added
+        self.old_annot_tag = "None" # Tag for the annotations, saved to be able to rename them later
+        self.old_seg_tag = "None" # Tag for the segmentation, saved to be able to rename them later
+        self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
         self.keep_layers = False # Keep old layers when adding new ones
-        self.keep_training = False # Extend features for subsequent training
         self.auto_select_annot = False # Automatically select annotation layer based on image name
+        self.annot_prefix = 'annotations' # Prefix for the annotation layer names
+        self.seg_prefix = 'segmentation' # Prefix for the segmentation layer names
+        self.proba_prefix = 'probabilities' # Prefix for the class probabilities layer names
+        self.keep_training = False # Extend features for subsequent training
         self.annot_layers = [] # List of annotation layers
         self.seg_layers = [] # List of segmentation layers
         self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
+        self.new_outputs = True # Flag to indicate if new outputs are created
 
 
     ### Model Tab
@@ -1545,59 +1578,66 @@ class ConvPaintWidget(QWidget):
     
 ### Helper functions
 
-    def _add_empty_layers(self, event=None, force_add=True):
-        """Add annotation and prediction layers to viewer. If the layer already exists,
+    def _add_empty_annot(self, event=None, force_add=True):
+        """Add annotation layer to viewer. If the layer already exists,
         remove it (or rename and keep it if specified in self.keep_layers) and add a new one.
         If the widget is used as third party (self.third_party=True), no layer is added if it didn't exist before,
-        unless force_add=True (e.g. when the user click on the add layer button)"""
+        unless force_add=True (e.g. when the user clicks on the add layer button)"""
 
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
             return
-
         layer_shape = self._get_annot_shape(img)
 
-        if self.keep_layers:
-            self._rename_annot_seg_for_backup()
-
-        # Add segmentation layer; do this first, so that the annotation layer is on top
-        segmentation_exists = 'segmentation' in self.viewer.layers
-        if segmentation_exists:
-            self.viewer.layers.remove('segmentation')
-
-        if (not self.third_party) | (self.third_party & segmentation_exists) | (force_add):
-            self.viewer.add_labels(
-                data=np.zeros((layer_shape), dtype=np.uint8),
-                name='segmentation'
-                )
-            # Add it to the list of layers where class labels shall be updated
-            self.seg_layers.append(self.viewer.layers['segmentation'])
-    
-        # Add annotation layer; do this second, so that the annotation layer is on top
-        annotation_exists = 'annotations' in self.viewer.layers
-        if annotation_exists:
-            self.viewer.layers.remove('annotations')
+        # Create a new annotation layer if it doesn't exist yet
+        annotation_exists = self.annot_prefix in self.viewer.layers
 
         if (not self.third_party) | (self.third_party & annotation_exists) | (force_add):
+            # Create a temp named annotation layer, so we can select it before renaming the old one
+            # (and not trigger a problem with incompatible layer shapes)
+            temp_name = self._get_unique_layer_name("temp_annotations")
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8),
-                name='annotations'
+                name=temp_name
                 )
+
+            # Select the temp layer in the dropdown
+            self.annotation_layer_selection_widget.value = self.viewer.layers[temp_name]
+            # If we replace a current layer, we can backup the old one, and replace it
+            if annotation_exists:
+                # Backup the old annotation layer if keep_layers is set (and the layer exists)
+                if self.keep_layers:
+                    self._rename_annot_for_backup()
+                # Otherwise, just remove the old annotation layer
+                else:
+                    self.viewer.layers.remove(self.annot_prefix)
+            # Create a copy of the temp layer with the original name (so we can select it)
+            self.viewer.add_labels(
+                data=self.viewer.layers[temp_name].data,
+                name=self.annot_prefix
+                )
+            # Select the new annotation layer in the dropdown
+            self.annotation_layer_selection_widget.value = self.viewer.layers[self.annot_prefix]
+            # Remove the temp layer
+            self.viewer.layers.remove(temp_name)
+
+            # Save information about the annotation layer to be able to rename it later
+            self._set_old_annot_tag()
             # Add it to the list of layers where class labels shall be updated
-            self.annot_layers.append(self.viewer.layers['annotations'])
-        
+            self.annot_layers.append(self.viewer.layers[self.annot_prefix])
+
         # Activate the annotation layer, select it in the dropdown and activate paint mode
-        if 'annotations' in self.viewer.layers:
-            self.viewer.layers.selection.active = self.viewer.layers['annotations']
-            self.annotation_layer_selection_widget.value = self.viewer.layers['annotations']
-            self.viewer.layers['annotations'].mode = 'paint'
-            self.viewer.layers['annotations'].brush_size = self.default_brush_size
+        if self.annot_prefix in self.viewer.layers:
+            self.viewer.layers.selection.active = self.viewer.layers[self.annot_prefix]
+            self.annotation_layer_selection_widget.value = self.viewer.layers[self.annot_prefix]
+            self.viewer.layers[self.annot_prefix].mode = 'paint'
+            self.viewer.layers[self.annot_prefix].brush_size = self.default_brush_size
 
         # Connect colormap events in new layers
         # labels_layer = self.annotation_layer_selection_widget.value
         # labels_layer.events.colormap.connect(self._on_change_annot_cmap)
-        # seg_layer = self.viewer.layers['segmentation']
+        # seg_layer = self.viewer.layers[self.seg_prefix]
         # seg_layer.events.colormap.connect(self._on_change_seg_cmap)
         
         # Update class labels
@@ -1605,27 +1645,129 @@ class ConvPaintWidget(QWidget):
         # Sync all labels layers (annotations and segmentation) between each other
         self._connect_all_cmaps()
 
-        # Save data tag, to be able to rename these layers later
-        self._set_old_data_tag()
+    def _check_create_segmentation_layer(self):
+        """Check if segmentation layer exists and create it if not."""
+        
+        img = self._get_selected_img(check=True)
+        if img is None:
+            warnings.warn('No image selected. No layers added.')
+            return
+        layer_shape = self._get_annot_shape(img)
+    
+        # Create a new segmentation layer if it doesn't exist yet or we need a new one
+        seg_exists = self.seg_prefix in self.viewer.layers
 
-    def _rename_annot_seg_for_backup(self):
-        """Create copies of the annotations and segmentation layers."""
-        # Use the prefix if one is saved, else use "annot_"
-        prefix = self.text_annot_prefix.text()
-        prefix = prefix if prefix != '' else 'annotations_'
+        # If we replace a current layer, we can backup the old one, and remove it
+        if self.new_outputs & seg_exists:
+            # Backup the old segmentation layer if keep_layers is set (and the layer exists)
+            if self.keep_layers:
+                self._rename_seg_for_backup()
+            # Otherwise, just remove the old segmentation layer
+            else:
+                self.viewer.layers.remove(self.seg_prefix)
+
+        # If there was no segmentation layer, or we need a new one, create it
+        if (not seg_exists) or self.new_outputs:
+            self.viewer.add_labels(
+                data=np.zeros((layer_shape), dtype=np.uint8),
+                name=self.seg_prefix
+                )
+            # Save information about the segmentation layer to be able to rename it later
+            self._set_old_seg_tag()
+            # Add it to the list of layers where class labels shall be updated
+            self.seg_layers.append(self.viewer.layers[self.seg_prefix])
+            
+    def _check_create_probas_layer(self, num_classes):
+        """Check if class probabilities layer exists and create it if not."""
+
+        img = self._get_selected_img(check=True)
+        if img is None:
+            warnings.warn('No image selected. No layers added.')
+            return
+        spatial_dims = self._get_annot_shape(img)
+
+        # Create a new probabilities layer if it doesn't exist yet or we need a new one
+        proba_exists = self.proba_prefix in self.viewer.layers
+
+        # If we replace a current layer, we can backup the old one, and remove it
+        if self.new_outputs & proba_exists:
+            # Backup the old probabilities layer if keep_layers is set (and the layer exists)
+            if self.keep_layers:
+                self._rename_probas_for_backup()
+            # Otherwise, just remove the old probabilities layer
+            else:
+                self.viewer.layers.remove(self.proba_prefix)
+
+        # If there was no probabilities layer, or we need a new one, create it
+        if (not proba_exists) or self.new_outputs:
+            # Create a new probabilities layer
+            self.viewer.add_image(
+                data=np.zeros(num_classes+spatial_dims, dtype=np.float32),
+                name=self.proba_prefix
+                )
+            # Save information about the probabilities layer to be able to rename it later
+            self._set_old_proba_tag()
+
+    def _rename_annot_for_backup(self):
+        """Create copy of the annotations layers."""
         # Rename the layers to avoid overwriting them
-        if 'annotations' in self.viewer.layers:
-            full_name = f'{prefix}{self.old_data_tag}'
-            self.viewer.layers['annotations'].name = full_name
+        if self.annot_prefix in self.viewer.layers:
+            full_name = self._get_unique_layer_name(self.old_annot_tag)
+            self.viewer.layers[self.annot_prefix].name = full_name
             # Add it to the list of layers where class labels shall be updated
             self.annot_layers.append(self.viewer.layers[full_name])
+
+    def _rename_seg_for_backup(self):
+        """Create copy of segmentation layer."""
         # Same for segmentation layer
-        prefix_seg = 'seg_'
-        if 'segmentation' in self.viewer.layers:
-            full_name = f'{prefix_seg}{self.old_data_tag}'
-            self.viewer.layers['segmentation'].name = full_name
+        if self.seg_prefix in self.viewer.layers:
+            full_name = self._get_unique_layer_name(self.old_seg_tag)
+            self.viewer.layers[self.seg_prefix].name = full_name
             # Add it to the list of layers where class labels shall be updated
             self.seg_layers.append(self.viewer.layers[full_name])
+
+    def _rename_probas_for_backup(self):
+        """Create copy of class probabilities layer."""
+        # Same for segmentation layer
+        if self.proba_prefix in self.viewer.layers:
+            full_name = self._get_unique_layer_name(self.old_proba_tag)
+            self.viewer.layers[self.seg_prefix].name = full_name
+
+    def _get_unique_layer_name(self, base_name):
+        """Get a unique name for a new layer by checking existing layers."""
+        # Check if the layer name already exists in the viewer
+        existing_layers = [layer.name for layer in self.viewer.layers]
+        new_name = base_name
+        exists = new_name in existing_layers
+
+        # If the layer already exists, find a unique name
+        num = 1
+        while exists:
+            new_name = f"{base_name} [{num}]"
+            num += 1
+            exists = new_name in existing_layers
+        
+        return new_name
+
+    def _get_old_data_tag(self):
+        """Set the old data tag based on the current image layer and data dimensions."""
+        image_name = self.image_layer_selection_widget.value.name
+        data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
+                    self.radio_multi_channel.isChecked()*"multiCh" +
+                    self.radio_single_channel.isChecked()*"singleCh")
+        return f"{image_name}_{data_dim_str}"
+    
+    def _set_old_annot_tag(self):
+        """Set the old annotation tag based on the current image layer and data dimensions."""
+        self.old_annot_tag = f"{self.annot_prefix}_{self._get_old_data_tag()}"
+
+    def _set_old_seg_tag(self):
+        """Set the old segmentation tag based on the current image layer and data dimensions."""
+        self.old_seg_tag = f"{self.seg_prefix}_{self._get_old_data_tag()}"
+
+    def _set_old_proba_tag(self):
+        """Set the old probabilities tag based on the current image layer and data dimensions."""
+        self.old_proba_tag = f"{self.proba_prefix}_{self._get_old_data_tag()}"
 
     def _reset_radio_data_dim_choices(self):
         """Set radio buttons active/inactive depending on selected image type.
@@ -1798,17 +1940,6 @@ class ConvPaintWidget(QWidget):
                 setter(val)
 
         self._update_gui_fe_scalings(params.fe_scalings)
-
-    def _check_create_prediction_layer(self):
-        """Check if segmentation layer exists and create it if not."""
-        layer_names = [x.name for x in self.viewer.layers]
-        if 'segmentation' not in layer_names:
-            data = self._get_selected_img()
-            layer_shape = self._get_annot_shape(data)
-            # Create a new segmentation layer with the same shape as the image
-            self.viewer.add_labels(
-                data=np.zeros((layer_shape), dtype=np.uint8), name='segmentation'
-                )
     
     def _get_selected_img(self, check=False):
         """Get the currently selected image layer."""
@@ -1914,15 +2045,6 @@ class ConvPaintWidget(QWidget):
         f' ({self.current_model_path})')
         self.model_description1.setText(descr)
         self.model_description2.setText(descr)
-        
-    def _set_old_data_tag(self):
-        """Set the old data tag based on the current image layer and data dimensions."""
-        image_name = self.image_layer_selection_widget.value.name
-        data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
-                    self.radio_multi_channel.isChecked()*"multiCh" +
-                    self.radio_single_channel.isChecked()*"singleCh")
-    
-        self.old_data_tag = f"{image_name}_{data_dim_str}"
 
     def _get_selected_layer_names(self):
         """Get names of selected layers."""
@@ -2082,43 +2204,27 @@ class ConvPaintWidget(QWidget):
         # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
         self.features_annots = {}
 
-    def add_layer_with_unique_name(self, layer_data, base_name='Image Layer', labels=False):
-        # Check if the layer already exists
-        existing_layers = [layer.name for layer in self.viewer.layers]
-        new_name = base_name
-        exists = new_name in existing_layers
-
-        # If the layer already exists, find a unique name
-        num = 1
-        while exists:
-            new_name = f"{base_name} [{num}]"
-            num += 1
-            exists = new_name in existing_layers
-
-        # Add the new layer
-        if labels:
-            self.viewer.add_labels(layer_data, name=new_name)
-        else:
-            self.viewer.add_image(layer_data, name=new_name)
-
-        return new_name
-
     def _on_add_all_annot_layers(self):
         # Get the selected image layers in the order they are in the widget
         img_layer_list = [layer for layer in self.viewer.layers
-                          if layer in self.viewer.layers.selection][::-1]
-        prefix = self.text_annot_prefix.text()
-        for img in img_layer_list[::-1]: # reverse to have annot for first img on top
+                          if layer in self.viewer.layers.selection]
+        for img in img_layer_list:
             layer_shape = self._get_annot_shape(img)
-            layer_name = f'{prefix}{img.name}'
+            data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
+                    self.radio_multi_channel.isChecked()*"multiCh" +
+                    self.radio_single_channel.isChecked()*"singleCh")
+            layer_name = f'{self.annot_prefix}_{img.name}_{data_dim_str}'
+            layer_name = self._get_unique_layer_name(layer_name)
             data = np.zeros((layer_shape), dtype=np.uint8)
-            new_layer_name = self.add_layer_with_unique_name(data, layer_name, labels=True)
-            labels_layer = self.viewer.layers[new_layer_name]
+            # Create a new annotation layer with the unique name
+            self.viewer.add_labels(data=data, name=layer_name)
+            labels_layer = self.viewer.layers[layer_name]
             # Set the annotation layer to paint mode
             labels_layer.mode = 'paint'
             labels_layer.brush_size = self.default_brush_size
             # Connect colormap events in new layers
             labels_layer.events.colormap.connect(self._on_change_annot_cmap)
+            # Add it to the list of layers where class labels shall be updated
             self.annot_layers.append(labels_layer)
         # Update class labels
         self._update_class_labels()
@@ -2132,13 +2238,12 @@ class ConvPaintWidget(QWidget):
         layer_list = list(self.viewer.layers.selection)
         layer_list.sort(key=lambda x: x.name)
         # Get the image and annotation layers based on the prefix
-        prefix = self.text_annot_prefix.text()
-        prefix_len = len(prefix)
+        prefix_len = len(self.annot_prefix)
         annot_list = [layer for layer in layer_list
-                      if layer.name[:prefix_len] == prefix
+                      if layer.name[:prefix_len] == self.annot_prefix
                       and isinstance(layer, napari.layers.Labels)]
         img_list = [layer for layer in layer_list
-                    if not layer.name[:prefix_len] == prefix
+                    if not layer.name[:prefix_len] == self.annot_prefix
                     and isinstance(layer, napari.layers.Image)]
         # NOTE: Checks are technically not necessary here, as it is done in the CPModel
         if len(annot_list) == 0 or len(img_list) == 0 or len(annot_list) != len(img_list):

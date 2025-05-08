@@ -11,7 +11,7 @@ def test_3d_single_channel(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_3d)
 
-    my_widget._on_add_annot_seg_layers()
+    my_widget._on_add_annot_layer()
 
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
 
@@ -52,7 +52,7 @@ def test_3d_multi_channel(make_napari_viewer, capsys):
     viewer.add_image(multid_3d)
 
     my_widget.radio_multi_channel.setChecked(True)
-    my_widget._on_add_annot_seg_layers()
+    my_widget._on_add_annot_layer()
 
     # check that stack normalization is off
     assert my_widget.radio_normalize_over_stack.isEnabled() == False
@@ -82,7 +82,7 @@ def test_RGB(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_rgb)
 
-    my_widget._on_add_annot_seg_layers()
+    my_widget._on_add_annot_layer()
 
     # check that stack normalization is off
     assert my_widget.radio_normalize_over_stack.isEnabled() == False
@@ -113,7 +113,7 @@ def test_4d_image(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_c_t)
-    my_widget._on_add_annot_seg_layers()
+    my_widget._on_add_annot_layer()
 
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
     
@@ -170,7 +170,7 @@ def test_RGBT_image(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_rgb_t)
-    my_widget._on_add_annot_seg_layers()
+    my_widget._on_add_annot_layer()
 
     # UNTIL HERE: py3.12 fails
 
