@@ -366,7 +366,7 @@ class ConvPaintWidget(QWidget):
 
         # Create group boxes
         self.advanced_labels_group = VHGroup('Layers handling', orientation='G')
-        self.advanced_training_group = VHGroup('Continuous training', orientation='G')
+        self.advanced_training_group = VHGroup('Training', orientation='G')
         # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
         self.advanced_prediction_group = VHGroup('Output', orientation='G')
 
@@ -416,7 +416,7 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group.glayout.setColumnStretch(1, 1)
 
         # Text to warn the user about their responsibility
-        self.advanced_training_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the channels of images are compatible.\n")
+        self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the channels of images are compatible.\n")
         self.advanced_training_note.setStyleSheet("font-size: 12px; color: rgba(120, 120, 120, 70%); font-style: italic")
         self.advanced_training_note.setWordWrap(True)
         self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 2)
@@ -439,8 +439,8 @@ class ConvPaintWidget(QWidget):
 
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
-        self.btn_train_on_selected.setToolTip('Train using selected layers beginning with "annotations')
-        # self.advanced_multifile_group.glayout.addWidget(self.btn_train_on_selected, 1, 1, 1, 1) # NOTE: TURNED OFF FOR NOW
+        self.btn_train_on_selected.setToolTip("Train using layers selected in the viewer's layer list and beginning with 'annotations'")
+        self.advanced_training_group.glayout.addWidget(self.btn_train_on_selected, 3, 0, 1, 2) # NOTE: TURNED OFF FOR NOW
 
         # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
@@ -704,8 +704,8 @@ class ConvPaintWidget(QWidget):
         self._reset_convpaint_btn.clicked.connect(self._on_reset_convpaint)
         
         # Change input layer selection when choosing a new image layer in dropdown
-        self.image_layer_selection_widget.changed.connect(self._delayed_on_select_layer)
-        self.annotation_layer_selection_widget.changed.connect(self._on_select_annot)
+        self.image_layer_selection_widget.native.activated.connect(self._delayed_on_select_layer)
+        self.annotation_layer_selection_widget.native.activated.connect(self._on_select_annot)
         self.add_layers_btn.clicked.connect(self._on_add_annot_layer)
 
         # Image Processing; only trigger from buttons that are activated (checked)
@@ -809,31 +809,33 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
-        # If it is the same layer, do nothing
-        if self.selected_channel == self.image_layer_selection_widget.native.currentText():
-            return
+        # Check if it is the same layer
+        was_same = self.selected_channel == self.image_layer_selection_widget.native.currentText()
         
-        # Otherwise, update the selected channel and reset the radio buttons
+        # Update the selected channel and reset the radio buttons, but only if it is a new image
         initial_add_layers_flag = self.add_layers_flag # Save initial state of add_layers_flag
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         img = self._get_selected_img()
         if img is not None:
-            self.add_layers_flag = False # Turn off layer creation, instead we do it manually below
-            # Set radio buttons depending on selected image type
-            self._reset_radio_data_dim_choices()
-            self._reset_radio_norm_choices()
-            self._reset_predict_buttons()
-            self._get_image_stats(img)
-            # Add empty layers and save old data tag for next addition
-            if self.auto_add_layers:
-                self._add_empty_annot()
-            # Set flag that new outputs need to be generated (and not planes of the old ones populated)
-            self.new_outputs = True
-            # Activate button to add annotation and segmentation layers
-            self.add_layers_btn.setEnabled(True)
-            # Give info if image is very large to use "tile image"
-            if self._check_large_image(img) and not self.cp_model.get_param('tile_image'):
-                show_info('Image is very large. Consider using tiling.')
+            # If it is a new image, set the according radio buttons, image stats etc.
+            if not was_same:
+                self.add_layers_flag = False # Turn off layer creation, instead we do it manually below
+                # Set radio buttons depending on selected image type
+                self._reset_radio_data_dim_choices()
+                self._reset_radio_norm_choices()
+                self._reset_predict_buttons()
+                self._get_image_stats(img)
+                # Add empty layers and save old data tag for next addition
+                if self.auto_add_layers:
+                    self._add_empty_annot()
+                # Set flags that new outputs need to be generated (and not planes of the old ones populated)
+                self.new_seg = True
+                self.new_proba = True
+                # Activate button to add annotation and segmentation layers
+                self.add_layers_btn.setEnabled(True)
+                # Give info if image is very large to use "tile image"
+                if self._check_large_image(img) and not self.cp_model.get_param('tile_image'):
+                    show_info('Image is very large. Consider using tiling.')
         else:
             self.add_layers_btn.setEnabled(False)
 
@@ -844,7 +846,7 @@ class ConvPaintWidget(QWidget):
         # Allow other methods again to add layers if that was the case before
         self.add_layers_flag = initial_add_layers_flag
 
-        # Check if finally a suited annotation layer is selected
+        # Check if finally, a suited annotation layer is selected
         labels_layer = self.annotation_layer_selection_widget.value
         if not self._approve_annotation_layer_shape(labels_layer, img):
             warnings.warn('Annotation layer has wrong shape for the selected data')
@@ -1004,17 +1006,10 @@ class ConvPaintWidget(QWidget):
         # If continuous training is activated, filter the annotations to only include new ones
         if self.keep_training:
             img_name = self._get_selected_img().name
-            if img_name in self.features_annots.keys():
-                # Annotations are just the new ones where we don't already have an annot (same image, same class labeled)
-                annot = ConvPaintWidget.remove_duplicates_from_all(annot, self.features_annots, img_name)
-                if np.sum(annot > 0) == 0:
-                    warnings.warn('No new pixels labeled. Training not performed.')
-                    return
-                else:
-                    self.features_annots[self.selected_channel].append(annot.copy())
-            else:
-                # If we don't have any features yet, just add the new annotations
-                self.features_annots[self.selected_channel] = [annot.copy()]
+            annot = self._compare_new_to_existing_annots(img_name, annot)
+            if annot is None:
+                warnings.warn('No new pixels labeled. Training not continued.')
+                return
         
         # Start training
         with warnings.catch_warnings():
@@ -1173,7 +1168,7 @@ class ConvPaintWidget(QWidget):
             # Check if we need to create a new segmentation layer
             self._check_create_segmentation_layer()
             # Set the flag to False, so we don't create a new layer every time
-            self.new_outputs = False
+            self.new_seg = False
 
             # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -1189,7 +1184,7 @@ class ConvPaintWidget(QWidget):
             num_classes = probas.shape[:1]
             self._check_create_probas_layer(num_classes)
             # Set the flag to False, so we don't create a new layer every time
-            self.new_outputs = False
+            self.new_proba = False
 
             # Update probabilities layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
@@ -1211,13 +1206,13 @@ class ConvPaintWidget(QWidget):
         if self.add_seg:
             self._check_create_segmentation_layer()
             # Set the flag to False, so we don't create a new layer every time
-            self.new_outputs = False
+            self.new_seg = False
         if self.add_probas:
             # Check if we need to create a new probabilities layer
             num_classes = self.cp_model.get_param('num_classes')
             self._check_create_probas_layer(num_classes)
             # Set the flag to False, so we don't create a new layer every time
-            self.new_outputs = False
+            self.new_proba = False
 
         # Get image stats if not already done
         if self.image_mean is None:
@@ -1345,8 +1340,9 @@ class ConvPaintWidget(QWidget):
             self._add_empty_annot()
         # Reset the features for continuous training
         self._reset_train_features()
-        # Set flag that new outputs need to be generated (and not planes of the old ones populated)
-        self.new_outputs = True
+        # Set flags that new outputs need to be generated (and not planes of the old ones populated)
+        self.new_seg = True
+        self.new_proba = True
 
     def _on_norm_changed(self):
         """Set the normalization options based on radio buttons,
@@ -1431,7 +1427,8 @@ class ConvPaintWidget(QWidget):
         self.seg_layers = [] # List of segmentation layers
         self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
-        self.new_outputs = True # Flag to indicate if new outputs are created
+        self.new_seg = True # Flags to indicate if new outputs are created
+        self.new_proba = True
 
 
     ### Model Tab
@@ -1658,7 +1655,7 @@ class ConvPaintWidget(QWidget):
         seg_exists = self.seg_prefix in self.viewer.layers
 
         # If we replace a current layer, we can backup the old one, and remove it
-        if self.new_outputs & seg_exists:
+        if self.new_seg & seg_exists:
             # Backup the old segmentation layer if keep_layers is set (and the layer exists)
             if self.keep_layers:
                 self._rename_seg_for_backup()
@@ -1667,7 +1664,7 @@ class ConvPaintWidget(QWidget):
                 self.viewer.layers.remove(self.seg_prefix)
 
         # If there was no segmentation layer, or we need a new one, create it
-        if (not seg_exists) or self.new_outputs:
+        if (not seg_exists) or self.new_seg:
             self.viewer.add_labels(
                 data=np.zeros((layer_shape), dtype=np.uint8),
                 name=self.seg_prefix
@@ -1690,7 +1687,7 @@ class ConvPaintWidget(QWidget):
         proba_exists = self.proba_prefix in self.viewer.layers
 
         # If we replace a current layer, we can backup the old one, and remove it
-        if self.new_outputs & proba_exists:
+        if self.new_proba & proba_exists:
             # Backup the old probabilities layer if keep_layers is set (and the layer exists)
             if self.keep_layers:
                 self._rename_probas_for_backup()
@@ -1699,7 +1696,7 @@ class ConvPaintWidget(QWidget):
                 self.viewer.layers.remove(self.proba_prefix)
 
         # If there was no probabilities layer, or we need a new one, create it
-        if (not proba_exists) or self.new_outputs:
+        if (not proba_exists) or self.new_proba:
             # Create a new probabilities layer
             self.viewer.add_image(
                 data=np.zeros(num_classes+spatial_dims, dtype=np.float32),
@@ -1731,7 +1728,7 @@ class ConvPaintWidget(QWidget):
         # Same for segmentation layer
         if self.proba_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_proba_tag)
-            self.viewer.layers[self.seg_prefix].name = full_name
+            self.viewer.layers[self.proba_prefix].name = full_name
 
     def _get_unique_layer_name(self, base_name):
         """Get a unique name for a new layer by checking existing layers."""
@@ -2208,6 +2205,12 @@ class ConvPaintWidget(QWidget):
         # Get the selected image layers in the order they are in the widget
         img_layer_list = [layer for layer in self.viewer.layers
                           if layer in self.viewer.layers.selection]
+        chosen_in_dropdwon = self._get_selected_img()
+        # If the layer chosen in the dropdown is selected, move it first, so its annotation is added first
+        if chosen_in_dropdwon is not None and chosen_in_dropdwon.name in img_layer_list:
+            img_layer_list.remove(chosen_in_dropdwon)
+            img_layer_list.insert(0, chosen_in_dropdwon)
+
         for img in img_layer_list:
             layer_shape = self._get_annot_shape(img)
             data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
@@ -2274,16 +2277,46 @@ class ConvPaintWidget(QWidget):
         # self.save_model_btn.setEnabled(True)
         self._set_model_description()
 
+    def _compare_new_to_existing_annots(self, img_name, annot):
+        """Compare new annotations to existing ones and remove duplicates."""
+        if img_name in self.features_annots.keys():
+            annot_sparse = ConvPaintWidget._annot_to_sparse(annot)
+            existing_sparse = self.features_annots[img_name] # Saved in sparse format
+            # Annotations are just the new ones where we don't already have an annot (same image, same class labeled)
+            annot_sparse = ConvPaintWidget._remove_duplicates_from_annot(annot_sparse, existing_sparse)
+            if len(annot_sparse) == 0:
+                # If there are no new annotations, return None (will trigger to not train and give a warning)
+                return None
+            else:
+                # If there are new annotations, add them to the list of existing ones
+                self.features_annots[img_name].append(annot.copy())
+        else:
+            # If we don't have any features yet, just add the new annotations
+            self.features_annots[img_name] = [annot_sparse.copy()]
+
     @staticmethod
-    def remove_duplicates_from_all(new_annot, existing_annotations, image_name):
-        """
-        Remove overlapping labels from new_annot based on all annotations already stored for the image.
-        """
-        cleaned = new_annot.copy()
-
-        for existing in existing_annotations.get(image_name, []):
-            assert cleaned.shape == existing.shape, "Annotation shapes must match"
-            duplicate_mask = (cleaned == existing) & (cleaned != 0)
-            cleaned[duplicate_mask] = 0
-
-        return cleaned
+    def _annot_to_sparse(annot):
+        """Convert annotations np array to sparse format {coord: label}."""
+        # Get the coordinates of the non-zero elements in the annotation array
+        coords = np.argwhere(annot > 0)
+        # Create a sparse representation of the annotations
+        sparse_annot = {tuple(coord): annot[tuple(coord)] for coord in coords}
+        return sparse_annot
+        
+    @staticmethod
+    def _sparse_to_annot(sparse_annot, shape):
+        """Convert sparse annotations to np array."""
+        annot = np.zeros(shape, dtype=np.uint8)
+        for coord, label in sparse_annot.items():
+            annot[coord] = label
+        return annot
+    
+    @staticmethod
+    def _remove_duplicates_from_annot(new_annot, existing_annot):
+        """Remove duplicates from new annotations based on existing ones, each given as sparse labels."""
+        filtered_annot = new_annot.copy()
+        for coord in new_annot.keys():
+            if coord in existing_annot.keys():
+                # If the coordinate is already in the existing annotations, remove it from the new ones
+                del filtered_annot[coord]
+        return filtered_annot
