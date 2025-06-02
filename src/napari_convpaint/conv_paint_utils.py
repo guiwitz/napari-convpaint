@@ -13,7 +13,7 @@ from torch.nn.functional import interpolate as torch_interpolate
 
 ### SCALING AND RESCALING
 
-def scale_img(image, scaling_factor, upscale=False, use_labels=False):
+def scale_img(image, scaling_factor, upscale=False, input_type="img"):
     """
     Downscale an image by averaging over non-overlapping blocks of the specified size.
     OR Upscale by repeating the pixels.
@@ -26,8 +26,9 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
         Factor by which to downscale the image.
     upscale : bool
         If True, upscale the image by repeating the pixels.
-    use_labels : bool
-        If True, use the mode (majority) instead of the median for downscaling labels.
+    input_type : str ("img", "labels", "coords")
+        Type of the input image. Determines how to scale the image:
+        If "img", use median, if "labels", use mode, if "coords", use max.
 
     Returns:
     ----------
@@ -65,12 +66,12 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
         slice_size[1] // scaling_factor, scaling_factor
     )
     # print(stacked_blocks[0,:,0,:])
-    if not use_labels:
+    if input_type == 'img':
         # Take the median along the scaling dimensions
         scaled_img = np.median(stacked_blocks, axis=(-3, -1))
         # scaled_img = median_filter(stacked_blocks, size=(1, scaling_factor, 1, scaling_factor)).reshape(
         #     *image.shape[:-2], slice_size[0] // scaling_factor, slice_size[1] // scaling_factor)
-    else:
+    elif input_type == 'labels':
         classes_before = np.unique(image)
         # For labels, take the majority (max count) along the scaling dimensions
         scaled_img = mode(stacked_blocks, axis=(-3, -1)).mode
@@ -78,6 +79,12 @@ def scale_img(image, scaling_factor, upscale=False, use_labels=False):
         # Check if the classes have changed after downscaling
         if len(classes_before) != len(classes_after):
             warnings.warn(f"Classes have changed after downscaling from {classes_before} to {classes_after}.")
+    elif input_type == 'coords':
+        # For coordinates, take the min along the scaling dimensions
+        scaled_img = np.min(stacked_blocks, axis=(-3, -1))
+    else:
+        raise ValueError(f"Unknown input type: {input_type}. Supported types are 'img', 'labels', and 'coords'.")
+    
     return scaled_img
 
 def rescale_features(feature_img, target_shape, order=1):
@@ -194,7 +201,7 @@ def reduce_to_patch_multiple(input, patch_size):
 
 ### PADDING, TILING & ANNOTATION EXTRACTION
 
-def pad(img, padding, use_labels=False):
+def pad(img, padding, input_type='img'):
     """
     Pads the image with the padding size given.
     The padding is done with the 'reflect' mode for images and 'constant' for annotations.
@@ -215,14 +222,19 @@ def pad(img, padding, use_labels=False):
         Padded image.
     """
     # Pad the image with the padding size
-    if use_labels:
-        return np.pad(img, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
-    else:
+    if input_type == 'img':
+        # For images, use 'reflect' padding
         return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='reflect')
+    elif input_type == 'labels':
+        # For labels, use 'constant' padding with 0
+        return np.pad(img, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
+    elif input_type == 'coords':
+        # For coordinates, use 'constant' padding with -1
+        return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='constant', constant_values=-1)
 
-def get_annot_planes(img, annot=None):
+def get_annot_planes(img, annot=None, coords=None):
     """
-    Extracts the planes (of the z dimension) of the padded data and annotations
+    Extracts the planes (of the z dimension) of the padded data, annotations and cordinates
     where there is at least one annotation.
     Dimensions are assumed [C, Z, H, W] and [Z, H, W] for images and annotations, respectively.
 
@@ -240,23 +252,28 @@ def get_annot_planes(img, annot=None):
         List of image planes that contain annotations. If annot is None, all image planes are returned.
     annot_planes : list of np.ndarray or None
         List of annotation planes from the input annotation. If annot is None, None is returned.
+    coords : np.ndarray or None
+        List of coordinates planes from the input coordinates. If coords is None, None is returned.
     """
     if annot is None:
         img_planes = [img[:, z:z+1] for z in range(img.shape[1])]
-        return img_planes, None
+        return img_planes, None, coords
     
     non_empty = np.unique(np.where(annot > 0)[0])
     if len(non_empty) == 0:
         warnings.warn('No annotations found')
-        return None, None
+        return None, None, None
     
-    # Extract the planes of the image and annotations
+    # Extract the planes of the image and annotations (and coordinates if provided)
     img_planes = [img[:,z:z+1] for z in non_empty] # images have a channels dimension
     annot_planes = [annot[z:z+1] for z in non_empty] # annotations do not have a channels dimension
+    if coords is not None:
+        coords_planes = [coords[:,z:z+1] for z in non_empty]
+    else:
+        coords_planes = None
+    return img_planes, annot_planes, coords_planes
 
-    return img_planes, annot_planes
-
-def tile_annot(img, annot, padding):
+def tile_annot(img, annot, coords, padding):
     """
     Tile the image and annotations into patches of the size of the annotations.
     Takes a number of pixels equal to 'padding' more than the bounding box of the annotation.
@@ -285,6 +302,7 @@ def tile_annot(img, annot, padding):
     # Create lists to store the tiles
     img_tiles = []
     annot_tiles = []
+    coord_tiles = []
 
     for i in range(len(boxes['label'])):
         # Get the bounding box of the annotation
@@ -296,11 +314,55 @@ def tile_annot(img, annot, padding):
         # Pad the image and annotations with the correct padding size
         img_tile = img[..., x_min:x_max, y_min:y_max]
         annot_tile = annot[..., x_min:x_max, y_min:y_max]
+        if coords is not None:
+            coords_tile = coords[..., x_min:x_max, y_min:y_max]
+        else:
+            coords_tile = None
 
         img_tiles.append(img_tile)
         annot_tiles.append(annot_tile)
+        coord_tiles.append(coords_tile)
 
-    return img_tiles, annot_tiles
+    return img_tiles, annot_tiles, coord_tiles
+
+def get_coordinates_image(img):
+    """
+    Get the coordinates of the pixels in the image.
+    The coordinates are returned as a 3D array of shape (Z, H, W) where each element is a tuple
+    of the form (z, h, w) representing the coordinates of the pixel in the image.
+    Dimensions are assumed [C, Z, H, W] for images.
+    
+    Parameters:
+    ----------
+    img : np.ndarray
+        Input image to extract coordinates from. Must have spatial dimensions as the last two dimensions.
+    Returns:
+    ----------
+    coords : np.ndarray
+        3D array of shape (Z, H, W) where each element is a tuple of the form (z, h, w).
+    """
+    # Check if the image has the correct number of dimensions
+    if img.ndim != 4:
+        raise ValueError("Input image must have 4 dimensions (C, Z, H, W).")
+    # Get spatial dimensions (remember, channels are first)
+    Z, H, W = img.shape[1:4]
+
+    # Create a 3D array of coordinates
+    # Each element is a tuple of the form (z, h, w)
+    # coords = np.empty((Z, H, W), dtype=object)
+    # for z in range(Z):
+    #     for h in range(H):
+    #         for w in range(W):
+    #             coords[z, h, w] = (z, h, w)
+
+    # Generate the coordinate grid
+    z_coords, h_coords, w_coords = np.meshgrid(
+        np.arange(Z), np.arange(H), np.arange(W), indexing='ij'
+    )
+    # Stack them into a coordinate array of shape (3, Z, H, W)
+    coords = np.stack((z_coords, h_coords, w_coords), axis=0)
+
+    return coords
 
 def get_features_targets(features, annot):
     """
@@ -324,8 +386,8 @@ def get_features_targets(features, annot):
     # Get the annotated pixels and targets
     mask = annot > 0
     features = np.moveaxis(features, 0, -1) #move [z, h, w, features]
-    # Select only the pixels that are annotated
-    features = features[mask]
+    # Select only the pixels that are annotated, linearizing them
+    features = features[mask] # Get the features
     annot = annot[mask] # Get the targets
 
     return features, annot

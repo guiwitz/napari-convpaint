@@ -1003,13 +1003,13 @@ class ConvPaintWidget(QWidget):
         image_stack_norm = self._get_data_channel_first_norm(img)
         annot = annot.data
 
-        # If continuous training is activated, filter the annotations to only include new ones
-        if self.keep_training:
-            img_name = self._get_selected_img().name
-            annot = self._compare_new_to_existing_annots(img_name, annot)
-            if annot is None:
-                warnings.warn('No new pixels labeled. Training not continued.')
-                return
+        # # If continuous training is activated, filter the annotations to only include new ones
+        # if self.keep_training:
+        #     img_name = self._get_selected_img().name
+        #     annot = self._compare_new_to_existing_annots(img_name, annot)
+        #     if annot is None:
+        #         warnings.warn('No new pixels labeled. Training not continued.')
+        #         return
         
         # Start training
         with warnings.catch_warnings():
@@ -1018,7 +1018,8 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            self.cp_model.train(image_stack_norm, annot, extend_features=self.keep_training)
+            img_name = self._get_selected_img().name
+            self.cp_model.train(image_stack_norm, annot, memory_mode=self.keep_training, img_ids=img_name)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -2192,11 +2193,11 @@ class ConvPaintWidget(QWidget):
         """Update the training counts in the GUI."""
         if self.cp_model is None:
             return
-        self.label_training_count.setText(f'Trainings performed: {self.cp_model.num_trainings}')
+        self.label_training_count.setText(f'Trained pixels: {len(self.cp_model.table)}')
 
     def _reset_train_features(self):
         """Reset the training features."""
-        self.cp_model.reset_features()
+        self.cp_model.reset_table()
         self._update_training_counts()
         # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
         self.features_annots = {}
@@ -2276,23 +2277,6 @@ class ConvPaintWidget(QWidget):
         self._reset_predict_buttons()
         # self.save_model_btn.setEnabled(True)
         self._set_model_description()
-
-    def _compare_new_to_existing_annots(self, img_name, annot):
-        """Compare new annotations to existing ones and remove duplicates."""
-        if img_name in self.features_annots.keys():
-            annot_sparse = ConvPaintWidget._annot_to_sparse(annot)
-            existing_sparse = self.features_annots[img_name] # Saved in sparse format
-            # Annotations are just the new ones where we don't already have an annot (same image, same class labeled)
-            annot_sparse = ConvPaintWidget._remove_duplicates_from_annot(annot_sparse, existing_sparse)
-            if len(annot_sparse) == 0:
-                # If there are no new annotations, return None (will trigger to not train and give a warning)
-                return None
-            else:
-                # If there are new annotations, add them to the list of existing ones
-                self.features_annots[img_name].append(annot.copy())
-        else:
-            # If we don't have any features yet, just add the new annotations
-            self.features_annots[img_name] = [annot_sparse.copy()]
 
     @staticmethod
     def _annot_to_sparse(annot):
