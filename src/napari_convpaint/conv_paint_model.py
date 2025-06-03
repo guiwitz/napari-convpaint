@@ -582,7 +582,7 @@ class ConvpaintModel:
 
 ### FEATURE EXTRACTION
     
-    def get_feature_image(self, data, annotations=None, restore_input_form=True, memory_mode=False, img_ids=None):
+    def get_feature_image(self, data, annotations=None, memory_mode=False, restore_input_form=True, img_ids=None):
         """
         Returns the features of images extracted by the feature extractor model.
         If annotations are given, the features are extracted from the annotated planes,
@@ -631,11 +631,10 @@ class ConvpaintModel:
         self._run_model_checks()
 
         # Make sure data is a list of images with [C, Z, H, W] shape
-        data, annotations, coords = self._prep_dims(data, annotations, get_coords=True)
-        print("Prepped data shapes:")
-        print(data[0].shape, coords[0].shape)
-        print(coords[0][:, 0, 20, 20])
-        print("Memory mode:", memory_mode)
+        data, annotations = self._prep_dims(data, annotations, get_coords=False)
+        # print("Prepped data shapes:")
+        # print(data[0].shape)
+        # print("Memory mode:", memory_mode)
 
         # Save the original data shapes for reshaping/rescaling later
         self.original_shapes = [d.shape for d in data]
@@ -653,21 +652,21 @@ class ConvpaintModel:
                                                       input_type="labels")
                            for a in annotations]
         if memory_mode:
-            coords = [conv_paint_utils.scale_img(c,
-                                                 params_for_extract.image_downsample,
-                                                 input_type="coords")
-                      for c in coords]
-            print("Downsampled data shapes:")
-            print(data[0].shape, coords[0].shape)
-            print(coords[0][:, 0, 20, 20])
-            annotations = self._register_and_update_annots(annotations, coords, img_ids)
+            annotations = self._register_and_update_annots(annotations, img_ids,
+                                                           params_for_extract.image_downsample)
             num_new_annot_pix = np.sum([annot > 0 for annot in annotations])
-            print(f"Number of new annotated pixels: {num_new_annot_pix}")
+            # print(f"Number of new annotated pixels: {num_new_annot_pix}")
             if num_new_annot_pix == 0:
                 warnings.warn("No new annotations. Train with existing features.")
-                print("No new annotations (just in case warning not shown).")
-                return [], [], [], []
-        
+                # print("No new annotations (just in case warning not shown).")
+                return [], [], [], [], params_for_extract.image_downsample
+            coords = [conv_paint_utils.get_coordinates_image(d) for d in data]
+            # print("Downsampled data shapes:")
+            # print(data[0].shape, coords[0].shape)
+            # print(coords[0][:, 0, 20, 20])
+        else:
+            coords = [None for _ in data]  # No coordinates if not in memory mode
+  
         # Get the correct padding size for the feature extraction    
         padding = self._get_total_pad_size(params_for_extract)
         # Pad the images and annotations with the correct padding size
@@ -677,11 +676,10 @@ class ConvpaintModel:
         if use_annots:
             annotations = [conv_paint_utils.pad(a, padding, input_type="labels") for a in annotations]
         if memory_mode:
-            print("IN MEMORY MODE PADDING")
             coords = [conv_paint_utils.pad(c, padding, input_type="coords") for c in coords]        
-        print("Padded data shapes:")
-        print(data[0].shape, coords[0].shape)
-        print(coords[0][:, 0, 20, 20])
+            # print("Padded data shapes:")
+            # print(data[0].shape, coords[0].shape)
+            # print(coords[0][:, 0, 20, 20])
 
         # Extract annotated planes and flatten them (treating as individual images)
         if use_annots:
@@ -695,10 +693,10 @@ class ConvpaintModel:
                 img_ids = [img_ids[i] for i, plane_tuple in enumerate(planes) for _ in range(len(plane_tuple[0]))]
             else:
                 img_ids = [None] * len(data)
-        print("Extracted annotated planes shapes:")
-        print(data[0].shape, coords[0].shape)
-        print(coords[0][:, 0, 20, 20])
-        print(img_ids)
+            # print("Extracted annotated planes shapes:")
+            # print(data[0].shape, coords[0].shape)
+            # print(coords[0][:, 0, 20, 20])
+            # print(img_ids)
 
         # Get annotated tiles (if enabled) and flatten them (treating as individual images)
         if params_for_extract.tile_annotations:
@@ -714,9 +712,9 @@ class ConvpaintModel:
                     img_ids = [img_ids[i] for i, tile_tuple in enumerate(tiles) for _ in range(len(tile_tuple[0]))]
                 else:
                     img_ids = [None] * len(data)
-            print("Extracted annotated tiles shapes:")
-            print(data[0].shape, coords[0].shape)
-            print(img_ids)
+                # print("Extracted annotated tiles shapes:")
+                # print(data[0].shape, coords[0].shape)
+                # print(img_ids)
 
         # Extract features from the images for each scaling in the pyramid
         # For training, we want to "unpatch" the features to match the annotations
@@ -727,7 +725,7 @@ class ConvpaintModel:
         # Return the raw features if required
         if not restore_input_form:
             if memory_mode:
-                return features, annotations, coords, img_ids
+                return features, annotations, coords, img_ids, params_for_extract.image_downsample
             elif use_annots:
                 return features, annotations
             else:
@@ -856,9 +854,9 @@ class ConvpaintModel:
 
         else:
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts, coords, img_ids  = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids)
+            features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids)
             # Get all annotations and features from the table
-            features, targets = self._register_and_get_all_features_annots(features, annot_parts, coords, img_ids)
+            features, targets = self._register_and_get_all_features_annots(features, annot_parts, coords, img_ids, scale)
 
         # Train the classifier
         self._clf_train(features, targets,
@@ -875,9 +873,11 @@ class ConvpaintModel:
         ----------
         None
         """
-        self.table = pd.DataFrame(columns=['img_id', 'coordinates', 'label', 'features_array', 'keep'])
+        self.table = pd.DataFrame(columns=['img_id', 'scale', 'coordinates', 'label', 'features_array'])
+        self.table.index.name = "row_key"
+        self.annot_dict = {}
 
-    def _register_and_update_annots(self, annotations, coords, img_ids):
+    def _register_and_update_annots(self, annotations, img_ids, scale=1):
         """
         Registers new annotations in the table and deletes existing ones from the new annotations.
 
@@ -885,8 +885,6 @@ class ConvpaintModel:
         ----------
         annotations : list[np.ndarray]
             List of annotations to register, each with shape [C, Z, H, W]
-        coords : list[np.ndarray]
-            List of coordinates corresponding to the annotations, each with shape [C, Z, H, W]
         img_ids : list[str]
             List of image IDs corresponding to the annotations, each as a string
 
@@ -899,42 +897,45 @@ class ConvpaintModel:
 
         if not len(annotations) == len(img_ids):
             raise ValueError('Annotations and image IDs must have the same length.')
-        if not len(annotations) == len(coords):
-            raise ValueError('Annotations and coordinates must have the same length.')
 
         # First update the table with the new annotations and features
         all_new_annots = []
-        for a, c, i in zip(annotations, coords, img_ids):
-            all_non_empties = np.argwhere(a > 0)
-            new_annot = a.copy()
-            for non_empty in all_non_empties:
-                # Get the coordinates of the non-empty pixels
-                non_empty = tuple(non_empty)
-                pix_annot = a[non_empty]
-                coord = tuple(c[:, non_empty[0], non_empty[1], non_empty[2]])
-                id = i
-                # Mark in the table which entries to keep, and remove those from the new annotations
-                table_entry = self.table[(self.table['img_id'] == id) &
-                    (self.table['coordinates'] == coord) &
-                    (self.table['label'] == pix_annot)]
-                if len(table_entry) == 1:
-                    # Mark it in the table as "keep"
-                    self.table.loc[table_entry.index, 'keep'] = True
-                    # Delete it from the new annotations (= set to zero)
-                    new_annot[non_empty] = 0
-                elif len(table_entry) > 1:
-                    raise ValueError(f"Multiple entries found in the table for image {id} at coordinates {coord} with label {pix_annot}.")
-            # Drop all entries in the table for the current image that are not marked as "keep"
-            self.table = self.table[~((self.table["img_id"] == id)
-                                                  & (self.table["keep"] != True))]
-            # Now reset the "keep" column to false for this image
-            self.table.loc[self.table['img_id'] == id, 'keep'] = False
+        for a, id in zip(annotations, img_ids):
+            dict_key = f"{id}_scale{scale}"
+            old_annot = self.annot_dict.get(dict_key, None)
+            # print("Annotated in old:", np.sum(old_annot>0) if old_annot is not None else None)
+            # Save the newest version of annotations in the dictionary
+            self.annot_dict[dict_key] = a.copy()
+            # Save the annotations to extract in a copy, from which duplicates will be removed
+            annot_to_extract = a.copy()
+
+            if old_annot is not None:
+                # Which ones can be ignored for feature extraction, since they are already in the table
+                mask_to_ignore = old_annot == annot_to_extract
+                # print("Num pixels to ignore:", np.sum(mask_to_ignore))
+                # Which ones can be removed from the table, since they are different to the new annotations
+                mask_to_remove = (old_annot > 0) & (old_annot != annot_to_extract)
+                # print("Num pixels to remove:", np.sum(mask_to_remove))
+                coords_to_remove = np.argwhere(mask_to_remove)
+
+                # Set the pixels that are the same as the old annotation to zero (no need to extract features)
+                annot_to_extract[mask_to_ignore] = 0
+
+                # coords_to_remove: shape [N, 3], rows of (z, h, w)
+                if len(coords_to_remove) > 0:
+                    row_keys_to_remove = [
+                        f"{id}_scale{scale}_{z}-{h}-{w}_{old_annot[z, h, w]}"
+                        for z, h, w in coords_to_remove
+                    ]
+                    # Drop all entries in the table that match the row keys to remove
+                    self.table.drop(index=row_keys_to_remove, errors='ignore', inplace=True)
+
             # Add the new annotations to the list
-            all_new_annots.append(new_annot)
+            all_new_annots.append(annot_to_extract)
 
         return all_new_annots
     
-    def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids):
+    def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids, scale):
         """
         Registers new features in the table and returns all features and annotations.
         IMPORTANT: This assumes that double entries have been removed from the annotations and old entries from the table.
@@ -962,7 +963,7 @@ class ConvpaintModel:
             raise ValueError('Features, annotations, coordinates, and image IDs must have the same length.')
 
         # First add the new annotations and features to the annotations table
-        for f, a, c, i in zip(features, annotations, coords, img_ids):
+        for f, a, c, id in zip(features, annotations, coords, img_ids):
             entries = []
             all_non_empties = np.argwhere(a > 0)
             for non_empty in all_non_empties:
@@ -971,19 +972,20 @@ class ConvpaintModel:
                 non_empty = tuple(non_empty)
                 new_annot = a[non_empty]
                 coord = tuple(c[:, non_empty[0], non_empty[1], non_empty[2]])
-                id = i
 
                 # Add the new entry to the table
                 new_entry = {"img_id": id,
+                             "scale": scale,
                              "coordinates": coord,
                              "label": new_annot,
                              "features_array": new_features,
-                             "keep": False}
+                             "row_key": f"{id}_scale{scale}_{coord[0]}-{coord[1]}-{coord[2]}_{new_annot}"}
                 entries.append(new_entry)
-            
+
             # Create a DataFrame from the entries and append it to the table
             new_entries_df = pd.DataFrame(entries)
-            self.table = pd.concat([self.table, new_entries_df], ignore_index=True)
+            new_entries_df.set_index("row_key", inplace=True)
+            self.table = pd.concat([self.table, new_entries_df])
 
         # Now extract all features and annotations from the table
         features = list(self.table['features_array'].values)

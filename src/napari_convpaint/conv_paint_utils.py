@@ -297,25 +297,31 @@ def tile_annot(img, annot, coords, padding):
     """
     # Find the bounding boxes of the annotations
     annot_regions = skimage.morphology.label(annot > 0)
-    boxes = skimage.measure.regionprops_table(annot_regions, properties=('label', 'bbox'))
+    regions = skimage.measure.regionprops(annot_regions)
 
     # Create lists to store the tiles
     img_tiles = []
     annot_tiles = []
     coord_tiles = []
 
-    for i in range(len(boxes['label'])):
+    for region in regions:
         # Get the bounding box of the annotation
-        x_min = boxes['bbox-1'][i] - padding
-        x_max = boxes['bbox-4'][i] + padding
-        y_min = boxes['bbox-2'][i] - padding
-        y_max = boxes['bbox-5'][i] + padding
+        z_min, y_min, x_min, z_max, y_max, x_max = region.bbox
 
-        # Pad the image and annotations with the correct padding size
-        img_tile = img[..., x_min:x_max, y_min:y_max]
-        annot_tile = annot[..., x_min:x_max, y_min:y_max]
+        x_min -= padding
+        x_max += padding
+        y_min -= padding
+        y_max += padding
+
+        img_tile = img[..., y_min:y_max, x_min:x_max]
+        annot_tile = annot[..., y_min:y_max, x_min:x_max]
+
+        # Zero-out all labels except this region
+        mask = annot_regions[..., y_min:y_max, x_min:x_max] == region.label
+        annot_tile = annot_tile * mask
+
         if coords is not None:
-            coords_tile = coords[..., x_min:x_max, y_min:y_max]
+            coords_tile = coords[..., y_min:y_max, x_min:x_max]
         else:
             coords_tile = None
 

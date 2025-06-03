@@ -416,31 +416,31 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group.glayout.setColumnStretch(1, 1)
 
         # Text to warn the user about their responsibility
-        self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the channels of images are compatible.\n")
+        self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the dimensions of images are compatible.\n")
         self.advanced_training_note.setStyleSheet("font-size: 12px; color: rgba(120, 120, 120, 70%); font-style: italic")
         self.advanced_training_note.setWordWrap(True)
         self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 2)
+
+        # Button for training on selected images
+        self.btn_train_on_selected = QPushButton('Train on selected data')
+        self.btn_train_on_selected.setToolTip("Train using layers selected in the viewer's layer list and beginning with 'annotations'")
+        self.advanced_training_group.glayout.addWidget(self.btn_train_on_selected, 1, 0, 1, 2)
 
         # Checkbox for continuous training
         self.check_keep_training = QCheckBox('Continuous training')
         self.check_keep_training.setToolTip('Save and use combined features in memory for training')
         self.check_keep_training.setChecked(self.keep_training)
-        self.advanced_training_group.glayout.addWidget(self.check_keep_training, 1, 0, 1, 1)
+        self.advanced_training_group.glayout.addWidget(self.check_keep_training, 2, 0, 1, 1)
 
         # Label for number of trainings performed
         self.label_training_count = QLabel('')
         self._update_training_counts()
-        self.advanced_training_group.glayout.addWidget(self.label_training_count, 1, 1, 1, 1)
+        self.advanced_training_group.glayout.addWidget(self.label_training_count, 2, 1, 1, 1)
 
         # Reset training button
         self.btn_reset_training = QPushButton('Reset continuous training')
         self.btn_reset_training.setToolTip('Clear training history and restart training counter')
-        self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 2, 0, 1, 2)
-
-        # Button for training on selected images
-        self.btn_train_on_selected = QPushButton('Train on selected data')
-        self.btn_train_on_selected.setToolTip("Train using layers selected in the viewer's layer list and beginning with 'annotations'")
-        self.advanced_training_group.glayout.addWidget(self.btn_train_on_selected, 3, 0, 1, 2) # NOTE: TURNED OFF FOR NOW
+        self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 3, 0, 1, 2)
 
         # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
@@ -705,6 +705,7 @@ class ConvPaintWidget(QWidget):
         
         # Change input layer selection when choosing a new image layer in dropdown
         self.image_layer_selection_widget.native.activated.connect(self._delayed_on_select_layer)
+        self.image_layer_selection_widget.changed.connect(self._delayed_on_select_layer)
         self.annotation_layer_selection_widget.native.activated.connect(self._on_select_annot)
         self.add_layers_btn.clicked.connect(self._on_add_annot_layer)
 
@@ -810,12 +811,14 @@ class ConvPaintWidget(QWidget):
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
         # Check if it is the same layer
-        was_same = self.selected_channel == self.image_layer_selection_widget.native.currentText()
+        was_same = ((self.selected_channel is not None) and
+                    (self.selected_channel == self.image_layer_selection_widget.native.currentText()))
         
         # Update the selected channel and reset the radio buttons, but only if it is a new image
         initial_add_layers_flag = self.add_layers_flag # Save initial state of add_layers_flag
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
         img = self._get_selected_img()
+
         if img is not None:
             # If it is a new image, set the according radio buttons, image stats etc.
             if not was_same:
@@ -1423,7 +1426,7 @@ class ConvPaintWidget(QWidget):
         self.annot_prefix = 'annotations' # Prefix for the annotation layer names
         self.seg_prefix = 'segmentation' # Prefix for the segmentation layer names
         self.proba_prefix = 'probabilities' # Prefix for the class probabilities layer names
-        self.keep_training = False # Extend features for subsequent training
+        self.keep_training = False # Update features for subsequent training
         self.annot_layers = [] # List of annotation layers
         self.seg_layers = [] # List of segmentation layers
         self.add_seg = True # Add a layer with segmentation
@@ -1581,7 +1584,6 @@ class ConvPaintWidget(QWidget):
         remove it (or rename and keep it if specified in self.keep_layers) and add a new one.
         If the widget is used as third party (self.third_party=True), no layer is added if it didn't exist before,
         unless force_add=True (e.g. when the user clicks on the add layer button)"""
-
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
@@ -2264,7 +2266,7 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            self.cp_model.train(img_list, annot_list, extend_features=self.keep_training)
+            self.cp_model.train(img_list, annot_list, memory_mode=self.keep_training)
             self._update_training_counts()
     
         with warnings.catch_warnings():
