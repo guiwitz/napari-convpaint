@@ -107,7 +107,7 @@ class ConvpaintModel:
         """
         # Initialize parameters and features
         self._param = Param()
-        self.reset_table()
+        self.reset_training()
         self.num_trainings = 0
 
         # Initialize the dictionary of all available models
@@ -346,6 +346,7 @@ class ConvpaintModel:
                     'classifier': self.classifier,
                     'param': self._param,
                     'table': self.table,
+                    'annnotations': self.annot_dict
                 }
                 pickle.dump(data, f)
 
@@ -377,6 +378,7 @@ class ConvpaintModel:
         self._param = new_param.copy()
         self.classifier = data['classifier']
         self.table = data['table']
+        self.annot_dict = data['annnotations']
 
     def _load_yml(self, yml_path):
         """
@@ -701,7 +703,7 @@ class ConvpaintModel:
         # Get annotated tiles (if enabled) and flatten them (treating as individual images)
         if params_for_extract.tile_annotations:
             if use_annots:
-                tiles = [conv_paint_utils.tile_annot(d, a, c, padding)
+                tiles = [conv_paint_utils.tile_annot(d, a, c, padding, plot_tiles=False)
                         for d, a, c in zip(data, annotations, coords)]
                 data = [tile for tile_tuple in tiles for tile in tile_tuple[0]]
                 annotations = [tile for tile_tuple in tiles for tile in tile_tuple[1]]
@@ -721,7 +723,7 @@ class ConvpaintModel:
         keep_patched = not use_annots
         features = [self.fe_model.get_feature_pyramid(d, params_for_extract, patched=keep_patched)
                     for d in data]
-        
+
         # Return the raw features if required
         if not restore_input_form:
             if memory_mode:
@@ -852,11 +854,17 @@ class ConvpaintModel:
             features = np.concatenate(features, axis=0) # Concatenate the features into a single array
             targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
 
-        else:
+        else: # memory mode
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
             features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(features, annot_parts, coords, img_ids, scale)
+
+        # Check if we have features and targets, and that we have at least two classes
+        if len(features) == 0 or len(targets) == 0:
+            raise ValueError('No features or targets found. Please check the input data and annotations.')
+        if len(np.unique(targets)) < 2:
+            raise ValueError('Not enough classes found in the targets. At least two classes are required for training.')
 
         # Train the classifier
         self._clf_train(features, targets,
@@ -864,7 +872,7 @@ class ConvpaintModel:
 
         return self.classifier
 
-    def reset_table(self):
+    def reset_training(self):
         """
         Resets the features and targets of the model. These can be used to
         iteratively train the model with the option extend_features=True.

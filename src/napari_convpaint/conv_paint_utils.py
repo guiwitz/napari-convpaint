@@ -9,6 +9,7 @@ from joblib import Parallel, delayed
 import einops as ein
 #import xgboost as xgb
 from torch.nn.functional import interpolate as torch_interpolate
+from matplotlib import pyplot as plt
 
 
 ### SCALING AND RESCALING
@@ -273,7 +274,7 @@ def get_annot_planes(img, annot=None, coords=None):
         coords_planes = None
     return img_planes, annot_planes, coords_planes
 
-def tile_annot(img, annot, coords, padding):
+def tile_annot(img, annot, coords, padding, plot_tiles=False):
     """
     Tile the image and annotations into patches of the size of the annotations.
     Takes a number of pixels equal to 'padding' more than the bounding box of the annotation.
@@ -304,14 +305,32 @@ def tile_annot(img, annot, coords, padding):
     annot_tiles = []
     coord_tiles = []
 
+    if plot_tiles:
+        im_to_show = img[0,0,...]
+        im_to_show[annot[0]>0] = 0
+    
     for region in regions:
         # Get the bounding box of the annotation
         z_min, y_min, x_min, z_max, y_max, x_max = region.bbox
+
+        if plot_tiles:
+            # Draw the bounding box on the image
+            im_to_show[y_min:y_max, x_min] = 1
+            im_to_show[y_min:y_max, x_max-1] = 1
+            im_to_show[y_min, x_min:x_max] = 1
+            im_to_show[y_max-1, x_min:x_max] = 1
 
         x_min -= padding
         x_max += padding
         y_min -= padding
         y_max += padding
+
+        if plot_tiles:
+            # Draw the bounding box WITH PADDING on the image
+            im_to_show[y_min:y_max, x_min] = 2
+            im_to_show[y_min:y_max, x_max-1] = 2
+            im_to_show[y_min, x_min:x_max] = 2
+            im_to_show[y_max-1, x_min:x_max] = 2
 
         img_tile = img[..., y_min:y_max, x_min:x_max]
         annot_tile = annot[..., y_min:y_max, x_min:x_max]
@@ -328,6 +347,10 @@ def tile_annot(img, annot, coords, padding):
         img_tiles.append(img_tile)
         annot_tiles.append(annot_tile)
         coord_tiles.append(coords_tile)
+    
+    if plot_tiles:
+            plt.imshow(im_to_show, cmap='gray')
+            plt.show()
 
     return img_tiles, annot_tiles, coord_tiles
 
