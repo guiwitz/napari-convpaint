@@ -93,7 +93,7 @@ class Hookmodel(FeatureExtractor):
             param.fe_scalings = [1,2]
             param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
         elif self.model_name == 'convnext':
-            param.fe_scalings = [1,2,4]
+            param.fe_scalings = [1,2]
             param.fe_layers = self.selectable_layer_keys[:2]
 
         param.tile_annotations = True # Overwrite non-FE settings
@@ -124,10 +124,10 @@ class Hookmodel(FeatureExtractor):
             return layers
     
     def get_padding(self):
-        ks = self.get_max_kernel_size()
-        return ks // 2
+        ks, depth = self.get_max_kernel_size_and_depth()
+        return ks * depth // 2  # Padding established empirically to avoid significant edge effects
 
-    def get_max_kernel_size(self):
+    def get_max_kernel_size_and_depth(self):
         """
         Given a hookmodel, find the maximum kernel size needed for the deepest layer.
         
@@ -142,6 +142,7 @@ class Hookmodel(FeatureExtractor):
         # Initialize variables
         max_kernel_size = 1
         current_total_pool = 1
+        conv_depth = 1
 
         if len(self.selected_layers) == 0:
             # no layers selected yet
@@ -156,11 +157,12 @@ class Hookmodel(FeatureExtractor):
                 current_total_pool *= curr_layer.kernel_size
             # For each convolution, multiply the kernel size with the current total pool
             elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
+                conv_depth += 1
                 max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
             # Only iterate until the latest selected layer
             if curr_layer == latest_layer:
                 break
-        return max_kernel_size
+        return max_kernel_size, conv_depth
     
     def get_num_input_channels(self):
         return [self.named_modules[0][1].in_channels]
