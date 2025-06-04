@@ -3,7 +3,7 @@ from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox, QButtonGroup,
                             QRadioButton,QDoubleSpinBox)
 from PyQt5 import QtWidgets, QtGui, QtCore
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer, QUrl
 from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
@@ -15,8 +15,6 @@ import warnings
 
 from .conv_paint_utils import normalize_image, compute_image_stats
 from .conv_paint_model import ConvpaintModel
-
-from qtpy.QtCore import QTimer
 
 class ConvPaintWidget(QWidget):
     """
@@ -60,6 +58,8 @@ class ConvPaintWidget(QWidget):
         self._reset_attributes()
 
         ### Build the widget
+        style_for_infos = "font-size: 12px; color: rgba(120, 120, 120, 80%); font-style: italic"
+        style_for_shortcut_info = "font-size: 11px; color: rgba(120, 120, 120, 80%); font-style: italic"
 
         # Create main layout
         self.main_layout = QVBoxLayout()
@@ -68,7 +68,29 @@ class ConvPaintWidget(QWidget):
         # Create and add tabs
         self.tab_names = ['Home', 'Model options', 'Class labels', 'Advanced'] #['Home', 'Project', 'Model options']
         self.tabs = TabSet(self.tab_names, tab_layouts=[None, QGridLayout(), None, None]) # [None, None, QGridLayout()])
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setSizePolicy(tab_bar.sizePolicy().horizontalPolicy(), tab_bar.sizePolicy().verticalPolicy())
+
+        # Create docs button
+        docs_button = QtWidgets.QToolButton()
+        docs_button.setText("Documentation")
+        docs_button.setStyleSheet("QToolButton {color: #999; text-decoration: underline; margin-left: 4px; margin-right: 8px}")
+        docs_button.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(QUrl("https://guiwitz.github.io/napari-convpaint/book/Landing.html")))
+        docs_button.setToolTip("Open the documentation in your browser")
+
+        # Create a widget to hold tab bar and button side by side
+        tab_header_widget = QWidget()
+        tab_header_layout = QtWidgets.QHBoxLayout(tab_header_widget)
+        tab_header_layout.setContentsMargins(0, 0, 0, 0)
+        tab_header_layout.setSpacing(0)
+
+        tab_header_layout.addWidget(tab_bar)
+        tab_header_layout.addWidget(docs_button)
+
+        # Add to your main layout
+        self.main_layout.addWidget(tab_header_widget)
         self.main_layout.addWidget(self.tabs)
+        
         # Disable project tab as long as not activated
         # self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False)
         
@@ -92,19 +114,17 @@ class ConvPaintWidget(QWidget):
         shortcuts_text2 = 'Shift+q: Set annotation label 1\nShift+w: Set annotation label 2\nShift+e: Set annotation label 3\nShift+r: Set annotation label 4'
         shortcuts_label1 = QLabel(shortcuts_text1)
         shortcuts_label2 = QLabel(shortcuts_text2)
-        shortcuts_label1.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
-        shortcuts_label2.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        shortcuts_label1.setStyleSheet(style_for_shortcut_info)
+        shortcuts_label2.setStyleSheet(style_for_shortcut_info)
         shortcuts_grid = QGridLayout()
         shortcuts_grid.addWidget(shortcuts_label1, 0, 0)
         shortcuts_grid.addWidget(shortcuts_label2, 0, 1)
         shortcuts_widget = QWidget()
         shortcuts_widget.setLayout(shortcuts_grid)
-        # self.shortcuts_label = QLabel(shortcuts_text)#"\n[Hover mouse to see shortcuts]")
-        # self.shortcuts_label.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%); font-style: italic")
-        # self.shortcuts_label.setToolTip(shortcuts_text)
+
         # Create a simple box to add a number, for testing purposes
-        self.number_box = create_widget(annotation=int, label='Test')
-        self.number_box.value = 0
+        # self.number_box = create_widget(annotation=int, label='Test')
+        # self.number_box.value = 0
 
 
         # Add groups to the tab
@@ -378,7 +398,7 @@ class ConvPaintWidget(QWidget):
 
         # Text to warn the user about their responsibility
         self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.\n")
-        self.advanved_labels_note.setStyleSheet("font-size: 12px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        self.advanved_labels_note.setStyleSheet(style_for_infos)
         self.advanved_labels_note.setWordWrap(True)
         self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
 
@@ -417,30 +437,51 @@ class ConvPaintWidget(QWidget):
 
         # Text to warn the user about their responsibility
         self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the dimensions of images are compatible.\n")
-        self.advanced_training_note.setStyleSheet("font-size: 12px; color: rgba(120, 120, 120, 70%); font-style: italic")
+        self.advanced_training_note.setStyleSheet(style_for_infos)
         self.advanced_training_note.setWordWrap(True)
-        self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 2)
+        self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 4)
 
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
         self.btn_train_on_selected.setToolTip("Train using layers selected in the viewer's layer list and beginning with 'annotations'")
-        self.advanced_training_group.glayout.addWidget(self.btn_train_on_selected, 1, 0, 1, 2)
+        # self.advanced_training_group.glayout.addWidget(self.btn_train_on_selected, 1, 0, 1, 2)
 
-        # Checkbox for continuous training
-        self.check_keep_training = QCheckBox('Continuous training')
-        self.check_keep_training.setToolTip('Save and use combined features in memory for training')
-        self.check_keep_training.setChecked(self.keep_training)
-        self.advanced_training_group.glayout.addWidget(self.check_keep_training, 2, 0, 1, 1)
+        # Radio Buttons for continuous training
+        self.button_group_cont_training = QButtonGroup()
+        self.radio_img_training = QRadioButton('Image')
+        self.radio_img_training.setToolTip('Keep features in memory, updating them only for new annotations in each training, as long as the image is not changed')
+        self.radio_global_training = QRadioButton('Global')
+        self.radio_global_training.setToolTip('Keep features in memory, updating them only for new annotations in each training, until reset manually')
+        self.radio_single_training = QRadioButton('Off')
+        self.radio_single_training.setToolTip('Extract all features freshly for each training')
+        self.radio_img_training.setChecked(True)
+        self.button_group_cont_training.addButton(self.radio_img_training, id=1)
+        self.button_group_cont_training.addButton(self.radio_global_training, id=2)
+        self.button_group_cont_training.addButton(self.radio_single_training, id=3)
+        self.advanced_training_group.glayout.addWidget(QLabel('Continuous training:'), 2, 0, 1, 1)
+        self.advanced_training_group.glayout.addWidget(self.radio_img_training, 2,1,1,1)
+        self.advanced_training_group.glayout.addWidget(self.radio_global_training, 2,2,1,1)
+        self.advanced_training_group.glayout.addWidget(self.radio_single_training, 2,3,1,1)
+
+        # self.check_cont_training = QCheckBox('Continuous training')
+        # self.check_cont_training.setToolTip('Save and use combined features in memory for training')
+        # self.check_cont_training.setChecked(self.cont_training)
+        # self.advanced_training_group.glayout.addWidget(self.check_cont_training, 2, 0, 1, 1)
 
         # Label for number of trainings performed
         self.label_training_count = QLabel('')
         self._update_training_counts()
-        self.advanced_training_group.glayout.addWidget(self.label_training_count, 2, 1, 1, 1)
+        self.advanced_training_group.glayout.addWidget(self.label_training_count, 3, 0, 1, 2)
+
+        # Button to display a diagram of class distribution
+        self.btn_class_distribution = QPushButton('Show class distribution')
+        self.btn_class_distribution.setToolTip('Show a diagram of the class distribution in the data used for training')
+        self.advanced_training_group.glayout.addWidget(self.btn_class_distribution, 3, 2, 1, 2)
 
         # Reset training button
         self.btn_reset_training = QPushButton('Reset continuous training')
         self.btn_reset_training.setToolTip('Clear training history and restart training counter')
-        self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 3, 0, 1, 2)
+        self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 4, 0, 1, 4)
 
         # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
@@ -785,10 +826,17 @@ class ConvPaintWidget(QWidget):
         self.check_auto_select_annot.stateChanged.connect(lambda: setattr(
             self, 'auto_select_annot', self.check_auto_select_annot.isChecked()))
 
-        self.check_keep_training.stateChanged.connect(lambda: setattr(
-            self, 'keep_training', self.check_keep_training.isChecked()))
-        self.btn_reset_training.clicked.connect(self._reset_train_features)
         self.btn_train_on_selected.clicked.connect(self._on_train_on_selected)
+        self.radio_single_training.toggled.connect(lambda: setattr(
+            self, 'cont_training', 'off'))
+        self.radio_img_training.toggled.connect(lambda: setattr(
+            self, 'cont_training', "image"))
+        self.radio_global_training.toggled.connect(lambda: setattr(
+            self, 'cont_training', "global"))
+        # self.check_cont_training.stateChanged.connect(lambda: setattr(
+        #     self, 'cont_training', self.check_cont_training.isChecked()))
+        self.btn_class_distribution.clicked.connect(self._on_show_class_distribution)
+        self.btn_reset_training.clicked.connect(self._reset_train_features)
 
         self.check_add_seg.stateChanged.connect(lambda: setattr(
             self, 'add_seg', self.check_add_seg.isChecked()))
@@ -839,6 +887,9 @@ class ConvPaintWidget(QWidget):
                 # Give info if image is very large to use "tile image"
                 if self._check_large_image(img) and not self.cp_model.get_param('tile_image'):
                     show_info('Image is very large. Consider using tiling.')
+                # If we have continuous training within a single image, reset the training features
+                if self.cont_training == "image":
+                    self._reset_train_features()
         else:
             self.add_layers_btn.setEnabled(False)
 
@@ -985,12 +1036,14 @@ class ConvPaintWidget(QWidget):
         # Get the data
         img = self._get_selected_img(check=True)
         annot = self.annotation_layer_selection_widget.value
+        mem_mode = (self.cont_training == "image"
+                    or self.cont_training == "global")
 
         # Check if annotations of at least 2 classes are present
         unique_labels = np.unique(annot.data)
         unique_labels = unique_labels[unique_labels != 0]
         if (len(unique_labels) < 2
-            and self.keep_training == False
+            and mem_mode == False
             and self.cp_model.num_trainings == 0):
             raise Exception('You need annotations for at least foreground and background')
 
@@ -1007,7 +1060,7 @@ class ConvPaintWidget(QWidget):
         annot = annot.data
 
         # # If continuous training is activated, filter the annotations to only include new ones
-        # if self.keep_training:
+        # if self.cont_training:
         #     img_name = self._get_selected_img().name
         #     annot = self._compare_new_to_existing_annots(img_name, annot)
         #     if annot is None:
@@ -1022,7 +1075,7 @@ class ConvPaintWidget(QWidget):
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             img_name = self._get_selected_img().name
-            self.cp_model.train(image_stack_norm, annot, memory_mode=self.keep_training, img_ids=img_name)
+            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1160,7 +1213,7 @@ class ConvPaintWidget(QWidget):
             if norm_mode != 1:
                 image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
 
-            # Predict image
+            # Predict image (use backend function which returns probabilities and segmentation)
             probas, segmentation = self.cp_model._predict(image_plane, add_seg=True)
 
         with warnings.catch_warnings():
@@ -1279,7 +1332,7 @@ class ConvPaintWidget(QWidget):
         self._set_model_description()
 
     def _on_load_model(self, event=None, save_file=None):
-        """Select classifier file to load along with the model parameters."""
+        """Select file to load classifier along with the model parameters."""
         # Get file path and open the data
         if save_file is None:
             dialog = QFileDialog()
@@ -1323,12 +1376,13 @@ class ConvPaintWidget(QWidget):
         self.temp_fe_model = ConvpaintModel.create_fe(new_param.fe_name,
                                                       new_param.fe_use_cuda)
 
-        # Adjust trained flag, save button and predict buttons, and update model description
+        # Adjust trained flag, save button, predict buttons etc., and update model description
         self.trained = save_file.suffix == '.pkl' and new_model.classifier is not None
         # self.save_model_btn.setEnabled(True)
         self._reset_predict_buttons()
         self.current_model_path = save_file.name
         self._set_model_description()
+        self._update_training_counts()
 
     # Image Processing
 
@@ -1378,7 +1432,10 @@ class ConvPaintWidget(QWidget):
         self.check_auto_add_layers.setChecked(self.auto_add_layers)
         self.check_keep_layers.setChecked(self.keep_layers)
         self.check_auto_select_annot.setChecked(self.auto_select_annot)
-        self.check_keep_training.setChecked(self.keep_training)
+        {"off": lambda: self.radio_single_training.setChecked(True),
+         "image": lambda: self.radio_img_training.setChecked(True),
+         "global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
+        # self.check_cont_training.setChecked(self.cont_training)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
         # Reset the model description
@@ -1426,7 +1483,7 @@ class ConvPaintWidget(QWidget):
         self.annot_prefix = 'annotations' # Prefix for the annotation layer names
         self.seg_prefix = 'segmentation' # Prefix for the segmentation layer names
         self.proba_prefix = 'probabilities' # Prefix for the class probabilities layer names
-        self.keep_training = False # Update features for subsequent training
+        self.cont_training = "image" # Update features for subsequent training ("image" or "off" or "global")
         self.annot_layers = [] # List of annotation layers
         self.seg_layers = [] # List of segmentation layers
         self.add_seg = True # Add a layer with segmentation
@@ -1635,8 +1692,8 @@ class ConvPaintWidget(QWidget):
             self.viewer.layers[self.annot_prefix].brush_size = self.default_brush_size
 
         # Connect colormap events in new layers
-        # labels_layer = self.annotation_layer_selection_widget.value
-        # labels_layer.events.colormap.connect(self._on_change_annot_cmap)
+        labels_layer = self.annotation_layer_selection_widget.value
+        labels_layer.events.colormap.connect(self._on_change_annot_cmap)
         # seg_layer = self.viewer.layers[self.seg_prefix]
         # seg_layer.events.colormap.connect(self._on_change_seg_cmap)
         
@@ -1676,6 +1733,9 @@ class ConvPaintWidget(QWidget):
             self._set_old_seg_tag()
             # Add it to the list of layers where class labels shall be updated
             self.seg_layers.append(self.viewer.layers[self.seg_prefix])
+                    # Connect colormap events in new layers
+            seg_layer = self.viewer.layers[self.seg_prefix]
+            seg_layer.events.colormap.connect(self._on_change_seg_cmap)
             
     def _check_create_probas_layer(self, num_classes):
         """Check if class probabilities layer exists and create it if not."""
@@ -2195,14 +2255,70 @@ class ConvPaintWidget(QWidget):
         """Update the training counts in the GUI."""
         if self.cp_model is None:
             return
-        self.label_training_count.setText(f'Trained pixels: {len(self.cp_model.table)}')
+        pix = len(self.cp_model.table)
+        imgs = len(np.unique(self.cp_model.table['img_id']))
+        lbls = len(np.unique(self.cp_model.table['label']))
+        self.label_training_count.setText(f'{pix} pixels, {imgs} image{"s"*(imgs>1)}, {lbls} labels')
 
     def _reset_train_features(self):
         """Reset the training features."""
-        self.cp_model.reset_table()
+        self.cp_model.reset_training()
         self._update_training_counts()
         # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
         self.features_annots = {}
+
+    def _on_show_class_distribution(self):
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            warnings.warn('matplotlib is not installed. Cannot show class distribution.')
+            return
+        # Show class distribution in a pie chart
+        if self.cp_model is None or self.cp_model.table is None:
+            warnings.warn('No training data available. Cannot show class distribution.')
+            return
+
+        # Get the class distribution from the training table
+        labels = self.cp_model.table['label'].values
+        classes = np.unique(labels)
+        counts = np.array([np.sum(labels == c) for c in classes])
+        percs = counts / np.sum(counts) * 100
+
+        # Get class display names from a list, assuming class numbers start at 1
+        class_names = [self.class_labels[c - 1].text() if 1 <= c <= len(self.class_labels) else str(c) for c in classes]
+
+        # Create label strings for the pie chart
+        pie_labels = [f'{count} ({perc:.1f}%)' for count, perc in zip(counts, percs)]
+
+        # Create a donut chart
+        fig, ax = plt.subplots(figsize=(8, 4), subplot_kw=dict(aspect="equal"))
+        cmap = plt.get_cmap('tab20', len(classes))
+        colors = [cmap(i) for i in range(len(classes))]
+
+        # Use custom labels with count and percentage
+        wedges, texts = ax.pie(
+            counts,
+            labels=pie_labels,            # Your custom count + % labels
+            colors=colors,
+            startangle=90,
+            wedgeprops=dict(width=0.5),   # Donut shape
+            textprops=dict(color="black") # Label color
+        )
+
+        # Add a legend with clean class names (not repeated on pie)
+        ax.legend(
+            wedges,
+            class_names,
+            title="Classes",
+            loc="center left",
+            bbox_to_anchor=(1, 1)
+        )
+
+        # Final touches
+        ax.axis('equal')  # Keep chart circular
+        plt.title('Class Distribution')
+        plt.tight_layout()
+        plt.show()
 
     def _on_add_all_annot_layers(self):
         # Get the selected image layers in the order they are in the widget
@@ -2256,6 +2372,7 @@ class ConvPaintWidget(QWidget):
             warnings.warn('Please select images and corresponding annotation layers')
             return
         # TODO: CHECK IF NORMALIZATION WORKS CORRECTLY LIKE THIS
+        id_list = [img.name for img in img_list]
         img_list = [self._get_data_channel_first_norm(img) for img in img_list]
         annot_list = [annot.data for annot in annot_list]
 
@@ -2266,7 +2383,8 @@ class ConvPaintWidget(QWidget):
 
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
-            self.cp_model.train(img_list, annot_list, memory_mode=self.keep_training)
+            mem_mode = self.cont_training == "global"
+            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list)
             self._update_training_counts()
     
         with warnings.catch_warnings():
