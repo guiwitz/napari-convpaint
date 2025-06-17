@@ -779,14 +779,18 @@ class ConvpaintModel:
             Trained classifier
         """
         if not use_rf:
+            # NOTE: THIS, FOR NOW, ASSUMES THAT GPU SHALL BE USED FOR CLF IF CHOSEN FOR FE
+            task_type = conv_paint_utils.get_catboost_device(self._param.fe_use_cuda)
             self.classifier = CatBoostClassifier(iterations=self._param.clf_iterations,
                                                  learning_rate=self._param.clf_learning_rate,
                                                  depth=self._param.clf_depth,
-                                                 allow_writing_files=allow_writing_files)
+                                                 allow_writing_files=allow_writing_files,
+                                                 task_type=task_type
+                                                 )
             self.classifier.fit(features, targets)
             self._param.classifier = 'CatBoost'
         else:
-                # train a random forest classififer
+                # train a random forest classififer (does not support GPU)
                 self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1)
                 self.classifier.fit(features, targets)
                 self._param.classifier = 'RandomForest'

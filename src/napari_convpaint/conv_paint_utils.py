@@ -526,15 +526,36 @@ def get_device(use_cuda=None):
     device : torch.device
         The device to use for PyTorch operations.
     """
-    if torch.cuda.is_available() and (use_cuda==True):
-        device = torch.device('cuda:0')  # use first available GPU
-    elif torch.backends.mps.is_available() and (use_cuda==True): #check if mps is available
-        device = torch.device('mps')
-    else:
-        if use_cuda:
-            warnings.warn('CUDA or MPS is not available. Using CPU')
-        device = torch.device('cpu')
-    return device
+    if use_cuda:
+        if torch.cuda.is_available():
+            return torch.device('cuda:0')  # use first available GPU
+        elif torch.backends.mps.is_available(): #check if mps is available
+            return torch.device('mps')
+        else:
+            warnings.warn('CUDA or MPS is not available. Using CPU for feature extraction.')
+    return torch.device('cpu')
+
+def get_catboost_device(use_cuda=None):
+    """
+    Get the device to use for CatBoost operations.
+    If CUDA is available, use the first available GPU. If MPS is available, use it.
+
+    Parameters:
+    ----------
+    use_cuda : bool, optional
+        If True, use CUDA if available. If False, use CPU. Default is None.
+
+    Returns:
+    ----------
+    device : str
+        The device to use for CatBoost operations.
+    """
+    if use_cuda:
+        if torch.cuda.is_available():
+            return 'cuda'
+        else:
+            warnings.warn('CUDA is not available. Using CPU for CatBoost.')
+    return 'cpu'
 
 def normalize_image(image, image_mean, image_std):
     """

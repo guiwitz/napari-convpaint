@@ -35,7 +35,7 @@ class FeatureExtractor:
             self.model = model
         # ELSE CREATE MODEL
         else:
-            self.model = self.create_model(model_name)
+            self.model = self.create_model(model_name, use_cuda=use_cuda)
 
     @staticmethod
     def create_model(model_name):

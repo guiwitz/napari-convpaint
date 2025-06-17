@@ -23,7 +23,7 @@ class DinoFeatures(FeatureExtractor):
         self.model.eval()
 
     @staticmethod
-    def create_model(model_name):
+    def create_model(model_name, use_cuda=False):
         # Validate for forks to prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
         torch.hub._validate_not_a_forked_repo=lambda a, b, c: True
 
@@ -135,6 +135,6 @@ class DinoFeatures(FeatureExtractor):
         image = np.moveaxis(image, 1, 0)
     
         # convert to tensor
-        image_tensor = torch.tensor(image, dtype=torch.float32,device=self.device)
+        image_tensor = torch.tensor(image, dtype=torch.float32, device=self.device)
 
         return image_tensor

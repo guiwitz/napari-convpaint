@@ -55,7 +55,7 @@ class Hookmodel(FeatureExtractor):
             self.register_hooks(self.get_default_params().fe_layers)
 
     @staticmethod
-    def create_model(model_name):
+    def create_model(model_name, use_cuda=False):
 
         # CREATE VGG16 MODEL
         if model_name == 'vgg16':
