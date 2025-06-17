@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device, scale_img
+from .conv_paint_utils import get_device, scale_img, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
@@ -24,12 +24,19 @@ class DinoFeatures(FeatureExtractor):
 
     @staticmethod
     def create_model(model_name):
-        # prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
-        torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
-        try:
-            model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False)
-        except(RuntimeError):
-            model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False, force_reload=True)
+        # Validate for forks to prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
+        torch.hub._validate_not_a_forked_repo=lambda a, b, c: True
+
+        # Extract model backbone name
+        model_backbone = model_name.split('_')[0] + "_" + model_name.split('_')[1]
+
+        model_file = f"{model_name}4_pretrain.pth"
+        model_url = f"https://dl.fbaipublicfiles.com/dinov2/{model_backbone}/{model_file}"
+
+        # Ensure weights are downloaded
+        _ = guided_model_download(model_file, model_url)
+
+        model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False)
         return model
 
     def get_description(self):

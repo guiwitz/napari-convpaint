@@ -1670,9 +1670,9 @@ class ConvPaintWidget(QWidget):
                 setattr(new_param, attr, val) # Set the default value in the param object
         if adjusted_params: show_info(f'The feature extractor adjusted the parameters {adjusted_params}')
 
-        # Create a new model (with a new classifier)
+        # Create a new model with the new FE
         self.cp_model = ConvpaintModel(param=new_param)
-        self._reset_clf()
+        self._reset_clf() # Call to take all actions needed after resetting the clf
         # Reset the features for continuous training
         self._reset_train_features()
 

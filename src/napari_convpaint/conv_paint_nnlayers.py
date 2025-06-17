@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
-from .conv_paint_utils import get_device, scale_img
+from .conv_paint_utils import get_device, scale_img, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 
 
@@ -59,16 +59,36 @@ class Hookmodel(FeatureExtractor):
 
         # CREATE VGG16 MODEL
         if model_name == 'vgg16':
-            return models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
-            # self.transform = models.VGG16_Weights.IMAGENET1K_V1.transforms()
+            model_file = 'vgg16-397923af.pth'
+            model_url = f'https://download.pytorch.org/models/{model_file}'
+            model_path = guided_model_download(model_file, model_url)
+            model = models.vgg16()
+            state_dict = torch.load(model_path, weights_only=True)
+            model.load_state_dict(state_dict)
+            return model
 
         # CREATE EFFICIENTNETB0 MODEL
         elif model_name == 'efficient_netb0':
-            return models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+            model_file = 'efficientnet_b0_rwightman-7f5810bc.pth'
+            model_url = f'https://download.pytorch.org/models/{model_file}'
+            model_path = guided_model_download(model_file, model_url)
+            model = models.efficientnet_b0()
+            state_dict = torch.load(model_path, weights_only=True)
+            model.load_state_dict(state_dict)
+            return model
         
         # CREATE ConvNeXt MODEL
         elif model_name == 'convnext':
-            return models.convnext_base(weights=models.ConvNeXt_Base_Weights.IMAGENET1K_V1)
+            model_file = 'convnext_base-6075fbad.pth'
+            model_url = f'https://download.pytorch.org/models/{model_file}'
+            model_path = guided_model_download(model_file, model_url)
+            model = models.convnext_base()
+            state_dict = torch.load(model_path, weights_only=True)
+            model.load_state_dict(state_dict)
+            return model
+        
+        else:
+            raise ValueError(f"Model {model_name} is not supported. Available models: {AVAILABLE_MODELS}")
 
     def get_description(self):
         if self.model_name == 'vgg16':

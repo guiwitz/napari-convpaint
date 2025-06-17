@@ -412,12 +412,12 @@ class ConvpaintModel:
         self.reset_classifier()
 
         # Check if we need to create a new FE model
-        new_fe_name = fe_name is not None and fe_name != self._param.get("fe_name")
-        new_fe_use_cuda = fe_use_cuda is not None and fe_use_cuda != self._param.get("fe_use_cuda")
-        new_fe_layers = fe_layers is not None and fe_layers != self._param.get("fe_layers")
+        fe_name_changed = fe_name is not None and fe_name != self._param.get("fe_name")
+        fe_use_cuda_changed = fe_use_cuda is not None and fe_use_cuda != self._param.get("fe_use_cuda")
+        fe_layers_changed = fe_layers is not None and fe_layers != self._param.get("fe_layers")
 
         # Create the feature extractor model
-        if new_fe_name or new_fe_use_cuda or new_fe_layers:
+        if fe_name_changed or fe_use_cuda_changed or fe_layers_changed:
             self.fe_model = ConvpaintModel.create_fe(
                 name=fe_name,
                 use_cuda=fe_use_cuda,

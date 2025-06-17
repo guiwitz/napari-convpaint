@@ -10,6 +10,93 @@ import einops as ein
 #import xgboost as xgb
 from torch.nn.functional import interpolate as torch_interpolate
 from matplotlib import pyplot as plt
+import os
+import requests
+
+
+### MODEL DOWNLOAD
+
+def guided_model_download(model_file: str, model_url: str, model_dir: str = None) -> str:
+    """
+    Downloads a model file with progress indication.
+    Uses Napari UI if available, otherwise falls back to CLI.
+    
+    Parameters:
+    ----------
+    model_file : str
+        Filename to save (e.g. "dinov2_vits14_reg.pth").
+    model_url : str
+        Direct URL to the model.
+    model_dir : str
+        Directory to save the model file (default: torch hub cache).
+
+    Returns:
+    ----------
+    model_path : str
+        Full path to the downloaded model file.
+    """
+    if model_dir is None:
+        model_dir = os.path.expanduser('~/.cache/torch/hub/checkpoints')
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, model_file)
+
+    if os.path.exists(model_path):
+        return model_path  # Already downloaded
+
+    # Try importing Napari tools
+    use_napari = False
+    try:
+        from napari.utils.progress import progress as napari_progress
+        from napari.utils.notifications import show_info, show_error
+        import napari
+        if napari.current_viewer():
+            use_napari = True
+    except ImportError:
+        pass  # Fall back to CLI mode
+
+    try:
+        if use_napari:
+            show_info(f"🔄 Downloading model weights: {model_file}")
+
+        with requests.get(model_url, stream=True) as r:
+            r.raise_for_status()
+            total = int(r.headers.get('content-length', 0))
+            chunk_size = 8192
+            num_chunks = total // chunk_size + 1
+
+            if use_napari:
+                progress_bar = napari_progress(total=num_chunks, desc=f"Downloading {model_file}")
+            else:
+                print(f"Downloading {model_file} ({total / 1e6:.2f} MB) from {model_url}...")
+                progress_bar = range(num_chunks)
+
+            with open(model_path, 'wb') as f:
+                for i, chunk in enumerate(r.iter_content(chunk_size=chunk_size)):
+                    if chunk:
+                        f.write(chunk)
+                    if use_napari:
+                        progress_bar.update(1)
+                    elif i % 50 == 0 or i == num_chunks - 1:
+                        print(f"  {min((i + 1) * chunk_size / total * 100, 100):.1f}% done", end="\r")
+
+        # Confirm completion
+        if use_napari:
+            show_info(f"✅ Download completed: {model_file}")
+
+    except Exception as e:
+        if use_napari:
+            show_error(
+                f"❌ Download failed: {e}\n\n"
+                f"Please manually download {model_file} from:\n{model_url}\n"
+                f"And place it in:\n{model_dir}"
+            )
+        else:
+            print(f"\n❌ Download failed: {e}")
+            print(f"Please manually download from:\n{model_url}")
+            print(f"And place it in:\n{model_dir}")
+        raise RuntimeError(f"Model download failed: {e}")
+
+    return model_path
 
 
 ### SCALING AND RESCALING
