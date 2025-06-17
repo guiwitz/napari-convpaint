@@ -1012,9 +1012,9 @@ class ConvPaintWidget(QWidget):
         # Allow other methods again to add layers if that was the case before
         self.add_layers_flag = initial_add_layers_flag
 
-        # Check if finally, a suited annotation layer is selected
+        # Check if the selected annotations layer is suited, if one is selected
         labels_layer = self.annotation_layer_selection_widget.value
-        if not self._approve_annotation_layer_shape(labels_layer, img):
+        if labels_layer is not None and not self._approve_annotation_layer_shape(labels_layer, img):
             warnings.warn('Annotation layer has wrong shape for the selected data')
 
     def _delayed_on_select_layer(self, event=None):
@@ -2336,11 +2336,14 @@ class ConvPaintWidget(QWidget):
 
         # Create a donut chart
         fig, ax = plt.subplots(figsize=(8, 4), subplot_kw=dict(aspect="equal"))
-        cmap = plt.get_cmap('tab20', len(classes))
-        colors = [cmap(i) for i in range(len(classes))]
-
+        if self.labels_cmap is not None:
+            colors = [self.labels_cmap.map(i+1) for i in range(len(classes))]
+        else:
+            cmap = plt.get_cmap('tab20', len(classes))
+            colors = [cmap(i) for i in range(len(classes))]
+        
         # Use custom labels with count and percentage
-        wedges, texts = ax.pie(
+        wedges, _ = ax.pie(
             counts,
             labels=pie_labels,            # Your custom count + % labels
             colors=colors,
