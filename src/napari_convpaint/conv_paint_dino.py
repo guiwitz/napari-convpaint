@@ -15,7 +15,7 @@ class DinoFeatures(FeatureExtractor):
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
         self.num_input_channels = [3]
 
-        self.device = get_device()
+        self.device = get_device(use_cuda)
         self.model = self.model.to(self.device)
         self.model.eval()
 
