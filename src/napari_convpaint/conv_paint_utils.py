@@ -552,10 +552,10 @@ def get_catboost_device(use_cuda=None):
     """
     if use_cuda:
         if torch.cuda.is_available():
-            return 'cuda'
+            return 'GPU'
         else:
             warnings.warn('CUDA is not available. Using CPU for CatBoost.')
-    return 'cpu'
+    return 'CPU'
 
 def normalize_image(image, image_mean, image_std):
     """

@@ -557,7 +557,7 @@ class ConvpaintModel:
             Segmented image or list of segmented images (according to the input)
             Dimensions are equal to the input image(s) without the channel dimension
         """
-        seg, _ = self._predict(image, add_seg=True)
+        _, seg = self._predict(image, add_seg=True)
         return seg
 
     def predict_probas(self, image):
@@ -780,7 +780,8 @@ class ConvpaintModel:
         """
         if not use_rf:
             # NOTE: THIS, FOR NOW, ASSUMES THAT GPU SHALL BE USED FOR CLF IF CHOSEN FOR FE
-            task_type = conv_paint_utils.get_catboost_device(self._param.fe_use_cuda)
+            use_gpu = self._param.clf_use_gpu if self._param.clf_use_gpu is not None else self._param.fe_use_cuda
+            task_type = conv_paint_utils.get_catboost_device(use_gpu)
             self.classifier = CatBoostClassifier(iterations=self._param.clf_iterations,
                                                  learning_rate=self._param.clf_learning_rate,
                                                  depth=self._param.clf_depth,

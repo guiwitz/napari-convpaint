@@ -732,14 +732,18 @@ class ConvPaintWidget(QWidget):
         self.update_all_labels_and_cmaps()
 
     def _on_reset_class_labels(self):
-        # Remove the labels and icons
-        for label, icon in zip(self.class_labels[::-1], self.class_icons[::-1]):
+        # Remove and delete all class label widgets and icons
+        for label in self.class_labels:
+            self.class_labels_layout.removeWidget(label)
             label.deleteLater()
+        for icon in self.class_icons:
+            self.class_labels_layout.removeWidget(icon)
             icon.deleteLater()
-            self.class_labels.pop()
-            self.class_icons.pop()
 
-        # Remove the buttons
+        self.class_labels.clear()
+        self.class_icons.clear()
+
+        # Remove the buttons from the layout
         self.class_labels_layout.removeWidget(self.add_class_btn)
         self.class_labels_layout.removeWidget(self.remove_class_btn)
         self.class_labels_layout.removeWidget(self.reset_class_btn)
@@ -747,10 +751,10 @@ class ConvPaintWidget(QWidget):
         # Recreate the default class labels and icons
         self._create_default_class_labels()
 
-        # Add the buttons again
-        self.class_labels_layout.addWidget(self.add_class_btn, len(self.initial_labels)+1, 0, 1, 5)
-        self.class_labels_layout.addWidget(self.remove_class_btn, len(self.initial_labels)+1, 5, 1, 5)
-        self.class_labels_layout.addWidget(self.reset_class_btn, len(self.initial_labels)+2, 0, 1, 10)
+        # Re-add the buttons below the class labels
+        self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
+        self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
+        self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
     
     def _on_add_class_label(self, text=None):
         
@@ -1471,6 +1475,15 @@ class ConvPaintWidget(QWidget):
         """Reset model to default and update GUI."""
         # Turn off automatic layer creation for the model reset
         self.add_layers_flag = False
+
+        # Remove class labels (note, resetting of class labels needs to be split because of the handling of the attributes)
+        for label in self.class_labels:
+            self.class_labels_layout.removeWidget(label)
+            label.deleteLater()
+        for icon in self.class_icons:
+            self.class_labels_layout.removeWidget(icon)
+            icon.deleteLater()
+
         # Reset the model to default
         self._reset_model()
         # Reset the widget attributes and the according buttons
@@ -1488,8 +1501,20 @@ class ConvPaintWidget(QWidget):
         self.check_add_probas.setChecked(self.add_probas)
         # Reset the model description
         self._set_model_description()
-        # Reset labels names
-        self._on_reset_class_labels()
+
+        # Remove the buttons from the layout
+        self.class_labels_layout.removeWidget(self.add_class_btn)
+        self.class_labels_layout.removeWidget(self.remove_class_btn)
+        self.class_labels_layout.removeWidget(self.reset_class_btn)
+
+        # Recreate the default class labels and icons
+        self._create_default_class_labels()
+
+        # Re-add the buttons below the class labels
+        self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
+        self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
+        self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+
         # Turn on layer creation again
         self.add_layers_flag = True
 

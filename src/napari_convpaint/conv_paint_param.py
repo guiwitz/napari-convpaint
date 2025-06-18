@@ -49,6 +49,8 @@ class Param:
             learning rate for the classifier
         clf_depth : int = None
             depth of the classifier
+        clf_use_gpu : bool = None
+            whether to use GPU for the classifier
     """
     classifier: str = None
 
@@ -75,6 +77,7 @@ class Param:
     clf_iterations: int = None
     clf_learning_rate: float = None
     clf_depth: int = None
+    clf_use_gpu: bool = None # NOTE: If this is None, fe_use_cuda is used...
     
     def get(self, key):
         """
