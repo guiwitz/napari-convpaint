@@ -51,6 +51,7 @@ class DinoFeatures(FeatureExtractor):
         param.fe_order = 0
         # param.image_downsample = 1
         param.tile_image = False
+        param.use_dask = False
         param.tile_annotations = False
         # param.normalize = 1
         return param

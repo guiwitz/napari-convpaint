@@ -216,6 +216,7 @@ class ConvpaintModel:
         def_param.seg_smoothening = 1
         def_param.tile_annotations = True
         def_param.tile_image = False
+        def_param.use_dask = False
 
         # FE parameters
         def_param.fe_name = "vgg16"
@@ -1028,7 +1029,7 @@ class ConvpaintModel:
 
         # Get class probabilities, using tiling if enabled
         if self._param.tile_image:
-            probas = [self._parallel_predict_image(d, return_proba=True, use_dask=False)
+            probas = [self._parallel_predict_image(d, return_proba=True)
                       for d in data]
         else:
             probas = self._predict_image(data, return_proba=True) # Can handle lists
@@ -1092,7 +1093,7 @@ class ConvpaintModel:
 
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=True, use_dask=False):
+    def _parallel_predict_image(self, image, return_proba=True):
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1105,6 +1106,7 @@ class ConvpaintModel:
         nblocks_rows = image.shape[-2] // maxblock
         nblocks_cols = image.shape[-1] // maxblock
         margin = 50
+        use_dask = self._param.use_dask
 
         image = self._prep_dims_single(image)[0]
 
@@ -1124,6 +1126,7 @@ class ConvpaintModel:
             dask.config.set({'distributed.worker.daemon': False})
             client = Client()
             processes = []
+            print("using dask")
 
         # Iterate over the blocks of the image and predict each block separately
         min_row_ind_collection = []
@@ -1196,11 +1199,17 @@ class ConvpaintModel:
             for k in range(len(processes)):
                 future = processes[k]
                 out = future.result()
+                crop_out = out[...,
+                    new_min_row_ind_collection[k]:new_max_row_ind_collection[k],
+                    new_min_col_ind_collection[k]:new_max_col_ind_collection[k]]
+                if not return_proba:
+                    crop_out = crop_out.astype(np.uint8)
+                # Write the result to the complete image
                 future.cancel()
                 del future
                 predicted_image_complete[...,
                     min_row_ind_collection[k]:max_row_ind_collection[k],
-                    min_col_ind_collection[k]:max_col_ind_collection[k]] = out.astype(np.uint8)
+                    min_col_ind_collection[k]:max_col_ind_collection[k]] = crop_out
             client.close()
         
         return predicted_image_complete

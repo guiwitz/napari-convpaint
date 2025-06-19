@@ -30,6 +30,8 @@ class Param:
             if True, extract only features of bounding boxes around annotated areas
         tile_image : bool
             if True, extract features in tiles (for large images)
+        use_dask : bool
+            if True, use dask for parallel processing of tiles
         fe_name : str
             name of the feature extractor model
         fe_layers : list[str]
@@ -64,6 +66,7 @@ class Param:
     seg_smoothening: int = None
     tile_annotations: bool = None
     tile_image: bool = None
+    use_dask: bool = False
 
     # Feature Extractor parameters
     fe_name: str = None
