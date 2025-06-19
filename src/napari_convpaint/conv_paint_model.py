@@ -1051,7 +1051,7 @@ class ConvpaintModel:
             else:
                 return probas
 
-    def _predict_image(self, data, return_proba=True):
+    def _predict_image(self, image, return_proba=True):
         """
         Backend method to predict images without tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1062,7 +1062,7 @@ class ConvpaintModel:
         """
 
         # Use get_feature_image to extract features
-        features = self.get_feature_image(data, restore_input_form=False)
+        features = self.get_feature_image(image, restore_input_form=False)
 
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
@@ -1088,7 +1088,7 @@ class ConvpaintModel:
             pred_reshaped = [self._probas_to_classes(p) for p in pred_reshaped]
 
         # If input was a single image, return the first prediction
-        if isinstance(data, np.ndarray) or isinstance(data, torch.Tensor):
+        if isinstance(image, np.ndarray) or isinstance(image, torch.Tensor):
             return pred_reshaped[0]
 
         return pred_reshaped
