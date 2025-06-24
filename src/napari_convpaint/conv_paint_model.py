@@ -524,13 +524,18 @@ class ConvpaintModel:
         annotations : np.ndarray or list[np.ndarray]
             Annotations to train the classifier on or list of annotations
             Image and annotation lists must correspond to each other
-        extend_features : bool, optional
-            Whether to extend the features with new features, by default False
-            This allows to train the classifier on new features without retraining it from scratch
+        memory_mode : bool, optional
+            Whether to use memory mode, by default False
+            If True, the annotations are registered and updated, and only features for new pixels are extracted
+        img_ids : str or list[str], optional
+            Image IDs to register the annotations with, by default None
         use_rf : bool, optional
             Whether to use a RandomForestClassifier instead of a CatBoostClassifier, by default False
         allow_writing_files : bool, optional
             Whether to allow writing files for the CatBoostClassifier, by default False
+        norm : bool, optional
+            Whether to normalize the images before training, by default False
+            If True, the images are normalized according to the parameter `normalize` in the model parameters
 
         Returns:
         ----------
@@ -551,6 +556,9 @@ class ConvpaintModel:
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to segment or list of images
+        norm : bool, optional
+            Whether to normalize the images before segmentation, by default False
+            If True, the images are normalized according to the parameter `normalize` in the model parameters
 
         Returns:
         ----------
@@ -571,6 +579,9 @@ class ConvpaintModel:
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to predict probabilities for or list of images
+        norm : bool, optional
+            Whether to normalize the images before prediction, by default False
+            If True, the images are normalized according to the parameter `normalize` in the model parameters
 
         Returns:
         ----------
@@ -613,7 +624,7 @@ class ConvpaintModel:
             Image IDs to register the annotations with, by default None (assuming a single image input)
         norm : bool, optional
             Whether to normalize the images before feature extraction, by default False
-            If True, the images are normalized according to the parameter `normalize` in the model parameters.
+            If True, the images are normalized according to the parameter `normalize` in the model parameters
             
         Returns:
         ----------
@@ -641,6 +652,7 @@ class ConvpaintModel:
         # print("Prepped data shapes:")
         # print(data[0].shape)
         # print("Memory mode:", memory_mode)
+        # print("Annotations in get_feature_image:", len(annotations), "annot of shape", annotations[0].shape, "with values", np.unique(annotations[0]))
 
         # If not done previously, normalize the images (separately and according to the parameter)
         if norm:
@@ -690,6 +702,9 @@ class ConvpaintModel:
             # print("Padded data shapes:")
             # print(data[0].shape, coords[0].shape)
             # print(coords[0][:, 0, 20, 20])
+        else:
+            coords = [None for _ in data]  # No coordinates if not in memory mode
+        # print("Annotations after padding:", len(annotations), "annot of shape", annotations[0].shape, "with values", [np.unique(a[0]) for a in annotations])
 
         # Extract annotated planes and flatten them (treating as individual images)
         if use_annots:
@@ -707,12 +722,23 @@ class ConvpaintModel:
             # print(data[0].shape, coords[0].shape)
             # print(coords[0][:, 0, 20, 20])
             # print(img_ids)
+        else:
+            coords = [None for _ in data]
+        # print("Annotations after extraction:", len(annotations), "annot of shape", annotations[0].shape, "with values", [np.unique(a[0]) for a in annotations])
+
 
         # Get annotated tiles (if enabled) and flatten them (treating as individual images)
         if params_for_extract.tile_annotations:
             if use_annots:
+                # print(coords)
+                # Make sure we have a list of coords for each annot, even if each is None
+                coords = [None for _ in data] if coords is None else coords
+                # print("coords", len(coords))
+                # print("data:", len(data), [d.shape for d in data])
+                # print("annotations:", len(annotations), [np.unique(a) for a in annotations])
                 tiles = [conv_paint_utils.tile_annot(d, a, c, padding, plot_tiles=False)
                         for d, a, c in zip(data, annotations, coords)]
+                # print("tiles:", len(tiles))
                 data = [tile for tile_tuple in tiles for tile in tile_tuple[0]]
                 annotations = [tile for tile_tuple in tiles for tile in tile_tuple[1]]
             if memory_mode:
@@ -725,6 +751,9 @@ class ConvpaintModel:
                 # print("Extracted annotated tiles shapes:")
                 # print(data[0].shape, coords[0].shape)
                 # print(img_ids)
+            else:
+                coords = [None for _ in data]
+        # print("Annotations after tiling:", len(annotations), "annot of shape", annotations[0].shape, "with values", [np.unique(a[0]) for a in annotations])
 
         # Extract features from the images for each scaling in the pyramid
         # For training, we want to "unpatch" the features to match the annotations
@@ -877,6 +906,7 @@ class ConvpaintModel:
         if len(features) == 0 or len(targets) == 0:
             raise ValueError('No features or targets found. Please check the input data and annotations.')
         if len(np.unique(targets)) < 2:
+            # print("Targets:", targets, "values:", np.unique(targets))
             raise ValueError('Not enough classes found in the targets. At least two classes are required for training.')
 
         # Train the classifier
@@ -888,7 +918,7 @@ class ConvpaintModel:
     def reset_training(self):
         """
         Resets the features and targets of the model. These can be used to
-        iteratively train the model with the option extend_features=True.
+        iteratively train the model with the option memory_mode.
 
         Parameters:
         ----------
