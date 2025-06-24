@@ -1452,7 +1452,7 @@ class ConvPaintWidget(QWidget):
             self.cp_model.set_param("normalize", 2)
         elif self.radio_normalize_by_image.isChecked():
             self.cp_model.set_param("normalize", 3)
-        # self._get_image_stats() # NOTE: Don't we want to set it right away?
+        # self._compute_image_stats() # NOTE: Don't we want to set it right away?
         self.image_mean, self.image_std = None, None
         self._reset_clf()
         # Reset the features for continuous training
@@ -2439,13 +2439,7 @@ class ConvPaintWidget(QWidget):
         
         # Create lists of images and annotations
         id_list = [img.name for img in img_list]
-        # img_list = [self._get_data_channel_first_norm(img) for img in img_list]
-        img_list_norm = []
-        for img in img_list:
-            self._compute_image_stats(img)
-            img_norm = self._get_data_channel_first_norm(img)
-            img_list_norm.append(img_norm)
-        img_list = img_list_norm
+        img_list = [self._get_data_channel_first(img) for img in img_list]
         annot_list = [annot.data for annot in annot_list]
 
         # Start training
@@ -2456,7 +2450,8 @@ class ConvPaintWidget(QWidget):
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             mem_mode = self.cont_training == "global"
-            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list)
+            # Train using the normalization inside ConvpaintModel
+            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, norm=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():

@@ -506,11 +506,11 @@ class ConvpaintModel:
         """
         keys = self.fe_model.get_layer_keys()
         return keys
-    
+
 
 ### USER METHODS FOR TRAINING AND PREDICTION
     
-    def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False):
+    def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, norm=False):
         """
         Trains the Convpaint model's classifier given images and annotations.
         Uses the Parameter and the FeatureExtractor model to extract features.
@@ -538,7 +538,7 @@ class ConvpaintModel:
             Trained classifier
         """
         clf = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
-                          allow_writing_files=allow_writing_files)
+                          allow_writing_files=allow_writing_files, norm=norm)
         return clf
 
     def segment(self, image, norm=False):
@@ -581,7 +581,7 @@ class ConvpaintModel:
         """
         probas = self._predict(image, add_seg=False, norm=norm)
         return probas
-    
+
 
 ### FEATURE EXTRACTION
     
