@@ -66,7 +66,7 @@ class Param:
     seg_smoothening: int = None
     tile_annotations: bool = None
     tile_image: bool = None
-    use_dask: bool = False
+    use_dask: bool = None
 
     # Feature Extractor parameters
     fe_name: str = None

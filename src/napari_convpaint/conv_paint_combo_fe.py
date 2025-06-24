@@ -92,7 +92,6 @@ class ComboFeatures(FeatureExtractor):
         param.fe_scalings = [1]
         param.fe_order = 0
         param.tile_image = False
-        param.use_dask = False
         param.tile_annotations = False
         return param
     
