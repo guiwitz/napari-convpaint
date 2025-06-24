@@ -591,9 +591,9 @@ def normalize_image(image, image_mean, image_std):
     # Avoid division by zero 
     image_std = np.maximum(image_std, 1e-6)
 
-    arr_norm = (image - image_mean) / image_std
+    img_norm = (image - image_mean) / image_std
 
-    return arr_norm
+    return img_norm
     
 def compute_image_stats(image, ignore_n_first_dims=None):
     """
@@ -631,8 +631,8 @@ def compute_image_stats(image, ignore_n_first_dims=None):
         image_mean = image.mean()
         image_std = image.std()
     else:
-        image_mean = image.mean(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
-        image_std = image.std(axis=tuple(range(ignore_n_first_dims,image.ndim)), keepdims=True)
+        image_mean = image.mean(axis=tuple(range(ignore_n_first_dims, image.ndim)), keepdims=True)
+        image_std = image.std(axis=tuple(range(ignore_n_first_dims, image.ndim)), keepdims=True)
 
     return image_mean, image_std
 

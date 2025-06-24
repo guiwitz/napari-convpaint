@@ -541,7 +541,7 @@ class ConvpaintModel:
                           allow_writing_files=allow_writing_files)
         return clf
 
-    def segment(self, image):
+    def segment(self, image, norm=False):
         """
         Segments images by predicting its most probable classes using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -558,10 +558,10 @@ class ConvpaintModel:
             Segmented image or list of segmented images (according to the input)
             Dimensions are equal to the input image(s) without the channel dimension
         """
-        _, seg = self._predict(image, add_seg=True)
+        _, seg = self._predict(image, add_seg=True, norm=norm)
         return seg
 
-    def predict_probas(self, image):
+    def predict_probas(self, image, norm=False):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -579,13 +579,13 @@ class ConvpaintModel:
             Dimensions are equal to the input image(s) without the channel dimension,
             with the class dimension added first
         """
-        probas = self._predict(image, add_seg=False)
+        probas = self._predict(image, add_seg=False, norm=norm)
         return probas
     
 
 ### FEATURE EXTRACTION
     
-    def get_feature_image(self, data, annotations=None, memory_mode=False, restore_input_form=True, img_ids=None):
+    def get_feature_image(self, data, annotations=None, memory_mode=False, restore_input_form=True, img_ids=None, norm=False):
         """
         Returns the features of images extracted by the feature extractor model.
         If annotations are given, the features are extracted from the annotated planes,
@@ -611,6 +611,9 @@ class ConvpaintModel:
             If True, the annotations are registered and updated, and only features for new pixels are extracted
         img_ids : str or list[str], optional
             Image IDs to register the annotations with, by default None (assuming a single image input)
+        norm : bool, optional
+            Whether to normalize the images before feature extraction, by default False
+            If True, the images are normalized according to the parameter `normalize` in the model parameters.
             
         Returns:
         ----------
@@ -638,6 +641,10 @@ class ConvpaintModel:
         # print("Prepped data shapes:")
         # print(data[0].shape)
         # print("Memory mode:", memory_mode)
+
+        # If not done previously, normalize the images (separately and according to the parameter)
+        if norm:
+            data = [self._norm_single_image(d) for d in data]
 
         # Save the original data shapes for reshaping/rescaling later
         self.original_shapes = [d.shape for d in data]
@@ -844,14 +851,14 @@ class ConvpaintModel:
 
 ### BACKEND TRAINING AND PREDICTION METHODS
 
-    def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False):
+    def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, norm=False):
         """
         Backend training method for the Convpaint model.
         """
 
         if not memory_mode:
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids)
+            features, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, norm=norm)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [conv_paint_utils.get_features_targets(f, a)
                         for f, a in zip(features, annot_parts)] # f and t are linearized
@@ -862,7 +869,7 @@ class ConvpaintModel:
 
         else: # memory mode
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids)
+            features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, norm=norm)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(features, annot_parts, coords, img_ids, scale)
 
@@ -1007,7 +1014,7 @@ class ConvpaintModel:
 
         return features, annotations
 
-    def _predict(self, data, add_seg=False):
+    def _predict(self, data, add_seg=False, norm=False):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1026,6 +1033,10 @@ class ConvpaintModel:
 
         # Make sure data is a list of images with [C, Z, H, W] shape
         data, _ = self._prep_dims(data)
+
+        # If not done previously, normalize the images (separately and according to the parameter)
+        if norm:
+            data = [self._norm_single_image(d) for d in data]
 
         # Get class probabilities, using tiling if enabled
         if self._param.tile_image:
@@ -1062,7 +1073,7 @@ class ConvpaintModel:
         """
 
         # Use get_feature_image to extract features
-        features = self.get_feature_image(image, restore_input_form=False)
+        features = self.get_feature_image(image, restore_input_form=False, norm=False) # NOTE: No normalization here, as it is done outside
 
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
@@ -1108,7 +1119,7 @@ class ConvpaintModel:
         margin = 50
         use_dask = self._param.use_dask
 
-        image = self._prep_dims_single(image)[0]
+        image = self._prep_dims_single(image)[0] # NOTE: should technically not be necessary, as done outside
 
         # Prepare array to write the predictions to
         if return_proba:
@@ -1126,7 +1137,6 @@ class ConvpaintModel:
             dask.config.set({'distributed.worker.daemon': False})
             client = Client()
             processes = []
-            print("using dask")
 
         # Iterate over the blocks of the image and predict each block separately
         min_row_ind_collection = []
@@ -1324,6 +1334,34 @@ class ConvpaintModel:
             raise Exception('Image and annotations have different dimensions')
 
         return img, annotations
+    
+    def _norm_single_image(self, img):
+        """
+        Normalize a single image.
+        Assumes that the image is in [C, Z, H, W] format.
+        """
+        if img.ndim != 4:
+            raise ValueError('Image must have 4 dimensions (C, Z, H, W).')
+        
+        # Get the normalization mode from the parameters
+        if self._param.normalize is None:
+            norm_mode = 1
+        else:
+            norm_mode = self._param.normalize
+        
+        # If normalization is off (= 1), we do not normalize
+        if norm_mode == 1:
+            return img
+        
+        # Otherwise we generally normalize each channel separately
+        # if normalization is "by image" (= 3), we additionally keep the z dimension
+        num_ignored_channels = 2 if norm_mode == 3 else 1
+        mean, sd = conv_paint_utils.compute_image_stats(img, ignore_n_first_dims=num_ignored_channels)
+        
+        # Normalize using these statistics
+        img_norm = conv_paint_utils.normalize_image(img, mean, sd)
+
+        return img_norm
 
     def _enforce_fe_params(self, old_param):
         """

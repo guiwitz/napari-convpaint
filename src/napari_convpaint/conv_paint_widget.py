@@ -991,7 +991,7 @@ class ConvPaintWidget(QWidget):
                 self._reset_radio_data_dim_choices()
                 self._reset_radio_norm_choices()
                 self._reset_predict_buttons()
-                self._get_image_stats(img)
+                self._compute_image_stats(img)
                 # Add empty layers and save old data tag for next addition
                 if self.auto_add_layers:
                     self._add_empty_annot()
@@ -1110,14 +1110,6 @@ class ConvPaintWidget(QWidget):
         # Get the image data and normalize it; also get the annotations
         image_stack_norm = self._get_data_channel_first_norm(img)
         annot = annot.data
-
-        # # If continuous training is activated, filter the annotations to only include new ones
-        # if self.cont_training:
-        #     img_name = self._get_selected_img().name
-        #     annot = self._compare_new_to_existing_annots(img_name, annot)
-        #     if annot is None:
-        #         warnings.warn('No new pixels labeled. Training not continued.')
-        #         return
         
         # Start training
         with warnings.catch_warnings():
@@ -1219,7 +1211,7 @@ class ConvPaintWidget(QWidget):
         # Perform checks as preparation for prediction
         img = self._get_selected_img(check=True)
         if self.image_mean is None or self.image_std is None:
-            self._get_image_stats(img)
+            self._compute_image_stats(img)
 
         # Start prediction
         with warnings.catch_warnings():
@@ -1235,6 +1227,7 @@ class ConvPaintWidget(QWidget):
             # Get image data and stats depending on the data dim and norm mode
             norm_mode = self.cp_model.get_param("normalize")
             img = self._get_data_channel_first(img)
+
             if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
                 image_plane = img
                 if norm_mode != 1:
@@ -1255,8 +1248,8 @@ class ConvPaintWidget(QWidget):
                 step = self.viewer.dims.current_step[1]
                 image_plane = img[:, step]
                 if norm_mode == 2: # over stack (only 1 value in stack dim; C, 1, 1, 1)
-                    image_mean = self.image_mean[:,0]
-                    image_std = self.image_std[:,0]
+                    image_mean = self.image_mean
+                    image_std = self.image_std
                 if norm_mode == 3: # by image (use values for current step; C, N, 1, 1)
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
@@ -1323,10 +1316,6 @@ class ConvPaintWidget(QWidget):
             # Set the flag to False, so we don't create a new layer every time
             self.new_proba = False
 
-        # Get image stats if not already done
-        if self.image_mean is None:
-            self._get_image_stats(img)
-
         # Start prediction
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1338,19 +1327,19 @@ class ConvPaintWidget(QWidget):
         # Step through the stack and predict each image
         num_steps = image_stack_norm.shape[-3]
         for step in progress(range(num_steps)):
-            if data_dims == '3D_single':
-                image = image_stack_norm[step]
-            elif data_dims in ['3D_RGB', '4D']:
-                image = image_stack_norm[:, step]
+
+            # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
+            image = image_stack_norm[..., step, :, :]
 
             # Predict the current step
             probas, seg = self.cp_model._predict(image, add_seg=True)
 
+            # Add the slices to the segmentation and probabilities layers
             if self.add_seg:
                 self.viewer.layers[self.seg_prefix].data[step] = seg
                 self.viewer.layers[self.seg_prefix].refresh()
             if self.add_probas:
-                self.viewer.layers[self.proba_prefix].data[...,step,:,:] = probas
+                self.viewer.layers[self.proba_prefix].data[..., step, :, :] = probas
                 self.viewer.layers[self.proba_prefix].refresh()
 
         with warnings.catch_warnings():
@@ -1531,7 +1520,7 @@ class ConvPaintWidget(QWidget):
         self._reset_radio_norm_choices()
         self._reset_predict_buttons()
         selected_img = self._get_selected_img()
-        self._get_image_stats(selected_img)
+        self._compute_image_stats(selected_img)
         # Reset the features for continuous training
         self._reset_train_features()
 
@@ -2211,11 +2200,13 @@ class ConvPaintWidget(QWidget):
     def _get_data_channel_first_norm(self, img):
         """Get data from selected channel. Output has channel (if present) in 
         first position and is normalized."""
-        image_stack = self._get_data_channel_first(img)
 
         # If stats are not set, compute them
         if self.image_mean is None or self.image_std is None:
-            self._get_image_stats(img)
+            self._compute_image_stats(img)
+
+        # Get data from selected channel
+        image_stack = self._get_data_channel_first(img)
 
         # Normalize image
         if self.cp_model.get_param("normalize") != 1:
@@ -2226,7 +2217,7 @@ class ConvPaintWidget(QWidget):
     
         return image_stack
 
-    def _get_image_stats(self, img):
+    def _compute_image_stats(self, img):
         """Get image stats depending on the normalization settings and data dimensions."""
         
         # If no image is selected, set stats to None
@@ -2240,23 +2231,25 @@ class ConvPaintWidget(QWidget):
         norm_mode = self.cp_model.get_param("normalize")
 
         # Compute image stats depending on the normalization mode
+
         if norm_mode == 2: # normalize over stack --> only keep channels dimension
-            if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]:
+            if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]: # Channels dimension present
                 # 3D multi/2D_RGB or 4D/3D_RGB --> (C,1,1) or (C,1,1,1)
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
-                    ignore_n_first_dims=1) # ignore channels dimension, but norm over stack
-            else:
+                    ignore_n_first_dims=1) # ignore channels dimension, but norm over stack if present
+            else: # No channels dimension present
                 # 2D or 3D_single --> (1,1) or (1,1,1)
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
                     ignore_n_first_dims=None) # for 3D_single, norm over stack
 
         elif norm_mode == 3: # normalize by image --> keep channels and plane dimensions
-            # also takes into account CXY case (3D multi-channel image) as first dim is dropped
+            # also takes into account CXY case (3D multi-channel image) where first dim is dropped, and 2D where none is
+            c_z_channels = data.ndim-2 # number of channels and/or Z dimension (i.e. "non-spatial" dimensions)
             self.image_mean, self.image_std = compute_image_stats(
-                image=data, ignore_n_first_dims=data.ndim-2) # ignore all but the plane dimensions
-            # --> 2D (1,1) or 3D (single, multi) or 2D_RGB (N/C,1,1) or 4D/3D_RGB (C,N,1,1)
+                image=data, ignore_n_first_dims=c_z_channels) # ignore all but the plane/spatial dimensions
+            # --> 2D (1,1) or 3D (single, multi -> Z/C,1,1) or 2D_RGB (C,1,1) or 4D/3D_RGB (C,Z,1,1)
 
     def _get_data_dims(self, img):
         """Get data dimensions. Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
@@ -2425,9 +2418,11 @@ class ConvPaintWidget(QWidget):
         self.update_all_labels_and_cmaps()
 
     def _on_train_on_selected(self):
+
         # Get selected layers (arbitrary order) and sort them by their names
         layer_list = list(self.viewer.layers.selection)
         layer_list.sort(key=lambda x: x.name)
+        
         # Get the image and annotation layers based on the prefix
         prefix_len = len(self.annot_prefix)
         annot_list = [layer for layer in layer_list
@@ -2436,13 +2431,21 @@ class ConvPaintWidget(QWidget):
         img_list = [layer for layer in layer_list
                     if not layer.name[:prefix_len] == self.annot_prefix
                     and isinstance(layer, napari.layers.Image)]
+
         # NOTE: Checks are technically not necessary here, as it is done in the CPModel
         if len(annot_list) == 0 or len(img_list) == 0 or len(annot_list) != len(img_list):
             warnings.warn('Please select images and corresponding annotation layers')
             return
-        # TODO: CHECK IF NORMALIZATION WORKS CORRECTLY LIKE THIS
+        
+        # Create lists of images and annotations
         id_list = [img.name for img in img_list]
-        img_list = [self._get_data_channel_first_norm(img) for img in img_list]
+        # img_list = [self._get_data_channel_first_norm(img) for img in img_list]
+        img_list_norm = []
+        for img in img_list:
+            self._compute_image_stats(img)
+            img_norm = self._get_data_channel_first_norm(img)
+            img_list_norm.append(img_norm)
+        img_list = img_list_norm
         annot_list = [annot.data for annot in annot_list]
 
         # Start training
