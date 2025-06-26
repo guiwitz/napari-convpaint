@@ -1119,7 +1119,8 @@ class ConvPaintWidget(QWidget):
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             img_name = self._get_selected_img().name
-            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name)
+            # Train the model with the current image and annotations; skip normalization as it is done in the widget
+            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, skip_norm=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1258,8 +1259,8 @@ class ConvPaintWidget(QWidget):
             if norm_mode != 1:
                 image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
 
-            # Predict image (use backend function which returns probabilities and segmentation)
-            probas, segmentation = self.cp_model._predict(image_plane, add_seg=True)
+            # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
+            probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, skip_norm=True)
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1331,8 +1332,8 @@ class ConvPaintWidget(QWidget):
             # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
             image = image_stack_norm[..., step, :, :]
 
-            # Predict the current step
-            probas, seg = self.cp_model._predict(image, add_seg=True)
+            # Predict the current step; skip normalization as it is done above
+            probas, seg = self.cp_model._predict(image, add_seg=True, skip_norm=True)
 
             # Add the slices to the segmentation and probabilities layers
             if self.add_seg:
@@ -2450,8 +2451,8 @@ class ConvPaintWidget(QWidget):
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             mem_mode = self.cont_training == "global"
-            # Train using the normalization inside ConvpaintModel
-            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, norm=True)
+            # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
+            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list)
             self._update_training_counts()
     
         with warnings.catch_warnings():
