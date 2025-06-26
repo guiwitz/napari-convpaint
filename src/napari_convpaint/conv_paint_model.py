@@ -510,7 +510,7 @@ class ConvpaintModel:
 
 ### USER METHODS FOR TRAINING AND PREDICTION
     
-    def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, skip_norm=False):
+    def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False):
         """
         Trains the Convpaint model's classifier given images and annotations.
         Uses the Parameter and the FeatureExtractor model to extract features.
@@ -533,6 +533,8 @@ class ConvpaintModel:
             Whether to use a RandomForestClassifier instead of a CatBoostClassifier, by default False
         allow_writing_files : bool, optional
             Whether to allow writing files for the CatBoostClassifier, by default False
+        in_channels : list[int], optional
+            List of channels to use for training, by default None
         skip_norm : bool, optional
             Whether to skip normalization of the images before training, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
@@ -543,10 +545,10 @@ class ConvpaintModel:
             Trained classifier
         """
         clf = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
-                          allow_writing_files=allow_writing_files, skip_norm=skip_norm)
+                          allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm)
         return clf
 
-    def segment(self, image, skip_norm=False):
+    def segment(self, image, in_channels=None, skip_norm=False):
         """
         Segments images by predicting its most probable classes using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -556,6 +558,8 @@ class ConvpaintModel:
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to segment or list of images
+        in_channels : list[int], optional
+            List of channels to use for segmentation, by default None
         skip_norm : bool, optional
             Whether to skip normalization of the images before segmentation, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
@@ -566,10 +570,10 @@ class ConvpaintModel:
             Segmented image or list of segmented images (according to the input)
             Dimensions are equal to the input image(s) without the channel dimension
         """
-        _, seg = self._predict(image, add_seg=True, skip_norm=skip_norm)
+        _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm)
         return seg
 
-    def predict_probas(self, image, skip_norm=False):
+    def predict_probas(self, image, in_channels=None, skip_norm=False):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -579,6 +583,8 @@ class ConvpaintModel:
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to predict probabilities for or list of images
+        in_channels : list[int], optional
+            List of channels to use for prediction, by default None
         skip_norm : bool, optional
             Whether to skip normalization of the images before prediction, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
@@ -590,13 +596,13 @@ class ConvpaintModel:
             Dimensions are equal to the input image(s) without the channel dimension,
             with the class dimension added first
         """
-        probas = self._predict(image, add_seg=False, skip_norm=skip_norm)
+        probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm)
         return probas
 
 
 ### FEATURE EXTRACTION
     
-    def get_feature_image(self, data, annotations=None, memory_mode=False, restore_input_form=True, img_ids=None, skip_norm=False):
+    def get_feature_image(self, data, annotations=None, memory_mode=False, restore_input_form=True, img_ids=None, in_channels=None, skip_norm=False):
         """
         Returns the features of images extracted by the feature extractor model.
         If annotations are given, the features are extracted from the annotated planes,
@@ -622,6 +628,8 @@ class ConvpaintModel:
             If True, the annotations are registered and updated, and only features for new pixels are extracted
         img_ids : str or list[str], optional
             Image IDs to register the annotations with, by default None (assuming a single image input)
+        in_channels : list[int], optional
+            List of channels to use for feature extraction, by default None
         skip_norm : bool, optional
             Whether to skip normalization of the images before feature extraction, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
@@ -653,6 +661,12 @@ class ConvpaintModel:
         # print(data[0].shape)
         # print("Memory mode:", memory_mode)
         # print("Annotations in get_feature_image:", len(annotations), "annot of shape", annotations[0].shape, "with values", np.unique(annotations[0]))
+        # If in_channels is given, extract the channels selected by in_channels from the data
+        if in_channels is not None:
+            if not (self._param.multi_channel_img or self._param.rgb_img):
+                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters.")
+            data = [d[in_channels] for d in data]
+        # print("Data shapes after in_channels:", [d.shape for d in data])
 
         # If not done previously, normalize the images (separately and according to the parameter)
         if not skip_norm:
@@ -880,14 +894,14 @@ class ConvpaintModel:
 
 ### BACKEND TRAINING AND PREDICTION METHODS
 
-    def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, skip_norm=False):
+    def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False):
         """
         Backend training method for the Convpaint model.
         """
 
         if not memory_mode:
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, skip_norm=skip_norm)
+            features, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [conv_paint_utils.get_features_targets(f, a)
                         for f, a in zip(features, annot_parts)] # f and t are linearized
@@ -898,7 +912,7 @@ class ConvpaintModel:
 
         else: # memory mode
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, skip_norm=skip_norm)
+            features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(features, annot_parts, coords, img_ids, scale)
 
@@ -938,6 +952,8 @@ class ConvpaintModel:
             List of annotations to register, each with shape [C, Z, H, W]
         img_ids : list[str]
             List of image IDs corresponding to the annotations, each as a string
+        scale : int, optional
+            Scale factor, used for creating the unique table entries, by default 1
 
         Returns:
         ----------
@@ -986,7 +1002,7 @@ class ConvpaintModel:
 
         return all_new_annots
     
-    def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids, scale):
+    def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids, scale=1):
         """
         Registers new features in the table and returns all features and annotations.
         IMPORTANT: This assumes that double entries have been removed from the annotations and old entries from the table.
@@ -1001,6 +1017,8 @@ class ConvpaintModel:
             List of coordinates corresponding to the annotations, each with shape [C, Z, H, W]
         img_ids : list[str]
             List of image IDs corresponding to the annotations, each as a string
+        scale : int
+            Scale factor, used for creating the unique table entries, by default 1
         
         Returns:
         ----------
@@ -1044,7 +1062,7 @@ class ConvpaintModel:
 
         return features, annotations
 
-    def _predict(self, data, add_seg=False, skip_norm=False):
+    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1063,6 +1081,12 @@ class ConvpaintModel:
 
         # Make sure data is a list of images with [C, Z, H, W] shape
         data, _ = self._prep_dims(data)
+
+        # If in_channels is given, extract the channels selected by in_channels from the data
+        if in_channels is not None:
+            if not (self._param.multi_channel_img or self._param.rgb_img):
+                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters.")
+            data = [d[in_channels] for d in data]
 
         # If not done previously, normalize the images (separately and according to the parameter)
         if not skip_norm:
@@ -1103,7 +1127,8 @@ class ConvpaintModel:
         """
 
         # Use get_feature_image to extract features
-        features = self.get_feature_image(image, restore_input_form=False, skip_norm=True) # NOTE: No normalization here, as it is done outside
+         # NOTE: No normalization here, as it is done outside; also, no channels extracted as already done outside
+        features = self.get_feature_image(image, restore_input_form=False, in_channels=None, skip_norm=True)
 
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
@@ -1209,7 +1234,7 @@ class ConvpaintModel:
 
                 image_block = image[..., min_row:max_row, min_col:max_col]
 
-                # Predict the block using dask or directly
+                # Predict the block using dask or directly (with no normalization, as it is done outside)
                 if use_dask:
                     processes.append(client.submit(
                         self._predict_image, image=image_block, return_proba=return_proba))
