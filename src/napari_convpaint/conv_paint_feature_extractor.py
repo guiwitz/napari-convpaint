@@ -38,7 +38,7 @@ class FeatureExtractor:
             self.model = self.create_model(model_name, use_cuda=use_cuda)
 
     @staticmethod
-    def create_model(model_name):
+    def create_model(model_name, use_cuda=None):
         """
         This method is intended to be overridden by subclasses to load the specific model.
 
