@@ -31,23 +31,17 @@ def test_filter_image():
     param.image_downsample = 1
 
     model = conv_paint_model.ConvpaintModel(param=param)
-    layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))',
-          'features.12 Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))'
-         ]
 
     image = skimage.data.cells3d()
     image = image[30,1]
-    labels = create_annotation_cell3d()[0][0]
     image = image[60:188, 0:128]
-    labels = labels[60:188, 0:128]
 
-    features, targets = model.get_features_current_layers(image=image, annotations=labels)
-    assert len(features.shape) == 2, f'Expecting dataframe with 2 dims but got {len(features.shape)}'
-    assert features.shape[0] == 218, f'Expecting 218 annotated pixels but got {features.shape[0]}'
-    assert features.shape[1] == 320, f'Expecting 320 features but got {features.shape[1]}'
+    features = model.get_feature_image(data=image)
+    assert features.shape[0] == 320, f'Expecting 320 features but got {features.shape[1]}'
+    assert features.shape[1] == 128, f'Expecting 128 annotated pixels but got {features.shape[0]}'
 
     #disable annotation tiling should lead to the same results
-    features, targets = model.get_features_current_layers(image=image, annotations=labels)
-    assert len(features.shape) == 2, f'Expecting dataframe with 2 dims but got {len(features.shape)}'
-    assert features.shape[0] == 218, f'Expecting 218 annotated pixels but got {features.shape[0]}'
-    assert features.shape[1] == 320, f'Expecting 320 features but got {features.shape[1]}'
+    model.set_param("tile_annotations", False)
+    features = model.get_feature_image(data=image)
+    assert features.shape[0] == 320, f'Expecting 320 features but got {features.shape[1]}'
+    assert features.shape[1] == 128, f'Expecting 128 annotated pixels but got {features.shape[0]}'

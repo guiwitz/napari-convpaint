@@ -1396,14 +1396,14 @@ class ConvPaintWidget(QWidget):
         data = self._get_selected_img()
         data_dims = self._get_data_dims(data)
         if data_dims in ['2D', '2D_RGB', '3D_RGB'] and new_param.multi_channel_img:
-            warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}.' +
+            warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}. ' +
                             'This might cause problems.')
         if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and new_param.rgb_img:
-            warnings.warn(f'The loaded model works with RGB, but the data is {data_dims}.' +
+            warnings.warn(f'The loaded model works with RGB, but the data is {data_dims}. ' +
                             'This might cause problems.')
         # Check if the loaded normalization setting is compatible with data
         if data_dims in ['2D', '2D_RGB', '3D_multi'] and new_param.normalize == 2:
-            warnings.warn(f'The loaded model normalizes over stack, but the data is {data_dims}.' +
+            warnings.warn(f'The loaded model normalizes over stack, but the data is {data_dims}. ' +
                             'This might cause problems.')
 
         # Update GUI with the new parameters
@@ -1628,7 +1628,7 @@ class ConvPaintWidget(QWidget):
             (new_param.multi_channel_img != fe_defaults.multi_channel_img)):
             # Catch case where multichannel is adjusted on incompatible data
             if data_dims in ['2D', '2D_RGB', '3D_RGB'] and fe_defaults.multi_channel_img:
-                warnings.warn(f'The feature extractor tried to enforce multichannel on {data_dims} data.' +
+                warnings.warn(f'The feature extractor tried to enforce multichannel on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             else: # If data is compatible, enforce the model's default multichannel setting
                 adjusted_params.append('multi_channel_img')
@@ -1644,7 +1644,7 @@ class ConvPaintWidget(QWidget):
             (new_param.rgb_img != fe_defaults.rgb_img)):
             # Catch case where RGB is adjusted on incompatible data
             if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and fe_defaults.rgb_img:
-                warnings.warn(f'The feature extractor tried to enforce RGB on {data_dims} data.' +
+                warnings.warn(f'The feature extractor tried to enforce RGB on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             # else: # If data is compatible, enforce the model's default RGB setting
             #     adjusted_params.append('rgb_img')
@@ -1659,7 +1659,7 @@ class ConvPaintWidget(QWidget):
         if ((fe_defaults.normalize is not None) and
             (new_param.normalize != fe_defaults.normalize)):
             if data_dims in ['2D', '2D_RGB', '3D_multi'] and fe_defaults.normalize == 2:
-                warnings.warn(f'The feature extractor tried to enforce normalization over stack on {data_dims} data.' +
+                warnings.warn(f'The feature extractor tried to enforce normalization over stack on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             else:
                 adjusted_params.append('normalize')
@@ -1727,7 +1727,11 @@ class ConvPaintWidget(QWidget):
                 )
 
             # Select the temp layer in the dropdown
-            self.annotation_layer_selection_widget.value = self.viewer.layers[temp_name]
+            if self.viewer.layers[temp_name] in self.annotation_layer_selection_widget.choices:
+                self.annotation_layer_selection_widget.value = self.viewer.layers[temp_name]
+            else:
+                warnings.warn(f'The temporary annotation layer {temp_name} could not be selected. ' +
+                              'This might cause problems with the annotation layer creation.')
             # If we replace a current layer, we can backup the old one, and replace it
             if annotation_exists:
                 # Backup the old annotation layer if keep_layers is set (and the layer exists)
@@ -1742,7 +1746,11 @@ class ConvPaintWidget(QWidget):
                 name=self.annot_prefix
                 )
             # Select the new annotation layer in the dropdown
-            self.annotation_layer_selection_widget.value = self.viewer.layers[self.annot_prefix]
+            if self.viewer.layers[self.annot_prefix] in self.annotation_layer_selection_widget.choices:
+                self.annotation_layer_selection_widget.value = self.viewer.layers[self.annot_prefix]
+            else:
+                warnings.warn(f'The annotation layer {self.annot_prefix} could not be selected. ' +
+                              'This might cause problems with the annotation layer creation.')
             # Remove the temp layer
             self.viewer.layers.remove(temp_name)
 
@@ -2220,7 +2228,7 @@ class ConvPaintWidget(QWidget):
 
     def _compute_image_stats(self, img):
         """Get image stats depending on the normalization settings and data dimensions."""
-        
+
         # If no image is selected, set stats to None
         if img is None:
             self.image_mean, self.image_std = None, None

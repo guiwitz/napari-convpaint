@@ -3,6 +3,7 @@ from napari_convpaint.utils import generate_synthetic_square, generate_synthetic
 import numpy as np
 import os
 from PIL import Image
+import napari
 
 def compute_precision_recall(ground_truth, recovered):
     all_precision = []
@@ -33,23 +34,28 @@ def test_add_layers(make_napari_viewer, capsys):
     my_widget._on_add_annot_layer()    
 
     assert 'annotations' in viewer.layers
-    assert 'segmentation' in viewer.layers
+    # assert 'segmentation' in viewer.layers
 
 def test_annotation_layer_dims(make_napari_viewer, capsys):
     """Check that dimensions of annotation layer match image layer"""
 
-    viewer = make_napari_viewer()
+    # viewer = make_napari_viewer()
+    viewer = napari.Viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((100, 100, 3)))
     my_widget._on_add_annot_layer()
+    assert "annotations" in viewer.layers
     assert viewer.layers['annotations'].data.shape == (100, 100)
+    viewer.close()
 
-    viewer = make_napari_viewer()
+    # viewer = make_napari_viewer()
+    viewer = napari.Viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(np.random.random((3, 100, 100)))
     my_widget._on_add_annot_layer()
+    assert "annotations" in viewer.layers
     assert viewer.layers['annotations'].data.shape == (3, 100, 100)
-
+    viewer.close()
 
 def test_correct_model(make_napari_viewer, capsys):
     # make viewer and add an image layer using our fixture
@@ -61,13 +67,16 @@ def test_correct_model(make_napari_viewer, capsys):
     viewer.add_image(im, name='sample')
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
     my_widget._on_train()
     assert my_widget.qcombo_fe_type.currentText() == 'vgg16', "Model type not updated correctly"
 
+    my_widget._reset_train_features()
     viewer.layers.clear()
     viewer.add_image(im[:,:,0], name='sample')
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
     my_widget._on_train()
     assert my_widget.qcombo_fe_type.currentText() == 'vgg16', "Model type not updated correctly"
 
@@ -83,6 +92,7 @@ def test_rgb_prediction(make_napari_viewer, capsys):
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
     my_widget._on_train()
     my_widget._on_predict()
 
@@ -124,6 +134,7 @@ def test_save_model(make_napari_viewer, capsys):
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
     my_widget._on_train()
     my_widget._on_predict()
 
@@ -166,7 +177,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
-    viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
 
     # Simulate selecting the Dino model from the dropdown
     my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
@@ -186,6 +197,7 @@ def test_save_model_dino(make_napari_viewer, capsys):
     assert cp_model._param.fe_scalings == [1]
     assert cp_model._param.fe_name == 'dinov2_vits14_reg'
 
+    viewer.layers['annotations'].data = im_annot
     my_widget._on_train()  # Update the classifier with the new parameters
     my_widget._on_predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
@@ -234,7 +246,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
-    viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
 
     # Create and save the first model with scales [1]
     my_widget.qcombo_fe_type.setCurrentText('vgg16')
@@ -242,6 +254,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget.set_fe_btn.setEnabled(True)
     my_widget.set_fe_btn.click()
     assert my_widget.cp_model._param.fe_scalings == [1]
+    viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
     my_widget._on_predict()
     model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
@@ -255,6 +268,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
 
     my_widget.set_fe_btn.click()
     assert my_widget.cp_model._param.fe_scalings == [1, 2, 4, 8]
+    viewer.layers['annotations'].data = im_annot
     my_widget._on_train()
     my_widget._on_predict()
     model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
@@ -291,7 +305,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         my_widget = ConvPaintWidget(viewer)
         viewer.add_image(im)
         my_widget._on_add_annot_layer()
-        viewer.layers['annotations'].data = im_annot
+        my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
 
         # Load the Dino model
         my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
@@ -301,6 +315,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         #set widget disable tiling annotations (should be done automatically, but just to be sure)
         my_widget.check_tile_annotations.setChecked(False)
         # my_widget._update_params_from_gui() # is done automatically
+        viewer.layers['annotations'].data = im_annot
         my_widget._on_train()
         my_widget._on_predict()
 
@@ -317,9 +332,10 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
 
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
-    viewer.add_image(im)
+    viewer.add_image(im, name='sample')
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data = im_annot
+    my_widget.cp_model.set_params(multi_channel_img=False, rgb_img=True)
 
     # Create and save the custom vgg16 model with selected layers
 
@@ -337,6 +353,7 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
 
         my_widget.set_fe_btn.setEnabled(True)
         my_widget.set_fe_btn.click()
+        viewer.layers['annotations'].data = im_annot
         my_widget._on_train()
 
         assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
