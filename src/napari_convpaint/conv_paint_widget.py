@@ -104,7 +104,7 @@ class ConvPaintWidget(QWidget):
         # Create groups and separate labels
         self.model_group = VHGroup('Model', orientation='G')
         self.layer_selection_group = VHGroup('Layer selection', orientation='G')
-        self.image_processing_group = VHGroup('Image shape and normalization', orientation='G')
+        self.image_processing_group = VHGroup('Image type and normalization', orientation='G')
         self.train_group = VHGroup('Train/Segment', orientation='G')
         # self.segment_group = VHGroup('Segment', orientation='G')
         # self.load_save_group = VHGroup('Load/Save', orientation='G')
@@ -416,13 +416,17 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group = VHGroup('Layers handling', orientation='G')
         self.advanced_training_group = VHGroup('Training', orientation='G')
         # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
-        self.advanced_prediction_group = VHGroup('Output', orientation='G')
+        self.advanced_prediction_group = VHGroup('Prediction', orientation='G')
+        self.advanced_input_group = VHGroup('Input', orientation='G')
+        self.advanced_output_group = VHGroup('Output', orientation='G')
 
         # Add groups to the tab
         self.tabs.add_named_tab('Advanced', self.advanced_labels_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_training_group.gbox)
-        # self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)
+        # self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)$
         self.tabs.add_named_tab('Advanced', self.advanced_prediction_group.gbox)
+        self.tabs.add_named_tab('Advanced', self.advanced_input_group.gbox)
+        self.tabs.add_named_tab('Advanced', self.advanced_output_group.gbox)
 
         # Text to warn the user about their responsibility
         self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.\n")
@@ -443,8 +447,8 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group.glayout.addWidget(self.check_keep_layers, 1, 1, 1, 1)
 
         # Button for adding annotation layers for selected images
-        self.btn_add_all_annot_layers = QPushButton('Add for selected')
-        self.btn_add_all_annot_layers.setToolTip('Add annotation layers for selected image layers')
+        self.btn_add_all_annot_layers = QPushButton('Add for all selected')
+        self.btn_add_all_annot_layers.setToolTip('Add annotation layers for all selected images in the layers list')
         self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 2, 0, 1, 1)
 
         # Checkbox for auto-selecting annotation layers
@@ -511,17 +515,30 @@ class ConvPaintWidget(QWidget):
         self.btn_reset_training.setToolTip('Clear training history and restart training counter')
         self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 4, 0, 1, 4)
 
+        # Dask option
+        self.check_use_dask = QCheckBox('Use Dask when tiling image for segmentation')
+        self.check_use_dask.setToolTip('Use Dask when using the option "Tile for segmentation"')
+        self.check_use_dask.setChecked(self.use_dask)
+        self.advanced_prediction_group.glayout.addWidget(self.check_use_dask, 0, 0, 1, 1)
+
+        # Input channels option
+        self.text_input_channels = QtWidgets.QLineEdit()
+        self.text_input_channels.setPlaceholderText('e.g. 0,1,2 or 0,1')
+        self.text_input_channels.setToolTip('Comma-separated list of channels to use for training and segmentation.\nLeave empty to use all channels.')
+        self.advanced_input_group.glayout.addWidget(QLabel('Input channels (empty = all)'), 0, 0, 1, 1)
+        self.advanced_input_group.glayout.addWidget(self.text_input_channels, 0, 1, 1, 1)
+
         # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
         self.check_add_seg.setToolTip('Add a layer with the predicted segmentation as output (= highest class probability)')
         self.check_add_seg.setChecked(self.add_seg)
-        self.advanced_prediction_group.glayout.addWidget(self.check_add_seg, 0, 0, 1, 1)
+        self.advanced_output_group.glayout.addWidget(self.check_add_seg, 0, 0, 1, 1)
 
         # Checkbox for adding probabilities
         self.check_add_probas = QCheckBox('Probabilities')
         self.check_add_probas.setToolTip('Add a layer with class probabilities as output')
         self.check_add_probas.setChecked(self.add_probas)
-        self.advanced_prediction_group.glayout.addWidget(self.check_add_probas, 0, 1, 1, 1)
+        self.advanced_output_group.glayout.addWidget(self.check_add_probas, 0, 1, 1, 1)
 
         # === PROJECT TAB (MULTIFILE) ===
 
@@ -707,6 +724,12 @@ class ConvPaintWidget(QWidget):
         #     self, 'cont_training', self.check_cont_training.isChecked()))
         self.btn_class_distribution.clicked.connect(self._on_show_class_distribution)
         self.btn_reset_training.clicked.connect(self._reset_train_features)
+
+        self.check_use_dask.stateChanged.connect(lambda: setattr(
+            self, 'use_dask', self.check_use_dask.isChecked()))
+
+        self.text_input_channels.textChanged.connect(lambda: setattr(
+            self, 'input_channels', self.text_input_channels.text()))
 
         self.check_add_seg.stateChanged.connect(lambda: setattr(
             self, 'add_seg', self.check_add_seg.isChecked()))
@@ -1119,8 +1142,9 @@ class ConvPaintWidget(QWidget):
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             img_name = self._get_selected_img().name
+            in_channels = self._parse_in_channels(self.input_channels)
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
-            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, skip_norm=True)
+            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, in_channels=in_channels, skip_norm=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1180,7 +1204,8 @@ class ConvPaintWidget(QWidget):
 
                 image_stack_norm = self._get_data_channel_first_norm()
                 annots = self.annotation_layer_selection_widget.value.data
-                features, targets = self.cp_model.get_features_current_layers(image_stack_norm, annots)
+                in_channels = self._parse_in_channels(self.input_channels)
+                features, targets = self.cp_model.get_features_current_layers(image_stack_norm, annots, in_channels=in_channels)
                 if features is None:
                     continue
                 all_features.append(features)
@@ -1260,7 +1285,8 @@ class ConvPaintWidget(QWidget):
                 image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
 
             # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
-            probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, skip_norm=True)
+            in_channels = self._parse_in_channels(self.input_channels)
+            probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True, use_dask=self.use_dask)
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1333,7 +1359,9 @@ class ConvPaintWidget(QWidget):
             image = image_stack_norm[..., step, :, :]
 
             # Predict the current step; skip normalization as it is done above
-            probas, seg = self.cp_model._predict(image, add_seg=True, skip_norm=True)
+            in_channels = self._parse_in_channels(self.input_channels)
+            # Use the backend function which returns probabilities and segmentation
+            probas, seg = self.cp_model._predict(image, add_seg=True, in_channels=in_channels, skip_norm=True, use_dask=self.use_dask)
 
             # Add the slices to the segmentation and probabilities layers
             if self.add_seg:
@@ -1487,6 +1515,8 @@ class ConvPaintWidget(QWidget):
          "image": lambda: self.radio_img_training.setChecked(True),
          "global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
         # self.check_cont_training.setChecked(self.cont_training)
+        self.check_use_dask.setChecked(self.use_dask)
+        self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
         # Reset the model description
@@ -1547,6 +1577,8 @@ class ConvPaintWidget(QWidget):
         self.seg_prefix = 'segmentation' # Prefix for the segmentation layer names
         self.proba_prefix = 'probabilities' # Prefix for the class probabilities layer names
         self.cont_training = "image" # Update features for subsequent training ("image" or "off" or "global")
+        self.use_dask = False # Use Dask for parallel processing
+        self.input_channels = "" # Input channels for the model (as txt, will be parsed)
         self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
         self.new_seg = True # Flags to indicate if new outputs are created
@@ -2460,7 +2492,9 @@ class ConvPaintWidget(QWidget):
             pbr.set_description(f"Training")
             mem_mode = self.cont_training == "global"
             # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
-            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list)
+            in_channels = self._parse_in_channels(self.in_channels.text())
+            print(f"Training with in_channels: {in_channels}")
+            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, in_channels=in_channels, skip_norm=False, progress=pbr)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -2500,3 +2534,14 @@ class ConvPaintWidget(QWidget):
                 # If the coordinate is already in the existing annotations, remove it from the new ones
                 del filtered_annot[coord]
         return filtered_annot
+    
+    @staticmethod
+    def _parse_in_channels(channels_text):
+        """Parse input channels from text."""
+        if not channels_text:
+            return None
+        try:
+            channels = list(map(int, channels_text.split(',')))
+            return channels
+        except ValueError:
+            return None
