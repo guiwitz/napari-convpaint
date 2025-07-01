@@ -216,7 +216,6 @@ class ConvpaintModel:
         def_param.seg_smoothening = 1
         def_param.tile_annotations = True
         def_param.tile_image = False
-        def_param.use_dask = False
 
         # FE parameters
         def_param.fe_name = "vgg16"
@@ -548,7 +547,7 @@ class ConvpaintModel:
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm)
         return clf
 
-    def segment(self, image, in_channels=None, skip_norm=False):
+    def segment(self, image, in_channels=None, skip_norm=False, use_dask=False):
         """
         Segments images by predicting its most probable classes using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -563,6 +562,8 @@ class ConvpaintModel:
         skip_norm : bool, optional
             Whether to skip normalization of the images before segmentation, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
+        use_dask : bool, optional
+            Whether to use dask for parallel processing, by default False
 
         Returns:
         ----------
@@ -570,10 +571,10 @@ class ConvpaintModel:
             Segmented image or list of segmented images (according to the input)
             Dimensions are equal to the input image(s) without the channel dimension
         """
-        _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm)
+        _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return seg
 
-    def predict_probas(self, image, in_channels=None, skip_norm=False):
+    def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -588,6 +589,8 @@ class ConvpaintModel:
         skip_norm : bool, optional
             Whether to skip normalization of the images before prediction, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
+        use_dask : bool, optional
+            Whether to use dask for parallel processing, by default False
 
         Returns:
         ----------
@@ -596,7 +599,7 @@ class ConvpaintModel:
             Dimensions are equal to the input image(s) without the channel dimension,
             with the class dimension added first
         """
-        probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm)
+        probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return probas
 
 
@@ -1062,7 +1065,7 @@ class ConvpaintModel:
 
         return features, annotations
 
-    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False):
+    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1094,7 +1097,7 @@ class ConvpaintModel:
 
         # Get class probabilities, using tiling if enabled
         if self._param.tile_image:
-            probas = [self._parallel_predict_image(d, return_proba=True)
+            probas = [self._parallel_predict_image(d, return_proba=True, use_dask=use_dask)
                       for d in data]
         else:
             probas = self._predict_image(data, return_proba=True) # Can handle lists
@@ -1130,6 +1133,13 @@ class ConvpaintModel:
          # NOTE: No normalization here, as it is done outside; also, no channels extracted as already done outside
         features = self.get_feature_image(image, restore_input_form=False, in_channels=None, skip_norm=True)
 
+        # Check that the extracted features and the expected features have the same length
+        num_f = features[0].shape[0] if isinstance(features, list) else features.shape[0]
+        num_f_clf = self.classifier.n_features_in_ if self.classifier is not None else 0
+        if num_f != num_f_clf:
+            raise ValueError("Extracted features have a different length than the classifier's expected features. " +
+                             "This is likely due to a change in the number of input channels.")
+
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
         predictions = [self._clf_predict(f, return_proba=True)
@@ -1159,7 +1169,7 @@ class ConvpaintModel:
 
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=True):
+    def _parallel_predict_image(self, image, return_proba=True, use_dask=False):
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1172,7 +1182,6 @@ class ConvpaintModel:
         nblocks_rows = image.shape[-2] // maxblock
         nblocks_cols = image.shape[-1] // maxblock
         margin = 50
-        use_dask = self._param.use_dask
 
         image = self._prep_dims_single(image)[0] # NOTE: should technically not be necessary, as done outside
 
