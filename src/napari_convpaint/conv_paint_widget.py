@@ -992,6 +992,7 @@ class ConvPaintWidget(QWidget):
         layer = event.value
         layer.events.name.connect(self._update_image_layers)
         layer.events.name.connect(self._update_annotation_layers)
+        layer.events.data.connect(self._on_select_layer)
 
     # Layer selection
 
@@ -1000,7 +1001,7 @@ class ConvPaintWidget(QWidget):
         # Check if it is the same layer
         was_same = ((self.selected_channel is not None) and
                     (self.selected_channel == self.image_layer_selection_widget.native.currentText()))
-        
+
         # Update the selected channel and reset the radio buttons, but only if it is a new image
         initial_add_layers_flag = self.add_layers_flag # Save initial state of add_layers_flag
         self.selected_channel = self.image_layer_selection_widget.native.currentText()
@@ -1008,7 +1009,8 @@ class ConvPaintWidget(QWidget):
 
         if img is not None:
             # If it is a new image, set the according radio buttons, image stats etc.
-            if not was_same:
+            if self.update_layer_flag:
+                self.update_layer_flag = False
                 self.add_layers_flag = False # Turn off layer creation, instead we do it manually below
                 # Set radio buttons depending on selected image type
                 self._reset_radio_data_dim_choices()
@@ -1029,6 +1031,7 @@ class ConvPaintWidget(QWidget):
                 # If we have continuous training within a single image, reset the training features
                 if self.cont_training == "image" or self.cont_training == "off":
                     self._reset_train_features()
+                self.update_layer_flag = True
         else:
             self.add_layers_btn.setEnabled(False)
 
@@ -1569,6 +1572,7 @@ class ConvPaintWidget(QWidget):
         self.old_seg_tag = "None" # Tag for the segmentation, saved to be able to rename them later
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
+        self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
         self.keep_layers = False # Keep old layers when adding new ones
@@ -2493,7 +2497,6 @@ class ConvPaintWidget(QWidget):
             mem_mode = self.cont_training == "global"
             # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
             in_channels = self._parse_in_channels(self.in_channels.text())
-            print(f"Training with in_channels: {in_channels}")
             self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, in_channels=in_channels, skip_norm=False, progress=pbr)
             self._update_training_counts()
     
