@@ -667,7 +667,8 @@ class ConvpaintModel:
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
             if not (self._param.multi_channel_img or self._param.rgb_img):
-                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters.")
+                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters. " +
+                                 "Please either remove in_channels or set multi_channel_img or rgb_img to True.")
             data = [d[in_channels] for d in data]
         # print("Data shapes after in_channels:", [d.shape for d in data])
 
