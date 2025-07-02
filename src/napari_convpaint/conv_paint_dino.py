@@ -61,6 +61,7 @@ class DinoFeatures(FeatureExtractor):
         return param
 
     def get_features(self, image, **kwargs):
+        # NOTE: Use this method, as it can pass a stack as a tensor, processing it as a batch.
         
         # Prepare the image (normalize etc.)
         image_tensor = self.prep_img(image)
@@ -98,6 +99,7 @@ class DinoFeatures(FeatureExtractor):
         assert image.shape[-2] % patch_size == 0
         assert image.shape[-1] % patch_size == 0
 
+        # 1) Normalize to 0-1 range
         # for uint8 or uint16 images, get divide by max value
         if image.dtype == np.uint8:
             image = image.astype(np.float32)
@@ -114,24 +116,25 @@ class DinoFeatures(FeatureExtractor):
                 divisor = 1e-6
             image = (image - np.min(image)) / divisor
 
-        # normalize to imagenet stats
+        # 2) normalize to imagenet stats (given the image is normalized to 0-1 range)
         mean = np.array([0.485, 0.456, 0.406])
         std = np.array([0.229, 0.224, 0.225])
         mean = mean[:, None, None, None]
         std = std[:, None, None, None]
         image = (image - mean) / std
 
-#       # crop image to make sure it is divisible by patch size
+        # Crop image to make sure it is divisible by patch size
+        # NOTE: This is not necessary (it's old code), but it does not hurt either
         h, w = image.shape[-2:]
         new_h = h - (h % patch_size)
         new_w = w - (w % patch_size)
         if new_h != h or new_w != w:
             image = image[:, :new_h, :new_w]
 
-        # Treat z as batch dimension (temprorarily)
+        # Treat z as batch dimension (temporarily)
         image = np.moveaxis(image, 1, 0)
-    
-        # convert to tensor
+
+        # Convert to tensor
         image_tensor = torch.tensor(image, dtype=torch.float32, device=self.device)
 
         return image_tensor

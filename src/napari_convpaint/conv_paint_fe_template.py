@@ -95,7 +95,7 @@ class GaussianFeatures(FeatureExtractor):
 #    Important: Output needs to be 4D: [nb_features, Z, H, W]
 
 
-# 5) TO USE THE MODEL INSIDE THE CONVPAINT MODEL, YOU NEED TO FOLLOW THE FOLLOWING STEPS:
+# 5) TO USE THE FEATURE EXTRACTOR CLASS INSIDE THE CONVPAINT MODEL, YOU NEED TO FOLLOW THE FOLLOWING STEPS:
 
 # - Import the AVAILABLE_MODELS and the class of the feature extractor
 # - Implement to add the model to the FE_MODELS_TYPES_DICT in the _init_fe_models_dict method
