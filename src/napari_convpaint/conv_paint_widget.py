@@ -1273,8 +1273,9 @@ class ConvPaintWidget(QWidget):
                     image_mean = self.image_mean
                     image_std = self.image_std
 
-            if data_dims == '3D_single': # Stack dim is first (no channels)
-                step = self.viewer.dims.current_step[0]
+            if data_dims == '3D_single': # Stack dim is third last
+                # NOTE: If we already have a layer with probas, the viewer has 4 dims; therefore take 3rd last not first
+                step = self.viewer.dims.current_step[-3]
                 image_plane = img[step]
                 if norm_mode == 2: # over stack (only 1 value in stack dim; 1, 1, 1)
                     image_mean = self.image_mean
@@ -1283,8 +1284,8 @@ class ConvPaintWidget(QWidget):
                     image_mean = self.image_mean[step]
                     image_std = self.image_std[step]
 
-            if data_dims in ['4D', '3D_RGB']: # Stack dim is second (channels first)
-                step = self.viewer.dims.current_step[1]
+            if data_dims in ['4D', '3D_RGB']: # Stack dim is third last
+                step = self.viewer.dims.current_step[-3]
                 image_plane = img[:, step]
                 if norm_mode == 2: # over stack (only 1 value in stack dim; C, 1, 1, 1)
                     image_mean = self.image_mean[:,0]
@@ -1322,6 +1323,7 @@ class ConvPaintWidget(QWidget):
 
         # Add probabilities if enabled
         if self.add_probas:
+
             # Check if we need to create a new probabilities layer
             num_classes = probas.shape[:1]
             self._check_create_probas_layer(num_classes)
@@ -1329,9 +1331,11 @@ class ConvPaintWidget(QWidget):
             self.new_proba = False
 
             # Update probabilities layer
-            if data_dims in ['2D', '2D_RGB', '3D_multi']:
+            if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
                 self.viewer.layers[self.proba_prefix].data = probas
-            else: # 3D_single, 4D, 3D_RGB
+            elif data_dims == '3D_single':
+                self.viewer.layers[self.proba_prefix].data[:, step] = probas
+            else: # 4D, 3D_RGB (stack dim is second, classes first)
                 self.viewer.layers[self.proba_prefix].data[:, step] = probas
             self.viewer.layers[self.proba_prefix].refresh()
 
@@ -1344,17 +1348,12 @@ class ConvPaintWidget(QWidget):
         if data_dims not in ['3D_single', '3D_RGB', '4D']:
             raise Exception(f'Image stack has wrong dimensionality {data_dims}')
         
-        # Create the necessary layers if they are not already present
+        # Create the segmentation layer if it is not already present
+        # (NOTE: probabilities layer is created in the prediction loop, as we need to know the number of classes)
         if self.add_seg:
             self._check_create_segmentation_layer()
             # Set the flag to False, so we don't create a new layer every time
             self.new_seg = False
-        if self.add_probas:
-            # Check if we need to create a new probabilities layer
-            num_classes = self.cp_model.get_param('num_classes')
-            self._check_create_probas_layer(num_classes)
-            # Set the flag to False, so we don't create a new layer every time
-            self.new_proba = False
 
         # Start prediction
         with warnings.catch_warnings():
@@ -1375,6 +1374,15 @@ class ConvPaintWidget(QWidget):
             in_channels = self._parse_in_channels(self.input_channels)
             # Use the backend function which returns probabilities and segmentation
             probas, seg = self.cp_model._predict(image, add_seg=True, in_channels=in_channels, skip_norm=True, use_dask=self.use_dask)
+
+            # In the first iteration, check if we need to create a new probas layer
+            # (we need the information about the number of classes)
+            if step == 0 and self.add_probas:
+                num_classes = probas.shape[0]
+                # Check if we need to create a new probabilities layer
+                self._check_create_probas_layer(num_classes)
+                # Set the flag to False, so we don't create a new layer every time
+                self.new_proba = False
 
             # Add the slices to the segmentation and probabilities layers
             if self.add_seg:
@@ -1854,26 +1862,32 @@ class ConvPaintWidget(QWidget):
     def _check_create_probas_layer(self, num_classes):
         """Check if class probabilities layer exists and create it if not."""
 
+
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
             return
+        
         spatial_dims = self._get_annot_shape(img)
+        if isinstance(num_classes, int):
+            num_classes = (num_classes,)
 
         # Create a new probabilities layer if it doesn't exist yet or we need a new one
         proba_exists = self.proba_prefix in self.viewer.layers
 
         # If we replace a current layer, we can backup the old one, and remove it
-        if self.new_proba & proba_exists:
-            # Backup the old probabilities layer if keep_layers is set (and the layer exists)
-            if self.keep_layers:
-                self._rename_probas_for_backup()
-            # Otherwise, just remove the old probabilities layer
-            else:
-                self.viewer.layers.remove(self.proba_prefix)
+        if proba_exists:
+            same_num_classes = self.viewer.layers[self.proba_prefix].data.shape[0] == num_classes[0]
+            if self.new_proba or not same_num_classes:
+                # Backup the old probabilities layer if keep_layers is set (and the layer exists)
+                if self.keep_layers:
+                    self._rename_probas_for_backup()
+                # Otherwise, just remove the old probabilities layer
+                else:
+                    self.viewer.layers.remove(self.proba_prefix)
 
         # If there was no probabilities layer, or we need a new one, create it
-        if (not proba_exists) or self.new_proba:
+        if (not proba_exists) or (proba_exists and not same_num_classes) or self.new_proba:
             # Create a new probabilities layer
             self.viewer.add_image(
                 data=np.zeros(num_classes+spatial_dims, dtype=np.float32),
