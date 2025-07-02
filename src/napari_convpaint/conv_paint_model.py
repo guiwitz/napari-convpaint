@@ -105,6 +105,7 @@ class ConvpaintModel:
         ValueError
             If more than one of alias, model_path, param, or fe_name is provided.
         """
+
         # Initialize parameters and features
         self._param = Param()
         self.reset_training()
@@ -683,13 +684,13 @@ class ConvpaintModel:
         params_for_extract = self._enforce_fe_params(self._param)
 
         # Downsample the images and annotations (if given)
-        data = [conv_paint_utils.scale_img(d,
-                                           params_for_extract.image_downsample)
+        upscale = params_for_extract.image_downsample < 1 # Register that we upscale if the parameter is negative
+        factor = -1 if upscale else 1 # Make the factor positive
+        factor = factor * params_for_extract.image_downsample
+        data = [conv_paint_utils.scale_img(d, factor, input_type="img", upscale=upscale)
                 for d in data]
         if use_annots:
-            annotations = [conv_paint_utils.scale_img(a,
-                                                      params_for_extract.image_downsample,
-                                                      input_type="labels")
+            annotations = [conv_paint_utils.scale_img(a, factor, input_type="labels", upscale=upscale)
                            for a in annotations]
         if memory_mode:
             annotations = self._register_and_update_annots(annotations, img_ids,
@@ -791,6 +792,7 @@ class ConvpaintModel:
         # Reshape the features to the original image shape
         padded_shapes = self.padded_shapes
         original_shapes = self.original_shapes
+        print("Reshaping inside get_feature_image with original shapes:", original_shapes)
         features = [self._restore_shape(features[i],
                                        padded_shapes[i],
                                        padding,
@@ -1153,6 +1155,7 @@ class ConvpaintModel:
         # Reshape the predictions to the original image shape
         padded_shapes = self.padded_shapes # Saved when extracting features
         original_shapes = self.original_shapes # Saved when extracting features
+        print("Reshaping inside _predict_image with original shapes:", original_shapes)
         pred_reshaped = [self._restore_shape(predictions[i],
                                             padded_shapes[i],
                                             padding,
@@ -1500,7 +1503,7 @@ class ConvpaintModel:
         outputs_image = outputs_image[..., padding:-padding, padding:-padding]
 
         # Then resize to original shape
-        if self._param.image_downsample > 1:
+        if self._param.image_downsample not in (-1, 0, 1):
             if class_preds:
                 outputs_image = conv_paint_utils.rescale_class_labels(
                     outputs_image, output_shape=(orig_z, orig_h, orig_w))

@@ -124,9 +124,9 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         Downscaled array or upscaled array.
     """
 
-    if scaling_factor == 1:
+    if scaling_factor in (-1, 0, 1):
         return image
-    
+
     # If option to UPSCALE is True, return the image upscaled
     if upscale:
         # Upscale by duplicating elements

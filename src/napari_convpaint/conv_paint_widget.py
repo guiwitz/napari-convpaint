@@ -242,10 +242,11 @@ class ConvPaintWidget(QWidget):
         # Add elements to "Acceleration" group
         # "Downsample" spinbox
         self.spin_downsample = QSpinBox()
-        self.spin_downsample.setMinimum(1)
+        self.spin_downsample.setMinimum(-10)
         self.spin_downsample.setMaximum(10)
         self.spin_downsample.setValue(1)
-        self.spin_downsample.setToolTip('Reduce image size for faster computing (output is rescaled to original size).')
+        self.spin_downsample.setToolTip('Reduce image size, e.g. for faster computing (output is rescaled to original size). ' +
+                                        'Negative values will instead upscale the image by the absolute value.')
         self.acceleration_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
         self.acceleration_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
         # "Smoothen output" spinbox
@@ -254,7 +255,7 @@ class ConvPaintWidget(QWidget):
         self.spin_smoothen.setMaximum(50)
         self.spin_smoothen.setValue(1)
         self.spin_smoothen.setToolTip('Smoothen output with a filter of this size.')
-        self.acceleration_group.glayout.addWidget(QLabel('Smoothen output'), 2,0,1,1)
+        self.acceleration_group.glayout.addWidget(QLabel('Smoothen segmentation'), 2,0,1,1)
         self.acceleration_group.glayout.addWidget(self.spin_smoothen, 2,1,1,1)
         # "Tile annotations" checkbox
         self.check_tile_annotations = QCheckBox('Tile annotations for training')
@@ -413,6 +414,7 @@ class ConvPaintWidget(QWidget):
         # === ADVANCED TAB ===
 
         # Create group boxes
+        self.advanced_note_group = VHGroup('Important note', orientation='G')
         self.advanced_labels_group = VHGroup('Layers handling', orientation='G')
         self.advanced_training_group = VHGroup('Training', orientation='G')
         # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
@@ -421,6 +423,7 @@ class ConvPaintWidget(QWidget):
         self.advanced_output_group = VHGroup('Output', orientation='G')
 
         # Add groups to the tab
+        self.tabs.add_named_tab('Advanced', self.advanced_note_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_labels_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_training_group.gbox)
         # self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)$
@@ -429,10 +432,18 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Advanced', self.advanced_output_group.gbox)
 
         # Text to warn the user about their responsibility
-        self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.\n")
-        self.advanved_labels_note.setStyleSheet(style_for_infos)
-        self.advanved_labels_note.setWordWrap(True)
-        self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
+        self.advanced_note = QLabel("Changing these options may lead to situations where the tool does not function as expected. " +
+                                    "In particular, it is the user's responsibility that the dimensions of images and annotations are compatible. " +
+                                    "Please refer to the documentation or contact the developers for assistance.")
+        self.advanced_note.setStyleSheet(style_for_infos)
+        self.advanced_note.setWordWrap(True)
+        self.advanced_note_group.glayout.addWidget(self.advanced_note, 0, 0, 1, 2)
+
+        # Text to warn the user about their responsibility
+        # self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.\n")
+        # self.advanved_labels_note.setStyleSheet(style_for_infos)
+        # self.advanved_labels_note.setWordWrap(True)
+        # self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
 
         # Checkbox to turn off automatic addition of annot/segmentation layers
         self.check_auto_add_layers = QCheckBox('Auto add annotations')
@@ -468,10 +479,10 @@ class ConvPaintWidget(QWidget):
         self.advanced_labels_group.glayout.setColumnStretch(1, 1)
 
         # Text to warn the user about their responsibility
-        self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the dimensions of images are compatible.\n")
-        self.advanced_training_note.setStyleSheet(style_for_infos)
-        self.advanced_training_note.setWordWrap(True)
-        self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 4)
+        # self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the dimensions of images are compatible.\n")
+        # self.advanced_training_note.setStyleSheet(style_for_infos)
+        # self.advanced_training_note.setWordWrap(True)
+        # self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 4)
 
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
@@ -1862,7 +1873,6 @@ class ConvPaintWidget(QWidget):
     def _check_create_probas_layer(self, num_classes):
         """Check if class probabilities layer exists and create it if not."""
 
-
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
@@ -1893,6 +1903,8 @@ class ConvPaintWidget(QWidget):
                 data=np.zeros(num_classes+spatial_dims, dtype=np.float32),
                 name=self.proba_prefix
                 )
+            # Change the colormap to one suited for probabilities
+            self.viewer.layers[self.proba_prefix].colormap = "turbo"
             # Save information about the probabilities layer to be able to rename it later
             self._set_old_proba_tag()
 
