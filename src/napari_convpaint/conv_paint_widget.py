@@ -528,6 +528,12 @@ class ConvPaintWidget(QWidget):
         self.advanced_input_group.glayout.addWidget(QLabel('Input channels (empty = all)'), 0, 0, 1, 1)
         self.advanced_input_group.glayout.addWidget(self.text_input_channels, 0, 1, 1, 1)
 
+        # 4D channels axis option
+        self.check_4d_channels_second = QCheckBox('4D data: use second axis as channels')
+        self.check_4d_channels_second.setToolTip('Use second axis as channels (e.g. for 4D images with time as first axis)')
+        self.check_4d_channels_second.setChecked(self.channels_second)
+        self.advanced_input_group.glayout.addWidget(self.check_4d_channels_second, 1, 0, 1, 2)
+
         # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
         self.check_add_seg.setToolTip('Add a layer with the predicted segmentation as output (= highest class probability)')
@@ -730,6 +736,9 @@ class ConvPaintWidget(QWidget):
 
         self.text_input_channels.textChanged.connect(lambda: setattr(
             self, 'input_channels', self.text_input_channels.text()))
+        
+        self.check_4d_channels_second.stateChanged.connect(lambda: setattr(
+            self, 'channels_second', self.check_4d_channels_second.isChecked()))
 
         self.check_add_seg.stateChanged.connect(lambda: setattr(
             self, 'add_seg', self.check_add_seg.isChecked()))
@@ -1009,8 +1018,8 @@ class ConvPaintWidget(QWidget):
 
         if img is not None:
             # If it is a new image, set the according radio buttons, image stats etc.
-            if self.update_layer_flag:
-                self.update_layer_flag = False
+            if self.data_shape is None or self.data_shape != img.data.shape or not was_same:
+                # self.update_layer_flag = False
                 self.add_layers_flag = False # Turn off layer creation, instead we do it manually below
                 # Set radio buttons depending on selected image type
                 self._reset_radio_data_dim_choices()
@@ -1018,7 +1027,7 @@ class ConvPaintWidget(QWidget):
                 self._reset_predict_buttons()
                 self._compute_image_stats(img)
                 # Add empty layers and save old data tag for next addition
-                if self.auto_add_layers:
+                if self.auto_add_layers and not was_same:
                     self._add_empty_annot()
                 # Set flags that new outputs need to be generated (and not planes of the old ones populated)
                 self.new_seg = True
@@ -1032,6 +1041,7 @@ class ConvPaintWidget(QWidget):
                 if self.cont_training == "image" or self.cont_training == "off":
                     self._reset_train_features()
                 self.update_layer_flag = True
+                self.data_shape = img.data.shape
         else:
             self.add_layers_btn.setEnabled(False)
 
@@ -1118,6 +1128,8 @@ class ConvPaintWidget(QWidget):
                     or self.cont_training == "global")
 
         # Check if annotations of at least 2 classes are present
+        if annot is None:
+            raise Exception('No annotation layer selected. Please create one.')
         unique_labels = np.unique(annot.data)
         unique_labels = unique_labels[unique_labels != 0]
         if (len(unique_labels) < 2
@@ -1520,6 +1532,7 @@ class ConvPaintWidget(QWidget):
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
         self.text_input_channels.setText(self.input_channels)
+        self.check_4d_channels_second.setChecked(self.channels_second)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
         # Reset the model description
@@ -1572,7 +1585,8 @@ class ConvPaintWidget(QWidget):
         self.old_seg_tag = "None" # Tag for the segmentation, saved to be able to rename them later
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
-        self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
+        # self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
+        self.data_shape = None # Shape of the currently selected image data
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
         self.keep_layers = False # Keep old layers when adding new ones
@@ -1583,6 +1597,7 @@ class ConvPaintWidget(QWidget):
         self.cont_training = "image" # Update features for subsequent training ("image" or "off" or "global")
         self.use_dask = False # Use Dask for parallel processing
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)
+        self.channels_second = False # Whether channels are second in the data (e.g. 4D data)
         self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
         self.new_seg = True # Flags to indicate if new outputs are created
@@ -2119,7 +2134,9 @@ class ConvPaintWidget(QWidget):
             return img_shape[0:2]
         if data_dims in ['3D_RGB', '3D_single']:
             return img_shape[0:3]
-        else: # 3D_multi, 4D
+        elif data_dims == '4D' and self.channels_second:
+            return img_shape[0:1] + (1,) + img_shape[2:4] # 4D data with channels second
+        else: # 3D_multi, 4D with channels first
             return img_shape[1:]
 
     def _check_large_image(self, img):
@@ -2130,7 +2147,7 @@ class ConvPaintWidget(QWidget):
             xy_plane = img_shape[0] * img_shape[1]
         elif data_dims in ['3D_single', '3D_RGB', '3D_multi']:
             xy_plane = img_shape[1] * img_shape[2]
-        else: # 4D
+        else: # 4D (does not matter if channels first or second)
             xy_plane = img_shape[2] * img_shape[3]
         return xy_plane > self.spatial_dim_info_thresh
 
@@ -2236,8 +2253,12 @@ class ConvPaintWidget(QWidget):
         """Get data from selected channel. If RGB, move channel axis to first position."""
         if img is None:
             return None
-        if self._get_data_dims(img) in ['2D_RGB', '3D_RGB']:
+        data_dims = self._get_data_dims(img)
+        if data_dims in ['2D_RGB', '3D_RGB']:
             img = np.moveaxis(img.data, -1, 0)
+        elif data_dims == "4D" and self.channels_second:
+            # If 4D and channels are in second position, move them to first
+            img = np.moveaxis(img.data, 1, 0)
         else:
             img = img.data
         return img
@@ -2245,13 +2266,19 @@ class ConvPaintWidget(QWidget):
     def _get_data_channel_first_norm(self, img):
         """Get data from selected channel. Output has channel (if present) in 
         first position and is normalized."""
-
+        print("get_data_channel_first_norm called. mean and std are: ",
+              self.image_mean, self.image_std)
         # If stats are not set, compute them
         if self.image_mean is None or self.image_std is None:
             self._compute_image_stats(img)
+        print("get_data_channel_first_norm: mean and std after computing are: ",
+              self.image_mean, self.image_std)
 
         # Get data from selected channel
         image_stack = self._get_data_channel_first(img)
+        print("get_data_channel_first_norm: image_stack shape is: ", image_stack.shape)
+        print("get_data_channel_first_norm: mean of each dimension besides the last 2: ",
+              np.mean(image_stack, axis=tuple(range(image_stack.ndim-2, image_stack.ndim))))
 
         # Normalize image
         if self.cp_model.get_param("normalize") != 1:
@@ -2259,6 +2286,9 @@ class ConvPaintWidget(QWidget):
                 image=image_stack,
                 image_mean=self.image_mean,
                 image_std=self.image_std)
+        print("get_data_channel_first_norm: image_stack shape after normalization is: ", image_stack.shape)
+        print("get_data_channel_first_norm: mean of each dimension besides the last 2 after normalization: ",
+              np.mean(image_stack, axis=tuple(range(image_stack.ndim-2, image_stack.ndim))))
     
         return image_stack
 
