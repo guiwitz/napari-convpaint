@@ -69,15 +69,15 @@ class ComboFeatures(FeatureExtractor):
             fe.model.eval()
 
     @staticmethod
-    def create_model(model_name):
+    def create_model(model_name, use_cuda=False):
         constructors = COMBOS[model_name]['constructors']
         names = COMBOS[model_name]['model names']
         if len(constructors) != 2:
             raise ValueError(f"Expected 2 constructors, got {len(constructors)}")
         if len(names) != 2:
             raise ValueError(f"Expected 2 model names, got {len(names)}")
-        model1 = constructors[0](model_name=names[0])
-        model2 = constructors[1](model_name=names[1])
+        model1 = constructors[0](model_name=names[0], use_cuda=use_cuda)
+        model2 = constructors[1](model_name=names[1], use_cuda=use_cuda)
         return (model1, model2)
 
     def get_description(self):
