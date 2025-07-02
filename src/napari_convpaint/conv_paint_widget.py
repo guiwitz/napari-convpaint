@@ -528,11 +528,10 @@ class ConvPaintWidget(QWidget):
         self.advanced_input_group.glayout.addWidget(QLabel('Input channels (empty = all)'), 0, 0, 1, 1)
         self.advanced_input_group.glayout.addWidget(self.text_input_channels, 0, 1, 1, 1)
 
-        # 4D channels axis option
-        self.check_4d_channels_second = QCheckBox('4D data: use second axis as channels')
-        self.check_4d_channels_second.setToolTip('Use second axis as channels (e.g. for 4D images with time as first axis)')
-        self.check_4d_channels_second.setChecked(self.channels_second)
-        self.advanced_input_group.glayout.addWidget(self.check_4d_channels_second, 1, 0, 1, 2)
+        # Button to switch first to axes
+        self.btn_switch_axes = QPushButton('Switch channels axis')
+        self.btn_switch_axes.setToolTip('Switch first two axes of the input image (to match the convention to have channels first)')
+        self.advanced_input_group.glayout.addWidget(self.btn_switch_axes, 1, 0, 1, 2)
 
         # Checkbox for adding segmentation
         self.check_add_seg = QCheckBox('Segmentation')
@@ -737,8 +736,7 @@ class ConvPaintWidget(QWidget):
         self.text_input_channels.textChanged.connect(lambda: setattr(
             self, 'input_channels', self.text_input_channels.text()))
         
-        self.check_4d_channels_second.stateChanged.connect(lambda: setattr(
-            self, 'channels_second', self.check_4d_channels_second.isChecked()))
+        self.btn_switch_axes.clicked.connect(self._on_switch_axes)
 
         self.check_add_seg.stateChanged.connect(lambda: setattr(
             self, 'add_seg', self.check_add_seg.isChecked()))
@@ -1532,7 +1530,6 @@ class ConvPaintWidget(QWidget):
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
         self.text_input_channels.setText(self.input_channels)
-        self.check_4d_channels_second.setChecked(self.channels_second)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
         # Reset the model description
@@ -1597,7 +1594,6 @@ class ConvPaintWidget(QWidget):
         self.cont_training = "image" # Update features for subsequent training ("image" or "off" or "global")
         self.use_dask = False # Use Dask for parallel processing
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)
-        self.channels_second = False # Whether channels are second in the data (e.g. 4D data)
         self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
         self.new_seg = True # Flags to indicate if new outputs are created
@@ -2134,9 +2130,7 @@ class ConvPaintWidget(QWidget):
             return img_shape[0:2]
         if data_dims in ['3D_RGB', '3D_single']:
             return img_shape[0:3]
-        elif data_dims == '4D' and self.channels_second:
-            return img_shape[0:1] + (1,) + img_shape[2:4] # 4D data with channels second
-        else: # 3D_multi, 4D with channels first
+        else: # 3D_multi, 4D (-> channels first)
             return img_shape[1:]
 
     def _check_large_image(self, img):
@@ -2147,7 +2141,7 @@ class ConvPaintWidget(QWidget):
             xy_plane = img_shape[0] * img_shape[1]
         elif data_dims in ['3D_single', '3D_RGB', '3D_multi']:
             xy_plane = img_shape[1] * img_shape[2]
-        else: # 4D (does not matter if channels first or second)
+        else: # 4D
             xy_plane = img_shape[2] * img_shape[3]
         return xy_plane > self.spatial_dim_info_thresh
 
@@ -2256,9 +2250,6 @@ class ConvPaintWidget(QWidget):
         data_dims = self._get_data_dims(img)
         if data_dims in ['2D_RGB', '3D_RGB']:
             img = np.moveaxis(img.data, -1, 0)
-        elif data_dims == "4D" and self.channels_second:
-            # If 4D and channels are in second position, move them to first
-            img = np.moveaxis(img.data, 1, 0)
         else:
             img = img.data
         return img
@@ -2540,6 +2531,20 @@ class ConvPaintWidget(QWidget):
         self._reset_predict_buttons()
         # self.save_model_btn.setEnabled(True)
         self._set_model_description()
+
+    def _on_switch_axes(self):
+        """Switch the first two axes of the input image."""
+        in_img = self._get_selected_img(check=True)
+        data_dim = self._get_data_dims(in_img)
+        if in_img is None:
+            warnings.warn('No image layer selected')
+            return
+        elif data_dim != "4D":
+            warnings.warn('Switching axes is only supported for 4D images')
+            return
+        # Get the data from the selected image layer
+        img_data = in_img.data
+        in_img.data = np.swapaxes(img_data, 0, 1)  # Swap the first two axes
 
     @staticmethod
     def _annot_to_sparse(annot):
