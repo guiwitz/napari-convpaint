@@ -1261,11 +1261,11 @@ class ConvPaintWidget(QWidget):
             
             pbr.set_description(f"Prediction")
 
-            data_dims = self._get_data_dims(img) # Do not normalize yet, so we can specifically normalize only the current step
+            data_dims = self._get_data_dims(img)
 
             # Get image data and stats depending on the data dim and norm mode
+            img = self._get_data_channel_first(img) # Do not normalize yet, so we can specifically normalize only the current step
             norm_mode = self.cp_model.get_param("normalize")
-            img = self._get_data_channel_first(img)
 
             if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
                 image_plane = img
@@ -1287,8 +1287,8 @@ class ConvPaintWidget(QWidget):
                 step = self.viewer.dims.current_step[1]
                 image_plane = img[:, step]
                 if norm_mode == 2: # over stack (only 1 value in stack dim; C, 1, 1, 1)
-                    image_mean = self.image_mean
-                    image_std = self.image_std
+                    image_mean = self.image_mean[:,0]
+                    image_std = self.image_std[:,0]
                 if norm_mode == 3: # by image (use values for current step; C, N, 1, 1)
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
@@ -2257,19 +2257,13 @@ class ConvPaintWidget(QWidget):
     def _get_data_channel_first_norm(self, img):
         """Get data from selected channel. Output has channel (if present) in 
         first position and is normalized."""
-        print("get_data_channel_first_norm called. mean and std are: ",
-              self.image_mean, self.image_std)
+
         # If stats are not set, compute them
         if self.image_mean is None or self.image_std is None:
             self._compute_image_stats(img)
-        print("get_data_channel_first_norm: mean and std after computing are: ",
-              self.image_mean, self.image_std)
 
         # Get data from selected channel
         image_stack = self._get_data_channel_first(img)
-        print("get_data_channel_first_norm: image_stack shape is: ", image_stack.shape)
-        print("get_data_channel_first_norm: mean of each dimension besides the last 2: ",
-              np.mean(image_stack, axis=tuple(range(image_stack.ndim-2, image_stack.ndim))))
 
         # Normalize image
         if self.cp_model.get_param("normalize") != 1:
@@ -2277,9 +2271,6 @@ class ConvPaintWidget(QWidget):
                 image=image_stack,
                 image_mean=self.image_mean,
                 image_std=self.image_std)
-        print("get_data_channel_first_norm: image_stack shape after normalization is: ", image_stack.shape)
-        print("get_data_channel_first_norm: mean of each dimension besides the last 2 after normalization: ",
-              np.mean(image_stack, axis=tuple(range(image_stack.ndim-2, image_stack.ndim))))
     
         return image_stack
 

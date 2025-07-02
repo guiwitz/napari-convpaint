@@ -1137,7 +1137,7 @@ class ConvpaintModel:
         num_f = features[0].shape[0] if isinstance(features, list) else features.shape[0]
         num_f_clf = self.classifier.n_features_in_ if self.classifier is not None else 0
         if num_f != num_f_clf:
-            raise ValueError("Extracted features have a different length than the classifier's expected features. " +
+            raise ValueError("Extracted features have a different length to what the classifier expects. " +
                              "This is likely due to a change in the number of input channels.")
 
         # Predict pixels based on the features and classifier
@@ -1340,9 +1340,9 @@ class ConvpaintModel:
         # Check if the dimension type of all images is the same (same num of dims and channels)
         for i, img in enumerate(prep_imgs):
             if img.ndim != prep_imgs[0].ndim:
-                raise ValueError(f'Image {i} has different number of dimensions than the first image.')
+                raise ValueError(f'Image {i} has different number of dimensions to the first image.')
             if img.shape[0] != prep_imgs[0].shape[0]:
-                raise ValueError(f'Image {i} has different number of channels than the first image.')
+                raise ValueError(f'Image {i} has different number of channels to the first image.')
 
         # If we want coordinates, create a coordinates img for each image in data
         if get_coords:
