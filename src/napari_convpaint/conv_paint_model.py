@@ -209,6 +209,7 @@ class ConvpaintModel:
 
         # Image processing parameters
         def_param.multi_channel_img = False # Interpret the first dimension as channels
+        def_param.rgb_img = False # Used to signal to the model that the image is RGB
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Acceleration parameters
@@ -666,7 +667,7 @@ class ConvpaintModel:
         # print("Annotations in get_feature_image:", len(annotations), "annot of shape", annotations[0].shape, "with values", np.unique(annotations[0]))
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
-            self._check_in_channels(in_channels)
+            self._check_in_channels(data, in_channels)
             data = [d[in_channels] for d in data]
         # print("Data shapes after in_channels:", [d.shape for d in data])
 
@@ -1086,7 +1087,7 @@ class ConvpaintModel:
 
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
-            self._check_in_channels(in_channels)
+            self._check_in_channels(data, in_channels)
             data = [d[in_channels] for d in data]
 
         # If not done previously, normalize the images (separately and according to the parameter)
@@ -1413,8 +1414,7 @@ class ConvpaintModel:
         # Check that all in_channels are valid channel indices
         channels_in_data = data[0].shape[0] if isinstance(data, list) else data.shape[0]
         if not all(0 <= ch < channels_in_data for ch in in_channels):
-            raise ValueError("All in_channels must be valid channel indices.")
-
+            raise ValueError("All in_channels must be valid channel indices. Please adjust in_channels to be within the range of channels in the data.")
     
     def _norm_single_image(self, img):
         """
