@@ -209,7 +209,6 @@ class ConvpaintModel:
 
         # Image processing parameters
         def_param.multi_channel_img = False # Interpret the first dimension as channels
-        def_param.rgb_img = False # Used to signal to the model that the image is RGB
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Acceleration parameters
@@ -667,9 +666,7 @@ class ConvpaintModel:
         # print("Annotations in get_feature_image:", len(annotations), "annot of shape", annotations[0].shape, "with values", np.unique(annotations[0]))
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
-            if not (self._param.multi_channel_img or self._param.rgb_img):
-                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters. " +
-                                 "Please either remove in_channels or set multi_channel_img or rgb_img to True.")
+            self._check_in_channels(in_channels)
             data = [d[in_channels] for d in data]
         # print("Data shapes after in_channels:", [d.shape for d in data])
 
@@ -792,7 +789,6 @@ class ConvpaintModel:
         # Reshape the features to the original image shape
         padded_shapes = self.padded_shapes
         original_shapes = self.original_shapes
-        print("Reshaping inside get_feature_image with original shapes:", original_shapes)
         features = [self._restore_shape(features[i],
                                        padded_shapes[i],
                                        padding,
@@ -1090,8 +1086,7 @@ class ConvpaintModel:
 
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
-            if not (self._param.multi_channel_img or self._param.rgb_img):
-                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters.")
+            self._check_in_channels(in_channels)
             data = [d[in_channels] for d in data]
 
         # If not done previously, normalize the images (separately and according to the parameter)
@@ -1155,7 +1150,6 @@ class ConvpaintModel:
         # Reshape the predictions to the original image shape
         padded_shapes = self.padded_shapes # Saved when extracting features
         original_shapes = self.original_shapes # Saved when extracting features
-        print("Reshaping inside _predict_image with original shapes:", original_shapes)
         pred_reshaped = [self._restore_shape(predictions[i],
                                             padded_shapes[i],
                                             padding,
@@ -1402,6 +1396,25 @@ class ConvpaintModel:
             raise Exception('Image and annotations have different dimensions')
 
         return img, annotations
+    
+    def _check_in_channels(self, data, in_channels=None):
+        """
+        Check if the conditions for using the given in_channels are met, and raise an error if not.
+        """
+        if in_channels is None:
+            print("No in_channels given for _check_in_channels.")
+            return
+        
+        # In channels makes only sense on multi-channel images
+        if not (self._param.multi_channel_img):
+            raise ValueError("in_channels can only be used if multi_channel_img is True in the model parameters. " +
+                                "Please either remove in_channels or make sure multi_channel_img is being set to True.")
+
+        # Check that all in_channels are valid channel indices
+        channels_in_data = data[0].shape[0] if isinstance(data, list) else data.shape[0]
+        if not all(0 <= ch < channels_in_data for ch in in_channels):
+            raise ValueError("All in_channels must be valid channel indices.")
+
     
     def _norm_single_image(self, img):
         """

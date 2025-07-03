@@ -247,7 +247,7 @@ class ConvPaintWidget(QWidget):
         self.spin_downsample.setValue(1)
         self.spin_downsample.setToolTip('Reduce image size, e.g. for faster computing (output is rescaled to original size). ' +
                                         'Negative values will instead upscale the image by the absolute value.')
-        self.acceleration_group.glayout.addWidget(QLabel('Downsample'), 1,0,1,1)
+        self.acceleration_group.glayout.addWidget(QLabel('Downsample input'), 1,0,1,1)
         self.acceleration_group.glayout.addWidget(self.spin_downsample, 1,1,1,1)
         # "Smoothen output" spinbox
         self.spin_smoothen = QSpinBox()
