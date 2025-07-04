@@ -689,6 +689,8 @@ class ConvpaintModel:
         if use_annots:
             annotations = [conv_paint_utils.scale_img(a, factor, input_type="labels", upscale=upscale)
                            for a in annotations]
+            
+        # Register the annotations if memory mode is enabled and update the annotations accordingly
         if memory_mode:
             annotations = self._register_and_update_annots(annotations, img_ids,
                                                            params_for_extract.image_downsample)

@@ -2,6 +2,7 @@ import warnings
 import torch
 import numpy as np
 from scipy.stats import mode
+from scipy.ndimage import gaussian_filter
 # from scipy.ndimage import median_filter
 import skimage.transform
 import skimage.morphology as morph
@@ -123,11 +124,13 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
     downscaled_img / upscaled_img : np.ndarray
         Downscaled array or upscaled array.
     """
-
+    # If the scaling factor is such that de facto no scaling is needed, return the image as is
     if scaling_factor in (-1, 0, 1):
         return image
 
     # If option to UPSCALE is True, return the image upscaled
+
+    # Upscale is the same for all input types
     if upscale:
         # Upscale by duplicating elements
         upscaled_img = np.repeat(
@@ -137,7 +140,24 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         return upscaled_img
     
     # Else DOWNSCALE the image
-    # Slice the last two dimensions
+
+    # IMAGES by gaussian filter and striding
+    if input_type == 'img':
+        # Apply a small Gaussian blur to avoid aliasing
+        sigma = 0.4 * scaling_factor
+        blurred_img = gaussian_filter(image, sigma=(0, 0, sigma, sigma))  # assuming shape (..., H, W)
+        # Downsample by striding
+        scaled_img = blurred_img[..., ::scaling_factor, ::scaling_factor]
+        # from matplotlib import pyplot as plt
+        # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        # ax[0].imshow(image[0,0,...], cmap='gray')
+        # ax[1].imshow(blurred_img[0,0,...], cmap='gray')
+        # ax[2].imshow(scaled_img[0,0,...], cmap='gray')
+        # plt.show()
+        return scaled_img
+
+    # # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
+    # # Slice the last two dimensions
     slice_start = ((image.shape[-2] % scaling_factor) // 2,
                      (image.shape[-1] % scaling_factor) // 2)
     slice_size = (image.shape[-2] // scaling_factor * scaling_factor,
@@ -152,28 +172,61 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         *image.shape[:-2],  # Preserve all leading dimensions
         slice_size[0] // scaling_factor, scaling_factor,
         slice_size[1] // scaling_factor, scaling_factor
-    )
-    # print(stacked_blocks[0,:,0,:])
-    if input_type == 'img':
-        # Take the median along the scaling dimensions
-        scaled_img = np.median(stacked_blocks, axis=(-3, -1))
-        # scaled_img = median_filter(stacked_blocks, size=(1, scaling_factor, 1, scaling_factor)).reshape(
-        #     *image.shape[:-2], slice_size[0] // scaling_factor, slice_size[1] // scaling_factor)
-    elif input_type == 'labels':
+    )    
+
+    if input_type == 'labels':
         classes_before = np.unique(image)
-        # For labels, take the majority (max count) along the scaling dimensions
-        scaled_img = mode(stacked_blocks, axis=(-3, -1)).mode
+
+        output_shape = (
+            image.shape[0],
+            *image.shape[1:-2],
+            slice_size[0] // scaling_factor,
+            slice_size[1] // scaling_factor
+        )
+        scaled_img = np.zeros(output_shape, dtype=image.dtype)
+
+        for i in range(image.shape[0]):
+            plane = image[i]
+            if np.all(plane == 0):
+                continue  # skip empty plane
+            sliced_plane = plane[
+                ..., 
+                slice_start[0]:slice_start[0] + slice_size[0],
+                slice_start[1]:slice_start[1] + slice_size[1]
+            ]
+            blocks = sliced_plane.reshape(
+                *plane.shape[:-2],
+                slice_size[0] // scaling_factor, scaling_factor,
+                slice_size[1] // scaling_factor, scaling_factor
+            )
+            scaled_img[i] = fast_mode(blocks, axis=(-3, -1))
+
         classes_after = np.unique(scaled_img)
-        # Check if the classes have changed after downscaling
         if len(classes_before) != len(classes_after):
             warnings.warn(f"Classes have changed after downscaling from {classes_before} to {classes_after}.")
+        return scaled_img
+
     elif input_type == 'coords':
-        # For coordinates, take the min along the scaling dimensions
         scaled_img = np.min(stacked_blocks, axis=(-3, -1))
+        return scaled_img
+
     else:
         raise ValueError(f"Unknown input type: {input_type}. Supported types are 'img', 'labels', and 'coords'.")
     
-    return scaled_img
+def fast_mode(arr, axis):
+    """
+    Fast mode pooling assuming integer values >= 0
+    """
+    if isinstance(axis, int):
+        axis = (axis,)
+    axis = tuple(a + arr.ndim if a < 0 else a for a in axis)  # Transform negative indices to positive indices
+    transpose_axes = [a for a in range(arr.ndim) if a not in axis] + list(axis)
+    transposed = arr.transpose(transpose_axes)
+    flat_main = transposed.reshape(-1, np.prod([arr.shape[a] for a in axis]))
+    result = np.apply_along_axis(lambda x: np.bincount(x).argmax(), 1, flat_main)
+    out_shape = [arr.shape[a] for a in range(arr.ndim) if a not in axis]
+    result = result.reshape(out_shape)
+    return result
 
 def rescale_features(feature_img, target_shape, order=1):
     """
