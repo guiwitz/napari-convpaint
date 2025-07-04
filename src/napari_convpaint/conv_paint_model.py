@@ -209,7 +209,6 @@ class ConvpaintModel:
 
         # Image processing parameters
         def_param.multi_channel_img = False # Interpret the first dimension as channels
-        def_param.rgb_img = False # Used to signal to the model that the image is RGB
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Acceleration parameters
@@ -1368,7 +1367,7 @@ class ConvpaintModel:
             img = np.expand_dims(img, axis=0)
             img = np.expand_dims(img, axis=0)
         elif num_dims == 3:
-            if self._param.multi_channel_img or self._param.rgb_img:
+            if self._param.multi_channel_img:
                 # Add a z dimension at the second position
                 img = np.expand_dims(img, axis=1)
             else:
@@ -1551,7 +1550,7 @@ class ConvpaintModel:
         """
         is_2d = len(original_shape) == 2
         is_3d = len(original_shape) == 3
-        is_3d_multi = is_3d and (self._param.multi_channel_img or self._param.rgb_img)
+        is_3d_multi = is_3d and (self._param.multi_channel_img)
         # if is 2d or 3D with multiple channels (including RGB), we remove the z dimension
         if is_2d or is_3d_multi:
             if pred.shape[-3] != 1:

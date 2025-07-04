@@ -1458,9 +1458,6 @@ class ConvPaintWidget(QWidget):
         if data_dims in ['2D', '2D_RGB', '3D_RGB'] and new_param.multi_channel_img:
             warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}. ' +
                             'This might cause problems.')
-        if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and new_param.rgb_img:
-            warnings.warn(f'The loaded model works with RGB, but the data is {data_dims}. ' +
-                            'This might cause problems.')
         # Check if the loaded normalization setting is compatible with data
         if data_dims in ['2D', '2D_RGB', '3D_multi'] and new_param.normalize == 2:
             warnings.warn(f'The loaded model normalizes over stack, but the data is {data_dims}. ' +
@@ -1491,8 +1488,7 @@ class ConvPaintWidget(QWidget):
     def _on_data_dim_changed(self):
         """Set the image data dimensions based on radio buttons,
         reset classifier, and adjust normalization options."""
-        self.cp_model.set_param("multi_channel_img", self.radio_multi_channel.isChecked())
-        self.cp_model.set_param("rgb_img", self.radio_rgb.isChecked()) # This should actually not happen (RGB is defined by data)
+        self.cp_model.set_param("multi_channel_img", self.radio_multi_channel.isChecked() or self.rgb_img)
         self._reset_clf()
         self._reset_radio_norm_choices()
         if (self.add_layers_flag # Add layers only if not triggered from layer selection
@@ -1602,6 +1598,9 @@ class ConvPaintWidget(QWidget):
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
         # self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
+        self.rgb_img = self.image_layer_selection_widget.value.rgb \
+            if self.image_layer_selection_widget.value is not None \
+            else False # If the image is RGB
         self.data_shape = None # Shape of the currently selected image data
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
@@ -1693,25 +1692,17 @@ class ConvPaintWidget(QWidget):
         if ((fe_defaults.multi_channel_img is not None) and
             (new_param.multi_channel_img != fe_defaults.multi_channel_img)):
             # Catch case where multichannel is adjusted on incompatible data
-            if data_dims in ['2D', '2D_RGB', '3D_RGB'] and fe_defaults.multi_channel_img:
+            if data_dims in ['2D'] and fe_defaults.multi_channel_img:
                 warnings.warn(f'The feature extractor tried to enforce multichannel on {data_dims} data. ' +
+                              'This is not supported and will be ignored.')
+            elif data_dims in ['2D_RGB', '3D_RGB', '4D'] and not fe_defaults.multi_channel_img:
+                warnings.warn(f'The feature extractor tried to enforce single-channel on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             else: # If data is compatible, enforce the model's default multichannel setting
                 adjusted_params.append('multi_channel_img')
-                if fe_defaults.multi_channel_img: # If the default model is multi-channel, enforce it
-                    new_param.multi_channel_img = True
-                    self.radio_multi_channel.setChecked(True)
-                else: # If the default model is non-multichannel, reset data dims according to data
-                    new_param.multi_channel_img = False
-                    self._reset_radio_data_dim_choices()
+                new_param.multi_channel_img = fe_defaults.multi_channel_img
+                self._reset_radio_data_dim_choices()
                 self._reset_radio_norm_choices() # Update norm options, since multi_channel_img changed
-        # RGB - cannot be adjusted, since it is defined by the image data; but raise a warning if incompatible
-        if ((fe_defaults.rgb_img is not None) and
-            (new_param.rgb_img != fe_defaults.rgb_img)):
-            # Catch case where RGB is adjusted on incompatible data
-            if data_dims in ['2D', '3D_single', '3D_multi', '4D'] and fe_defaults.rgb_img:
-                warnings.warn(f'The feature extractor tried to enforce RGB on {data_dims} data. ' +
-                              'This is not supported and will be ignored.')
             # else: # If data is compatible, enforce the model's default RGB setting
             #     adjusted_params.append('rgb_img')
             #     if fe_defaults.rgb_img: # If the default model is RGB, enforce it
@@ -1975,8 +1966,8 @@ class ConvPaintWidget(QWidget):
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
             return
-        self.cp_model.set_param("rgb_img", self.image_layer_selection_widget.value.rgb)
-        if self.cp_model.get_param("rgb_img"): # If the image is RGB (2D or 3D makes no difference), this is the only option
+        self.rgb_img = self.image_layer_selection_widget.value.rgb
+        if self.rgb_img: # If the image is RGB (2D or 3D makes no difference), this is the only option
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(True)
@@ -2102,17 +2093,21 @@ class ConvPaintWidget(QWidget):
         """Update GUI from parameters."""
         if params is None:
             params = self.cp_model.get_params()
+        # Reset data dim choices
         self._reset_radio_data_dim_choices()
         # Set radio buttons depending on param (possibly enforcing a choice)
-        if params.multi_channel_img:
+        if params.multi_channel_img and not self.rgb_img:
             self.radio_single_channel.setChecked(False)
             self.radio_multi_channel.setChecked(True)
             self.radio_rgb.setChecked(False)
-        elif params.rgb_img:
+        elif params.multi_channel_img and self.rgb_img:
             self.radio_single_channel.setChecked(False)
             self.radio_multi_channel.setChecked(False)
             self.radio_rgb.setChecked(True)
         else:
+            if self.rgb_img:
+                warnings.warn('The selected image is RGB, but the model is set to single channel. ' +
+                          'Please choose a different image.')
             self.radio_single_channel.setChecked(True)
             self.radio_multi_channel.setChecked(False)
             self.radio_rgb.setChecked(False)
@@ -2212,17 +2207,17 @@ class ConvPaintWidget(QWidget):
         """Set general parameters back to default."""
         # Set defaults in GUI
         self.radio_single_channel.setChecked(not self.default_cp_param.multi_channel_img
-                                             and not self.default_cp_param.rgb_img)
-        self.radio_multi_channel.setChecked(self.default_cp_param.multi_channel_img)
-        self.radio_rgb.setChecked(self.default_cp_param.rgb_img)
+                                             and not self.rgb_img)
+        self.radio_multi_channel.setChecked(self.default_cp_param.multi_channel_img
+                                            and not self.rgb_img)
+        self.radio_rgb.setChecked(self.rgb_img) # Also put rgb if the defaults would be multi-channel
         self.button_group_normalize.button(self.default_cp_param.normalize).setChecked(True)
         self.spin_downsample.setValue(self.default_cp_param.image_downsample)
         self.spin_smoothen.setValue(self.default_cp_param.seg_smoothening)
         self.check_tile_annotations.setChecked(self.default_cp_param.tile_annotations)
         self.check_tile_image.setChecked(self.default_cp_param.tile_image)
         # Set defaults in param object (not done through bindings if values in the widget are not changed)
-        self.cp_model.set_params(multi_channel_img = self.default_cp_param.multi_channel_img,
-                                 rgb_img = self.default_cp_param.rgb_img,
+        self.cp_model.set_params(multi_channel_img =  self.rgb_img or self.default_cp_param.multi_channel_img,
                                  normalize = self.default_cp_param.normalize,
                                  image_downsample = self.default_cp_param.image_downsample,
                                  seg_smoothening = self.default_cp_param.seg_smoothening,
@@ -2342,7 +2337,7 @@ class ConvPaintWidget(QWidget):
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
         if num_dims == 2:
-            if self.cp_model.get_param("rgb_img"):
+            if  self.rgb_img:
                 return '2D_RGB'
             else:
                 return '2D'

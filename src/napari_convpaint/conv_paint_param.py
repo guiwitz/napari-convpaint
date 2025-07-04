@@ -16,8 +16,6 @@ class Param:
             path to the classifier model
         multi_channel_img : bool = None
             interpret the first dimension as channels
-        rgb_img : bool
-            used to signal to the model that the image is RGB
         normalize : int
             normalization mode
             1: no normalization, 2: normalize stack, 3: normalize each image
@@ -56,7 +54,6 @@ class Param:
 
     # Image processing parameters
     multi_channel_img: bool = None # Interpret the first dimension as channels
-    rgb_img: bool = None # Used to signal to the model that the image is RGB
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
 
     # Acceleration parameters
