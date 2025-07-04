@@ -1598,9 +1598,7 @@ class ConvPaintWidget(QWidget):
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
         # self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
-        self.rgb_img = self.image_layer_selection_widget.value.rgb \
-            if self.image_layer_selection_widget.value is not None \
-            else False # If the image is RGB
+        self.rgb_img = False # Tag to register if the image is RGB
         self.data_shape = None # Shape of the currently selected image data
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
@@ -2342,7 +2340,7 @@ class ConvPaintWidget(QWidget):
             else:
                 return '2D'
         if num_dims == 3:
-            if self.cp_model.get_param("rgb_img"):
+            if self.rgb_img:
                 return '3D_RGB'
             if self.cp_model.get_param("multi_channel_img"):
                 return '3D_multi'
