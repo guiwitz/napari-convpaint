@@ -1365,6 +1365,9 @@ class ConvpaintModel:
         """
         num_dims = img.ndim
         if num_dims == 2:
+            if self._param.multi_channel_img:
+                warnings.warn('Image has only 2 dimensions, but multi_channel_img is True. ' +
+                              'Assuming that the image is a single channel image.')
             # Add a channels and a z dimension
             img = np.expand_dims(img, axis=0)
             img = np.expand_dims(img, axis=0)
@@ -1376,8 +1379,12 @@ class ConvpaintModel:
                 # Add a channels dimension at the first position
                 img = np.expand_dims(img, axis=0)
         elif num_dims == 4:
-            # Data is already in [C, Z, H, W] format
-            pass
+            # Data must be in [C, Z, H, W] format
+            if not self._param.multi_channel_img:
+                warnings.warn('Image has 4 dimensions, but multi_channel_img is False. ' +
+                              'Convpaint only works with 3D multi-channel images with [C, Z, H, W]. ' +
+                              'Setting multi_channel_img to True.')
+                self._param.multi_channel_img = True
         else:
             raise Exception('Image has wrong number of dimensions')
         
