@@ -110,6 +110,42 @@ class ConvpaintModel:
         self._param = Param()
         self.reset_training()
         self.num_trainings = 0
+        self._params_to_reset_training = ['multi_channel_img',
+                                          'normalize',
+                                        #   'image_downsample',
+                                        #   'seg_smoothening',
+                                        #   'tile_annotations',
+                                        #   'tile_image',
+                                        #   'use_dask',
+                                          'fe_name',
+                                        #   'fe_use_cuda',
+                                          'fe_layers',
+                                          'fe_scalings',
+                                          'fe_order',
+                                          'fe_use_min_features',
+                                        #   'clf_iterations',
+                                        #   'clf_learning_rate',
+                                        #   'clf_depth',
+                                        #   'clf_use_gpu'
+                                          ]
+        self._params_to_reset_clf = ['multi_channel_img',
+                                     'normalize',
+                                    #  'image_downsample',
+                                    #  'seg_smoothening',
+                                    #  'tile_annotations',
+                                    #  'tile_image',
+                                    #  'use_dask',
+                                     'fe_name',
+                                    #  'fe_use_cuda',
+                                     'fe_layers',
+                                     'fe_scalings',
+                                     'fe_order',
+                                     'fe_use_min_features',
+                                    #  'clf_iterations',
+                                    #  'clf_learning_rate',
+                                    #  'clf_depth',
+                                    #  'clf_use_gpu'
+                                     ]
 
         # Initialize the dictionary of all available models
         if not ConvpaintModel.FE_MODELS_TYPES_DICT:
@@ -133,7 +169,7 @@ class ConvpaintModel:
         elif fe_name is not None:
             self._set_fe(fe_name, fe_use_cuda, fe_layers)
             self._param = self.get_fe_defaults()
-            self.set_params(no_warning=True, # Here at initiation, it is intended to set FE parameters...
+            self.set_params(ignore_warnings=True, # Here at initiation, it is intended to set FE parameters...
                             fe_layers = fe_layers, # Overwrite the layers with the given layers
                             fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
                             **kwargs) # Overwrite the parameters with the given parameters
@@ -207,11 +243,11 @@ class ConvpaintModel:
 
         def_param = Param()
 
-        # Image processing parameters
+        # Image type parameters
         def_param.multi_channel_img = False # Interpret the first dimension as channels
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
-        # Acceleration parameters
+        # Input and output parameters
         def_param.image_downsample = 1
         def_param.seg_smoothening = 1
         def_param.tile_annotations = True
@@ -268,11 +304,11 @@ class ConvpaintModel:
         param = self._param.copy()
         return param
     
-    def set_param(self, key, val, no_warning=False):
+    def set_param(self, key, val, ignore_warnings=False):
         """
         Sets the value of the given parameter key.
         Raises a warning if key FE parameters are set (intended only for initiation),
-        unless no_warning is True.
+        unless ignore_warnings is True.
 
         Parameters:
         ----------
@@ -280,18 +316,34 @@ class ConvpaintModel:
             Key of the parameter to set
         val : any
             Value to set the parameter to
-        no_warning : bool, optional
+        ignore_warnings : bool, optional
             Whether to suppress the warning for setting FE parameters, by default False
         """
-        if key in Param.get_keys():
-            self._param.set_single(key, val)
-            if (key == 'fe_name' or key == 'fe_use_cuda' or key == 'fe_layers') and not no_warning:
-                warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
-                    "You should create a new ConvpaintModel instead.")
-        else:
+        if not key in Param.get_keys():
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
+            return
+        if val == self._param.get(key):
+            print(f"Parameter '{key}' already has the value {val}.")
+            return
+        if key in self._params_to_reset_training and self.num_trainings > 0 and not ignore_warnings:
+            warnings.warn(f"When changing the parameter {key}, the features saved in memory mode should be reset.\n" +
+                "The parameter was not changed. To do so, either first reset the features by calling the reset_training() method.\n"
+                "Or, if you are aware of the consequences, you can also change the parameter without resetting by setting ignore_warnings to True.")
+            return
+        if key in self._params_to_reset_clf and self.classifier is not None and not ignore_warnings:
+            warnings.warn(f"When changing the parameter {key}, the classifier should be reset.\n" +
+                "The parameter was not changed. To do so, either first reset the classifier by calling the reset_classifier() method.\n"
+                "Or, if you are aware of the consequences, you can also change the parameter without resetting by setting ignore_warnings to True.")
+            return
+        if key in ['fe_name', 'fe_use_cuda', 'fe_layers'] and not ignore_warnings:
+            warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+                "You should create a new ConvpaintModel instead.\n" +
+                "If you are aware of the consequences, you can set ignore_warnings to True to change the parameter anyway.")
+            return
+        # Set the parameter
+        self._param.set_single(key, val)
 
-    def set_params(self, param=None, no_warning=False, **kwargs):
+    def set_params(self, param=None, ignore_warnings=False, **kwargs):
         """
         Sets the parameters, given either as a Param object or as keyword arguments.
         Note that the model is not reset and no new FE model is created.
@@ -301,7 +353,7 @@ class ConvpaintModel:
         ----------
         param : Param, optional
             Param object with the parameters to set, by default None
-        no_warning : bool, optional
+        ignore_warnings : bool, optional
             Whether to suppress the warning for setting FE parameters, by default False
         **kwargs : parameters as keyword arguments
             Parameters to set as keyword arguments (instead of a Param object)
@@ -317,7 +369,7 @@ class ConvpaintModel:
             kwargs = param.__dict__
         for key, val in kwargs.items():
             if val is not None:
-                self.set_param(key, val, no_warning=no_warning)
+                self.set_param(key, val, ignore_warnings=ignore_warnings)
 
     def save(self, model_path, create_pkl=True, create_yml=True):
         """
@@ -396,7 +448,7 @@ class ConvpaintModel:
         """
         self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
         self._param = self.get_fe_defaults()
-        self.set_params(no_warning=True, **param.__dict__) # Overwrite the parameters with the given parameters
+        self.set_params(ignore_warnings=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
 
 ### FE METHODS
@@ -410,6 +462,7 @@ class ConvpaintModel:
 
         # Reset the model and classifier
         self.reset_classifier()
+        self.reset_training()
 
         # Check if we need to create a new FE model
         fe_name_changed = fe_name is not None and fe_name != self._param.get("fe_name")
@@ -423,6 +476,7 @@ class ConvpaintModel:
                 use_cuda=fe_use_cuda,
                 layers=fe_layers
             )
+        
         # Set the parameters
         self._param.set(fe_name=fe_name, fe_use_cuda=fe_use_cuda, fe_layers=fe_layers)
 

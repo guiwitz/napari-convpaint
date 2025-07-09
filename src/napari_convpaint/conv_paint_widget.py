@@ -680,13 +680,13 @@ class ConvPaintWidget(QWidget):
 
         # Acceleration
         self.spin_downsample.valueChanged.connect(lambda:
-            self.cp_model.set_param('image_downsample', self.spin_downsample.value()))
+            self.cp_model.set_param('image_downsample', self.spin_downsample.value()), ignore_warnings=True)
         self.spin_smoothen.valueChanged.connect(lambda:
-            self.cp_model.set_param('seg_smoothening', self.spin_smoothen.value()))
+            self.cp_model.set_param('seg_smoothening', self.spin_smoothen.value()), ignore_warnings=True)
         self.check_tile_annotations.stateChanged.connect(lambda: 
-            self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked()))
+            self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked()), ignore_warnings=True)
         self.check_tile_image.stateChanged.connect(lambda: 
-            self.cp_model.set_param('tile_image', self.check_tile_image.isChecked()))
+            self.cp_model.set_param('tile_image', self.check_tile_image.isChecked()), ignore_warnings=True)
 
         # === MODEL OPTIONS TAB ===
 
@@ -701,11 +701,11 @@ class ConvPaintWidget(QWidget):
         
         # Classifier
         self.spin_iterations.valueChanged.connect(lambda:
-            self.cp_model.set_param('clf_iterations', self.spin_iterations.value()))
+            self.cp_model.set_param('clf_iterations', self.spin_iterations.value()), ignore_warnings=True)
         self.spin_learning_rate.valueChanged.connect(lambda:
-            self.cp_model.set_param('clf_learning_rate', self.spin_learning_rate.value()))
+            self.cp_model.set_param('clf_learning_rate', self.spin_learning_rate.value()), ignore_warnings=True)
         self.spin_depth.valueChanged.connect(lambda:
-            self.cp_model.set_param('clf_depth', self.spin_depth.value()))
+            self.cp_model.set_param('clf_depth', self.spin_depth.value()), ignore_warnings=True)
         self.set_default_clf_btn.clicked.connect(self._on_reset_clf_params)
 
         # === CLASS LABELS TAB ===
@@ -1488,7 +1488,7 @@ class ConvPaintWidget(QWidget):
     def _on_data_dim_changed(self):
         """Set the image data dimensions based on radio buttons,
         reset classifier, and adjust normalization options."""
-        self.cp_model.set_param("multi_channel_img", self.radio_multi_channel.isChecked() or self.rgb_img)
+        self.cp_model.set_param("multi_channel_img", self.radio_multi_channel.isChecked() or self.rgb_img, ignore_warnings=True)
         self._reset_clf()
         self._reset_radio_norm_choices()
         if (self.add_layers_flag # Add layers only if not triggered from layer selection
@@ -1504,11 +1504,11 @@ class ConvPaintWidget(QWidget):
         """Set the normalization options based on radio buttons,
         and update stats."""
         if self.radio_no_normalize.isChecked():
-            self.cp_model.set_param("normalize", 1)
+            self.cp_model.set_param("normalize", 1, ignore_warnings=True)
         elif self.radio_normalize_over_stack.isChecked():
-            self.cp_model.set_param("normalize", 2)
+            self.cp_model.set_param("normalize", 2, ignore_warnings=True)
         elif self.radio_normalize_by_image.isChecked():
-            self.cp_model.set_param("normalize", 3)
+            self.cp_model.set_param("normalize", 3, ignore_warnings=True)
         # self._compute_image_stats() # NOTE: Don't we want to set it right away?
         self.image_mean, self.image_std = None, None
         self._reset_clf()
@@ -2182,7 +2182,8 @@ class ConvPaintWidget(QWidget):
         # In the param object (not done through bindings if values in the widget are not changed)
         self.cp_model.set_params(clf_iterations = self.default_cp_param.clf_iterations,
                                  clf_learning_rate = self.default_cp_param.clf_learning_rate,
-                                 clf_depth = self.default_cp_param.clf_depth)
+                                 clf_depth = self.default_cp_param.clf_depth,
+                                 ignore_warnings=True)
 
     def _reset_fe_params(self):
         """Reset feature extraction parameters to default values."""
@@ -2220,7 +2221,8 @@ class ConvPaintWidget(QWidget):
                                  image_downsample = self.default_cp_param.image_downsample,
                                  seg_smoothening = self.default_cp_param.seg_smoothening,
                                  tile_annotations = self.default_cp_param.tile_annotations,
-                                 tile_image = self.default_cp_param.tile_image)
+                                 tile_image = self.default_cp_param.tile_image,
+                                 ignore_warnings=True)
 
     def _set_model_description(self):
         """Set the model description text."""

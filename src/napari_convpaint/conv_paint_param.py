@@ -52,11 +52,11 @@ class Param:
     """
     classifier: str = None
 
-    # Image processing parameters
+    # Image type parameters
     multi_channel_img: bool = None # Interpret the first dimension as channels
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
 
-    # Acceleration parameters
+    # Input and output parameters
     image_downsample: int = None
     seg_smoothening: int = None
     tile_annotations: bool = None
