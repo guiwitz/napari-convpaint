@@ -11,10 +11,12 @@ import pandas as pd
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
 from napari_convpaint.conv_paint_dino import AVAILABLE_MODELS as DINO_MODELS
+from napari_convpaint.conv_paint_dino_jafar import AVAILABLE_MODELS as DINO_JAFAR_MODELS
 from napari_convpaint.conv_paint_combo_fe import AVAILABLE_MODELS as COMBO_MODELS
 from napari_convpaint.conv_paint_nnlayers import Hookmodel
 from napari_convpaint.conv_paint_gaussian import GaussianFeatures
 from napari_convpaint.conv_paint_dino import DinoFeatures
+from napari_convpaint.conv_paint_dino_jafar import DinoJafarFeatures
 from napari_convpaint.conv_paint_combo_fe import ComboFeatures
 from napari_convpaint.conv_paint_param import Param
 from . import conv_paint_utils
