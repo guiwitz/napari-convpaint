@@ -322,9 +322,9 @@ class ConvpaintModel:
         if not key in Param.get_keys():
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
             return
-        if val == self._param.get(key):
-            print(f"Parameter '{key}' already has the value {val}.")
-            return
+        # if val == self._param.get(key):
+        #     print(f"Parameter '{key}' already has the value {val}.")
+        #     return
         if key in self._params_to_reset_training and self.num_trainings > 0 and not ignore_warnings:
             warnings.warn(f"When changing the parameter {key}, the features saved in memory mode should be reset.\n" +
                 "The parameter was not changed. To do so, either first reset the features by calling the reset_training() method.\n"
@@ -429,8 +429,14 @@ class ConvpaintModel:
         self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
         self._param = new_param.copy()
         self.classifier = data['classifier']
-        self.table = data['table']
-        self.annot_dict = data['annnotations']
+        # If there is a features table and an annotations dictionary, load them
+        if 'table' in data and 'annnotations' in data:
+            if not isinstance(data['table'], pd.DataFrame):
+                raise ValueError('Table must be a pandas DataFrame.')
+            if not isinstance(data['annotations'], dict):
+                raise ValueError('Annotations must be a dictionary.')
+            self.table = data['table']
+            self.annot_dict = data['annotations']
 
     def _load_yml(self, yml_path):
         """
@@ -1433,14 +1439,18 @@ class ConvpaintModel:
                 # Add a channels dimension at the first position
                 img = np.expand_dims(img, axis=0)
         elif num_dims == 4:
-            # Data must be in [C, Z, H, W] format
-            if not self._param.multi_channel_img:
-                warnings.warn('Image has 4 dimensions, but multi_channel_img is False. ' +
-                              'Convpaint only works with 3D multi-channel images with [C, Z, H, W]. ' +
-                              'Setting multi_channel_img to True.')
-                self._param.multi_channel_img = True
+            pass  # Image is already in [C, Z, H, W] format
         else:
             raise Exception('Image has wrong number of dimensions')
+        
+        # Check if there are 4 actual dimensions (> 1), and if so, make sure multi_channel_img is True
+        num_real_dims = np.sum(np.array(img.shape) > 1)
+        if num_real_dims == 4 and not self._param.multi_channel_img:
+            # Data must be in [C, Z, H, W] format
+            warnings.warn('Image has 4 dimensions, but multi_channel_img is False. ' +
+                          'Convpaint only works with 4D data as 3D multi-channel images with [C, Z, H, W]. ' +
+                          'Setting multi_channel_img to True.')
+            self._param.multi_channel_img = True
         
         if annotations is None:
             return img, None
@@ -1453,10 +1463,10 @@ class ConvpaintModel:
             # Annotations are already in [Z, H, W] format
             pass
         else:
-            raise Exception('Annotations have wrong number of dimensions')
-        
+            raise Exception(f'Annotations have wrong number of dimensions ({num_dims_annots})')
+
         if img.shape[1:] != annotations.shape:
-            raise Exception('Image and annotations have different dimensions')
+            raise Exception(f'Image and annotations have different dimensions: {img.shape[1:]} vs {annotations.shape}')
 
         return img, annotations
     

@@ -680,13 +680,13 @@ class ConvPaintWidget(QWidget):
 
         # Acceleration
         self.spin_downsample.valueChanged.connect(lambda:
-            self.cp_model.set_param('image_downsample', self.spin_downsample.value()), ignore_warnings=True)
+            self.cp_model.set_param('image_downsample', self.spin_downsample.value(), ignore_warnings=True))
         self.spin_smoothen.valueChanged.connect(lambda:
-            self.cp_model.set_param('seg_smoothening', self.spin_smoothen.value()), ignore_warnings=True)
+            self.cp_model.set_param('seg_smoothening', self.spin_smoothen.value(), ignore_warnings=True))
         self.check_tile_annotations.stateChanged.connect(lambda: 
-            self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked()), ignore_warnings=True)
+            self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked(), ignore_warnings=True))
         self.check_tile_image.stateChanged.connect(lambda: 
-            self.cp_model.set_param('tile_image', self.check_tile_image.isChecked()), ignore_warnings=True)
+            self.cp_model.set_param('tile_image', self.check_tile_image.isChecked(), ignore_warnings=True))
 
         # === MODEL OPTIONS TAB ===
 
@@ -701,11 +701,11 @@ class ConvPaintWidget(QWidget):
         
         # Classifier
         self.spin_iterations.valueChanged.connect(lambda:
-            self.cp_model.set_param('clf_iterations', self.spin_iterations.value()), ignore_warnings=True)
+            self.cp_model.set_param('clf_iterations', self.spin_iterations.value(), ignore_warnings=True))
         self.spin_learning_rate.valueChanged.connect(lambda:
-            self.cp_model.set_param('clf_learning_rate', self.spin_learning_rate.value()), ignore_warnings=True)
+            self.cp_model.set_param('clf_learning_rate', self.spin_learning_rate.value(), ignore_warnings=True))
         self.spin_depth.valueChanged.connect(lambda:
-            self.cp_model.set_param('clf_depth', self.spin_depth.value()), ignore_warnings=True)
+            self.cp_model.set_param('clf_depth', self.spin_depth.value(), ignore_warnings=True))
         self.set_default_clf_btn.clicked.connect(self._on_reset_clf_params)
 
         # === CLASS LABELS TAB ===
@@ -1308,14 +1308,13 @@ class ConvPaintWidget(QWidget):
             # Normalize image (using the stats based on the radio buttons)
             if norm_mode != 1:
                 image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
-
             # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
             in_channels = self._parse_in_channels(self.input_channels)
             probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True, use_dask=self.use_dask)
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(False)            
+            self.viewer.window._status_bar._toggle_activity_dock(False)
 
         # Add segmentation layer if enabled
         if self.add_seg:
