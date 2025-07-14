@@ -105,10 +105,47 @@ class ConvpaintModel:
         ValueError
             If more than one of alias, model_path, param, or fe_name is provided.
         """
+
         # Initialize parameters and features
         self._param = Param()
         self.reset_training()
         self.num_trainings = 0
+        self._params_to_reset_training = ['multi_channel_img',
+                                          'normalize',
+                                        #   'image_downsample',
+                                        #   'seg_smoothening',
+                                        #   'tile_annotations',
+                                        #   'tile_image',
+                                        #   'use_dask',
+                                          'fe_name',
+                                        #   'fe_use_cuda',
+                                          'fe_layers',
+                                          'fe_scalings',
+                                          'fe_order',
+                                          'fe_use_min_features',
+                                        #   'clf_iterations',
+                                        #   'clf_learning_rate',
+                                        #   'clf_depth',
+                                        #   'clf_use_gpu'
+                                          ]
+        self._params_to_reset_clf = ['multi_channel_img',
+                                     'normalize',
+                                    #  'image_downsample',
+                                    #  'seg_smoothening',
+                                    #  'tile_annotations',
+                                    #  'tile_image',
+                                    #  'use_dask',
+                                     'fe_name',
+                                    #  'fe_use_cuda',
+                                     'fe_layers',
+                                     'fe_scalings',
+                                     'fe_order',
+                                     'fe_use_min_features',
+                                    #  'clf_iterations',
+                                    #  'clf_learning_rate',
+                                    #  'clf_depth',
+                                    #  'clf_use_gpu'
+                                     ]
 
         # Initialize the dictionary of all available models
         if not ConvpaintModel.FE_MODELS_TYPES_DICT:
@@ -132,7 +169,7 @@ class ConvpaintModel:
         elif fe_name is not None:
             self._set_fe(fe_name, fe_use_cuda, fe_layers)
             self._param = self.get_fe_defaults()
-            self.set_params(no_warning=True, # Here at initiation, it is intended to set FE parameters...
+            self.set_params(ignore_warnings=True, # Here at initiation, it is intended to set FE parameters...
                             fe_layers = fe_layers, # Overwrite the layers with the given layers
                             fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
                             **kwargs) # Overwrite the parameters with the given parameters
@@ -206,17 +243,15 @@ class ConvpaintModel:
 
         def_param = Param()
 
-        # Image processing parameters
+        # Image type parameters
         def_param.multi_channel_img = False # Interpret the first dimension as channels
-        def_param.rgb_img = False # Used to signal to the model that the image is RGB
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
-        # Acceleration parameters
+        # Input and output parameters
         def_param.image_downsample = 1
         def_param.seg_smoothening = 1
         def_param.tile_annotations = True
         def_param.tile_image = False
-        def_param.use_dask = False
 
         # FE parameters
         def_param.fe_name = "vgg16"
@@ -269,11 +304,11 @@ class ConvpaintModel:
         param = self._param.copy()
         return param
     
-    def set_param(self, key, val, no_warning=False):
+    def set_param(self, key, val, ignore_warnings=False):
         """
         Sets the value of the given parameter key.
         Raises a warning if key FE parameters are set (intended only for initiation),
-        unless no_warning is True.
+        unless ignore_warnings is True.
 
         Parameters:
         ----------
@@ -281,18 +316,34 @@ class ConvpaintModel:
             Key of the parameter to set
         val : any
             Value to set the parameter to
-        no_warning : bool, optional
+        ignore_warnings : bool, optional
             Whether to suppress the warning for setting FE parameters, by default False
         """
-        if key in Param.get_keys():
-            self._param.set_single(key, val)
-            if (key == 'fe_name' or key == 'fe_use_cuda' or key == 'fe_layers') and not no_warning:
-                warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
-                    "You should create a new ConvpaintModel instead.")
-        else:
+        if not key in Param.get_keys():
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
+            return
+        # if val == self._param.get(key):
+        #     print(f"Parameter '{key}' already has the value {val}.")
+        #     return
+        if key in self._params_to_reset_training and self.num_trainings > 0 and not ignore_warnings:
+            warnings.warn(f"When changing the parameter {key}, the features saved in memory mode should be reset.\n" +
+                "The parameter was not changed. To do so, either first reset the features by calling the reset_training() method.\n"
+                "Or, if you are aware of the consequences, you can also change the parameter without resetting by setting ignore_warnings to True.")
+            return
+        if key in self._params_to_reset_clf and self.classifier is not None and not ignore_warnings:
+            warnings.warn(f"When changing the parameter {key}, the classifier should be reset.\n" +
+                "The parameter was not changed. To do so, either first reset the classifier by calling the reset_classifier() method.\n"
+                "Or, if you are aware of the consequences, you can also change the parameter without resetting by setting ignore_warnings to True.")
+            return
+        if key in ['fe_name', 'fe_use_cuda', 'fe_layers'] and not ignore_warnings:
+            warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+                "You should create a new ConvpaintModel instead.\n" +
+                "If you are aware of the consequences, you can set ignore_warnings to True to change the parameter anyway.")
+            return
+        # Set the parameter
+        self._param.set_single(key, val)
 
-    def set_params(self, param=None, no_warning=False, **kwargs):
+    def set_params(self, param=None, ignore_warnings=False, **kwargs):
         """
         Sets the parameters, given either as a Param object or as keyword arguments.
         Note that the model is not reset and no new FE model is created.
@@ -302,7 +353,7 @@ class ConvpaintModel:
         ----------
         param : Param, optional
             Param object with the parameters to set, by default None
-        no_warning : bool, optional
+        ignore_warnings : bool, optional
             Whether to suppress the warning for setting FE parameters, by default False
         **kwargs : parameters as keyword arguments
             Parameters to set as keyword arguments (instead of a Param object)
@@ -318,7 +369,7 @@ class ConvpaintModel:
             kwargs = param.__dict__
         for key, val in kwargs.items():
             if val is not None:
-                self.set_param(key, val, no_warning=no_warning)
+                self.set_param(key, val, ignore_warnings=ignore_warnings)
 
     def save(self, model_path, create_pkl=True, create_yml=True):
         """
@@ -378,8 +429,14 @@ class ConvpaintModel:
         self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
         self._param = new_param.copy()
         self.classifier = data['classifier']
-        self.table = data['table']
-        self.annot_dict = data['annnotations']
+        # If there is a features table and an annotations dictionary, load them
+        if 'table' in data and 'annnotations' in data:
+            if not isinstance(data['table'], pd.DataFrame):
+                raise ValueError('Table must be a pandas DataFrame.')
+            if not isinstance(data['annotations'], dict):
+                raise ValueError('Annotations must be a dictionary.')
+            self.table = data['table']
+            self.annot_dict = data['annotations']
 
     def _load_yml(self, yml_path):
         """
@@ -397,7 +454,7 @@ class ConvpaintModel:
         """
         self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
         self._param = self.get_fe_defaults()
-        self.set_params(no_warning=True, **param.__dict__) # Overwrite the parameters with the given parameters
+        self.set_params(ignore_warnings=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
 
 ### FE METHODS
@@ -411,6 +468,7 @@ class ConvpaintModel:
 
         # Reset the model and classifier
         self.reset_classifier()
+        self.reset_training()
 
         # Check if we need to create a new FE model
         fe_name_changed = fe_name is not None and fe_name != self._param.get("fe_name")
@@ -424,6 +482,7 @@ class ConvpaintModel:
                 use_cuda=fe_use_cuda,
                 layers=fe_layers
             )
+        
         # Set the parameters
         self._param.set(fe_name=fe_name, fe_use_cuda=fe_use_cuda, fe_layers=fe_layers)
 
@@ -548,7 +607,7 @@ class ConvpaintModel:
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm)
         return clf
 
-    def segment(self, image, in_channels=None, skip_norm=False):
+    def segment(self, image, in_channels=None, skip_norm=False, use_dask=False):
         """
         Segments images by predicting its most probable classes using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -563,6 +622,8 @@ class ConvpaintModel:
         skip_norm : bool, optional
             Whether to skip normalization of the images before segmentation, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
+        use_dask : bool, optional
+            Whether to use dask for parallel processing, by default False
 
         Returns:
         ----------
@@ -570,10 +631,10 @@ class ConvpaintModel:
             Segmented image or list of segmented images (according to the input)
             Dimensions are equal to the input image(s) without the channel dimension
         """
-        _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm)
+        _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return seg
 
-    def predict_probas(self, image, in_channels=None, skip_norm=False):
+    def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
         Uses the feature extractor model to extract features from the image.
@@ -588,6 +649,8 @@ class ConvpaintModel:
         skip_norm : bool, optional
             Whether to skip normalization of the images before prediction, by default False
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
+        use_dask : bool, optional
+            Whether to use dask for parallel processing, by default False
 
         Returns:
         ----------
@@ -596,7 +659,7 @@ class ConvpaintModel:
             Dimensions are equal to the input image(s) without the channel dimension,
             with the class dimension added first
         """
-        probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm)
+        probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return probas
 
 
@@ -663,8 +726,7 @@ class ConvpaintModel:
         # print("Annotations in get_feature_image:", len(annotations), "annot of shape", annotations[0].shape, "with values", np.unique(annotations[0]))
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
-            if not (self._param.multi_channel_img or self._param.rgb_img):
-                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters.")
+            self._check_in_channels(data, in_channels)
             data = [d[in_channels] for d in data]
         # print("Data shapes after in_channels:", [d.shape for d in data])
 
@@ -679,14 +741,16 @@ class ConvpaintModel:
         params_for_extract = self._enforce_fe_params(self._param)
 
         # Downsample the images and annotations (if given)
-        data = [conv_paint_utils.scale_img(d,
-                                           params_for_extract.image_downsample)
+        upscale = params_for_extract.image_downsample < 1 # Register that we upscale if the parameter is negative
+        factor = -1 if upscale else 1 # Make the factor positive
+        factor = factor * params_for_extract.image_downsample
+        data = [conv_paint_utils.scale_img(d, factor, input_type="img", upscale=upscale)
                 for d in data]
         if use_annots:
-            annotations = [conv_paint_utils.scale_img(a,
-                                                      params_for_extract.image_downsample,
-                                                      input_type="labels")
+            annotations = [conv_paint_utils.scale_img(a, factor, input_type="labels", upscale=upscale)
                            for a in annotations]
+            
+        # Register the annotations if memory mode is enabled and update the annotations accordingly
         if memory_mode:
             annotations = self._register_and_update_annots(annotations, img_ids,
                                                            params_for_extract.image_downsample)
@@ -1062,7 +1126,7 @@ class ConvpaintModel:
 
         return features, annotations
 
-    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False):
+    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1084,8 +1148,7 @@ class ConvpaintModel:
 
         # If in_channels is given, extract the channels selected by in_channels from the data
         if in_channels is not None:
-            if not (self._param.multi_channel_img or self._param.rgb_img):
-                raise ValueError("in_channels can only be used if multi_channel_img or rgb_img is True in the model parameters.")
+            self._check_in_channels(data, in_channels)
             data = [d[in_channels] for d in data]
 
         # If not done previously, normalize the images (separately and according to the parameter)
@@ -1094,7 +1157,7 @@ class ConvpaintModel:
 
         # Get class probabilities, using tiling if enabled
         if self._param.tile_image:
-            probas = [self._parallel_predict_image(d, return_proba=True)
+            probas = [self._parallel_predict_image(d, return_proba=True, use_dask=use_dask)
                       for d in data]
         else:
             probas = self._predict_image(data, return_proba=True) # Can handle lists
@@ -1130,6 +1193,13 @@ class ConvpaintModel:
          # NOTE: No normalization here, as it is done outside; also, no channels extracted as already done outside
         features = self.get_feature_image(image, restore_input_form=False, in_channels=None, skip_norm=True)
 
+        # Check that the extracted features and the expected features have the same length
+        num_f = features[0].shape[0] if isinstance(features, list) else features.shape[0]
+        num_f_clf = self.classifier.n_features_in_ if self.classifier is not None else 0
+        if num_f != num_f_clf:
+            raise ValueError("Extracted features have a different length to what the classifier expects. " +
+                             "This is likely due to a change in the number of input channels.")
+
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
         predictions = [self._clf_predict(f, return_proba=True)
@@ -1159,7 +1229,7 @@ class ConvpaintModel:
 
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=True):
+    def _parallel_predict_image(self, image, return_proba=True, use_dask=False):
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1172,7 +1242,6 @@ class ConvpaintModel:
         nblocks_rows = image.shape[-2] // maxblock
         nblocks_cols = image.shape[-1] // maxblock
         margin = 50
-        use_dask = self._param.use_dask
 
         image = self._prep_dims_single(image)[0] # NOTE: should technically not be necessary, as done outside
 
@@ -1331,9 +1400,9 @@ class ConvpaintModel:
         # Check if the dimension type of all images is the same (same num of dims and channels)
         for i, img in enumerate(prep_imgs):
             if img.ndim != prep_imgs[0].ndim:
-                raise ValueError(f'Image {i} has different number of dimensions than the first image.')
+                raise ValueError(f'Image {i} has different number of dimensions to the first image.')
             if img.shape[0] != prep_imgs[0].shape[0]:
-                raise ValueError(f'Image {i} has different number of channels than the first image.')
+                raise ValueError(f'Image {i} has different number of channels to the first image.')
 
         # If we want coordinates, create a coordinates img for each image in data
         if get_coords:
@@ -1356,21 +1425,32 @@ class ConvpaintModel:
         """
         num_dims = img.ndim
         if num_dims == 2:
+            if self._param.multi_channel_img:
+                warnings.warn('Image has only 2 dimensions, but multi_channel_img is True. ' +
+                              'Assuming that the image is a single channel image.')
             # Add a channels and a z dimension
             img = np.expand_dims(img, axis=0)
             img = np.expand_dims(img, axis=0)
         elif num_dims == 3:
-            if self._param.multi_channel_img or self._param.rgb_img:
+            if self._param.multi_channel_img:
                 # Add a z dimension at the second position
                 img = np.expand_dims(img, axis=1)
             else:
                 # Add a channels dimension at the first position
                 img = np.expand_dims(img, axis=0)
         elif num_dims == 4:
-            # Data is already in [C, Z, H, W] format
-            pass
+            pass  # Image is already in [C, Z, H, W] format
         else:
             raise Exception('Image has wrong number of dimensions')
+        
+        # Check if there are 4 actual dimensions (> 1), and if so, make sure multi_channel_img is True
+        num_real_dims = np.sum(np.array(img.shape) > 1)
+        if num_real_dims == 4 and not self._param.multi_channel_img:
+            # Data must be in [C, Z, H, W] format
+            warnings.warn('Image has 4 dimensions, but multi_channel_img is False. ' +
+                          'Convpaint only works with 4D data as 3D multi-channel images with [C, Z, H, W]. ' +
+                          'Setting multi_channel_img to True.')
+            self._param.multi_channel_img = True
         
         if annotations is None:
             return img, None
@@ -1383,12 +1463,30 @@ class ConvpaintModel:
             # Annotations are already in [Z, H, W] format
             pass
         else:
-            raise Exception('Annotations have wrong number of dimensions')
-        
+            raise Exception(f'Annotations have wrong number of dimensions ({num_dims_annots})')
+
         if img.shape[1:] != annotations.shape:
-            raise Exception('Image and annotations have different dimensions')
+            raise Exception(f'Image and annotations have different dimensions: {img.shape[1:]} vs {annotations.shape}')
 
         return img, annotations
+    
+    def _check_in_channels(self, data, in_channels=None):
+        """
+        Check if the conditions for using the given in_channels are met, and raise an error if not.
+        """
+        if in_channels is None:
+            print("No in_channels given for _check_in_channels.")
+            return
+        
+        # In channels makes only sense on multi-channel images
+        if not (self._param.multi_channel_img):
+            raise ValueError("in_channels can only be used if multi_channel_img is True in the model parameters. " +
+                                "Please either remove in_channels or make sure multi_channel_img is being set to True.")
+
+        # Check that all in_channels are valid channel indices
+        channels_in_data = data[0].shape[0] if isinstance(data, list) else data.shape[0]
+        if not all(0 <= ch < channels_in_data for ch in in_channels):
+            raise ValueError("All in_channels must be valid channel indices. Please adjust in_channels to be within the range of channels in the data.")
     
     def _norm_single_image(self, img):
         """
@@ -1490,7 +1588,7 @@ class ConvpaintModel:
         outputs_image = outputs_image[..., padding:-padding, padding:-padding]
 
         # Then resize to original shape
-        if self._param.image_downsample > 1:
+        if self._param.image_downsample not in (-1, 0, 1):
             if class_preds:
                 outputs_image = conv_paint_utils.rescale_class_labels(
                     outputs_image, output_shape=(orig_z, orig_h, orig_w))
@@ -1525,7 +1623,7 @@ class ConvpaintModel:
         """
         is_2d = len(original_shape) == 2
         is_3d = len(original_shape) == 3
-        is_3d_multi = is_3d and (self._param.multi_channel_img or self._param.rgb_img)
+        is_3d_multi = is_3d and (self._param.multi_channel_img)
         # if is 2d or 3D with multiple channels (including RGB), we remove the z dimension
         if is_2d or is_3d_multi:
             if pred.shape[-3] != 1:

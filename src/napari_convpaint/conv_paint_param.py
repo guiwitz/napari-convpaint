@@ -16,8 +16,6 @@ class Param:
             path to the classifier model
         multi_channel_img : bool = None
             interpret the first dimension as channels
-        rgb_img : bool
-            used to signal to the model that the image is RGB
         normalize : int
             normalization mode
             1: no normalization, 2: normalize stack, 3: normalize each image
@@ -30,8 +28,6 @@ class Param:
             if True, extract only features of bounding boxes around annotated areas
         tile_image : bool
             if True, extract features in tiles (for large images)
-        use_dask : bool
-            if True, use dask for parallel processing of tiles
         fe_name : str
             name of the feature extractor model
         fe_layers : list[str]
@@ -56,12 +52,11 @@ class Param:
     """
     classifier: str = None
 
-    # Image processing parameters
+    # Image type parameters
     multi_channel_img: bool = None # Interpret the first dimension as channels
-    rgb_img: bool = None # Used to signal to the model that the image is RGB
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
 
-    # Acceleration parameters
+    # Input and output parameters
     image_downsample: int = None
     seg_smoothening: int = None
     tile_annotations: bool = None
