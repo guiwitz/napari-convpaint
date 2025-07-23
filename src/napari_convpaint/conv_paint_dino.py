@@ -36,7 +36,7 @@ class DinoFeatures(FeatureExtractor):
 
         # Set model to evaluation mode and move it to the correct device
         model.eval()
-        model.to(get_device(use_cuda))
+        model = model.to(get_device(use_cuda))
 
         return model
 

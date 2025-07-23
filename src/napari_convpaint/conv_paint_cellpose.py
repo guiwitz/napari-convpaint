@@ -45,6 +45,7 @@ class CellposeFeatures(FeatureExtractor):
 
         image_expanded = np.expand_dims(image, axis=0)
         tensor = torch.from_numpy(image_expanded).float()
+        tensor = tensor.to(self.device)
 
         if self.model.mkldnn:
             tensor = tensor.to_mkldnn()
