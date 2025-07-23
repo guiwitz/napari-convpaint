@@ -1544,6 +1544,12 @@ class ConvpaintModel:
         if not (self._param.multi_channel_img):
             raise ValueError("in_channels can only be used if multi_channel_img is True in the model parameters. " +
                                 "Please either remove in_channels or make sure multi_channel_img is being set to True.")
+        
+        # Check that in_channels is a list of integers
+        if not isinstance(in_channels, list):
+            raise ValueError("in_channels must be a list of integers. Please provide a list of channel indices to use.")
+        if not all(isinstance(ch, int) for ch in in_channels):
+            raise ValueError("in_channels must be a list of integers. Please provide a list of channel indices to use.")
 
         # Check that all in_channels are valid channel indices
         channels_in_data = data[0].shape[0] if isinstance(data, list) else data.shape[0]
