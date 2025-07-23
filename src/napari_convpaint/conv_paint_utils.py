@@ -585,8 +585,30 @@ def get_device(use_cuda=None):
         elif torch.backends.mps.is_available(): #check if mps is available
             return torch.device('mps')
         else:
-            warnings.warn('CUDA or MPS is not available. Using CPU for feature extraction.')
+            warnings.warn('CUDA or MPS is not available. Setting device to CPU.')
     return torch.device('cpu')
+
+def get_device_from_torch_model(model):
+    """
+    Get the device from a PyTorch model.
+    
+    Parameters:
+    ----------
+    model : torch.nn.Module
+        The PyTorch model to get the device from.
+
+    Returns:
+        ----------
+        device : torch.device
+            The device the model is on.
+    """
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        try:
+            return next(model.buffers()).device
+        except StopIteration:
+            return torch.device("unknown")
 
 def get_catboost_device(use_cuda=None):
     """

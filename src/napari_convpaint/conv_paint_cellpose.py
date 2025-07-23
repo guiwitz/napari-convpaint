@@ -16,10 +16,7 @@ class CellposeFeatures(FeatureExtractor):
         super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
         self.patch_size = 8
 
-        if use_cuda: # This is just to check and register the device used (the setting is done when creating the model)
-            self.device = get_device()
-        else:
-            self.device = 'cpu'
+        self.device = self.model.net.device if model is not None else None
 
     @staticmethod
     def create_model(model_name, use_cuda=False):

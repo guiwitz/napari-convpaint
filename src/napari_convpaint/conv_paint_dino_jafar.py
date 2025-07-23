@@ -5,17 +5,14 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 from IPython.display import clear_output
-from .conv_paint_utils import get_device
+from .conv_paint_utils import get_device, get_device_from_torch_model
 from .conv_paint_feature_extractor import FeatureExtractor
 from typing import List, Tuple
 import copy
 from pathlib import Path
 from napari_convpaint.jafar.layers import PretrainedViTWrapper, JAFAR
 
-
-
 AVAILABLE_MODELS = ["vit_small_patch14_reg4_dinov2"]
-
 
 class DinoJafarFeatures(FeatureExtractor):
     """
@@ -38,12 +35,9 @@ class DinoJafarFeatures(FeatureExtractor):
         self.padding    = 0           # model-internal extra pad (none)
         self.num_input_channels = [3] # RGB
 
-        self.device = get_device(use_cuda)
-        # Parent .create_model() returned tuple (hr_head, backbone) in self.model
+        # Parent .create_model() saves tuple (hr_head, backbone) in self.model
         self.model, self.backbone = self.model
-        self.backbone = self.backbone.to(self.device).eval()
-        self.model    = self.model.to(self.device).eval()
-
+        self.device = get_device_from_torch_model(self.model)
 
     # ------------------------------------------------------------------ #
     # Load JAFAR upscaler and DINOv2 backbone
@@ -54,7 +48,7 @@ class DinoJafarFeatures(FeatureExtractor):
         Load backbone and JAFAR model head without Hydra, from .pth checkpoints.
         """
 
-        device = torch.device("cuda" if use_cuda and torch.cuda.is_available() else "cpu")
+        device = get_device(use_cuda)
         head_file = "vit_small_patch14_reg4_dinov2.pth"
 
         project_root = Path().resolve().parents[0]

@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device, scale_img, guided_model_download
+from .conv_paint_utils import get_device, get_device_from_torch_model, scale_img, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
@@ -15,9 +15,8 @@ class DinoFeatures(FeatureExtractor):
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
         self.num_input_channels = [3]
 
-        self.device = get_device(use_cuda)
-        self.model = self.model.to(self.device)
-        self.model.eval()
+        # Register the device of the created model
+        self.device = get_device_from_torch_model(self.model)
 
     @staticmethod
     def create_model(model_name, use_cuda=False):
@@ -34,6 +33,11 @@ class DinoFeatures(FeatureExtractor):
         _ = guided_model_download(model_file, model_url)
 
         model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False)
+
+        # Set model to evaluation mode and move it to the correct device
+        model.eval()
+        model.to(get_device(use_cuda))
+
         return model
 
     def get_description(self):

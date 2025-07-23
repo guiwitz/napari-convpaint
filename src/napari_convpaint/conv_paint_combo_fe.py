@@ -53,19 +53,19 @@ class ComboFeatures(FeatureExtractor):
     def __init__(self, model_name='combo_dino_vgg', use_cuda=False):
         
         # Sets self.model_name and self.use_cuda and creates the model
-        super().__init__(model_name=model_name, use_cuda=use_cuda)
-        
+        # Use "use_cuda=False" to force CPU mode; and move them manually below
+        super().__init__(model_name=model_name, use_cuda=False)
+
         self.model1, self.model2 = self.model
         self.feature_extraction = False
 
+        # Move all models to the device manually to ensure they are all on the same...
+        self.use_cuda = use_cuda
+        self.device = get_device(use_cuda)
         for fe in self.model:
             if fe.model is None:
                 continue
-            if use_cuda:
-                self.device = get_device()
-                fe.model.to(self.device)
-            else:
-                self.device = 'cpu'
+            fe.model.to(self.device)
             fe.model.eval()
 
     @staticmethod

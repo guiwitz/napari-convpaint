@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn.functional import interpolate as torch_interpolate
 from torchvision import models
-from .conv_paint_utils import get_device, scale_img, guided_model_download
+from .conv_paint_utils import get_device, get_device_from_torch_model, scale_img, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 
 
@@ -40,10 +40,8 @@ class Hookmodel(FeatureExtractor):
         
         super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
 
-        # SET DEVICE
-        self.device = get_device(use_cuda)
-        self.model = self.model.to(self.device)
-        self.model.eval()
+        # REGISTER DEVICE OF THE MODEL
+        self.device = get_device_from_torch_model(self.model)
 
         # INITIALIZATION OF LAYER HOOKS
         self.update_layer_dict()
@@ -63,9 +61,6 @@ class Hookmodel(FeatureExtractor):
             model_url = f'https://download.pytorch.org/models/{model_file}'
             model_path = guided_model_download(model_file, model_url)
             model = models.vgg16()
-            state_dict = torch.load(model_path, weights_only=True)
-            model.load_state_dict(state_dict)
-            return model
 
         # CREATE EFFICIENTNETB0 MODEL
         elif model_name == 'efficient_netb0':
@@ -73,9 +68,6 @@ class Hookmodel(FeatureExtractor):
             model_url = f'https://download.pytorch.org/models/{model_file}'
             model_path = guided_model_download(model_file, model_url)
             model = models.efficientnet_b0()
-            state_dict = torch.load(model_path, weights_only=True)
-            model.load_state_dict(state_dict)
-            return model
         
         # CREATE ConvNeXt MODEL
         elif model_name == 'convnext':
@@ -83,12 +75,19 @@ class Hookmodel(FeatureExtractor):
             model_url = f'https://download.pytorch.org/models/{model_file}'
             model_path = guided_model_download(model_file, model_url)
             model = models.convnext_base()
-            state_dict = torch.load(model_path, weights_only=True)
-            model.load_state_dict(state_dict)
-            return model
         
         else:
             raise ValueError(f"Model {model_name} is not supported. Available models: {AVAILABLE_MODELS}")
+
+        # Load the model's state_dict
+        state_dict = torch.load(model_path, weights_only=True)
+        model.load_state_dict(state_dict)
+        
+        # Set model to evaluation mode and move it to the correct device
+        model.eval()
+        model.to(get_device(use_cuda))
+
+        return model
 
     def get_description(self):
         if self.model_name == 'vgg16':
