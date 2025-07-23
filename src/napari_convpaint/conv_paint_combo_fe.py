@@ -66,9 +66,9 @@ class ComboFeatures(FeatureExtractor):
             if fe.model is None:
                 continue
             fe.model = fe.model.to(self.device)
+            fe.model.eval()
             fe.device = self.device
             fe.use_cuda = self.use_cuda
-            fe.model.eval()
 
     @staticmethod
     def create_model(model_name, use_cuda=False):

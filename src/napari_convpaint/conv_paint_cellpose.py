@@ -16,7 +16,7 @@ class CellposeFeatures(FeatureExtractor):
         super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
         self.patch_size = 8
 
-        self.device = self.model.net.device if model is not None else None
+        self.device = self.model.device if self.model is not None else None
 
     @staticmethod
     def create_model(model_name, use_cuda=False):
@@ -68,7 +68,9 @@ class CellposeFeatures(FeatureExtractor):
         out_t = []
         #append the output tensors from T0
         for t in T0[:3]:
-            t = t.detach().numpy()[0]
+            # Put to cpu, detach, and convert to numpy
+            t = t.detach().cpu().numpy()[0]
+            # Resize if necessary
             f,w,h = t.shape[-3:]
             if (w,h != w_img,h_img):
                 t = skimage.transform.resize(
@@ -78,7 +80,7 @@ class CellposeFeatures(FeatureExtractor):
             out_t.append(t)
 
         #append the output tensor from T1 (gradients and cell probability)
-        t = T1.detach().numpy()[0]
+        t = T1.detach().cpu().numpy()[0]
         f,w,h = t.shape[-3:]
         if (w,h != w_img,h_img):
             t = skimage.transform.resize(
