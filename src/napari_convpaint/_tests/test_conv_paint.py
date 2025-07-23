@@ -6,17 +6,21 @@ from PIL import Image
 import napari
 
 def compute_precision_recall(ground_truth, recovered):
+
     all_precision = []
     all_recall = []
+
     for class_val in np.unique(ground_truth):
             tp = np.sum((recovered == class_val) & (ground_truth == class_val))
             fp = np.sum((recovered == class_val) & (ground_truth != class_val))
             fn = np.sum((recovered != class_val) & (ground_truth == class_val))
             tn = np.sum((recovered != class_val) & (ground_truth != class_val))
-            precision = tp / (tp + fp)
-            recall = tp / (tp + fn)
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
             all_precision.append(precision)
             all_recall.append(recall)
+
     return np.mean(all_precision), np.mean(all_recall)
 
     # tp = np.sum((recovered==2) & (ground_truth==2))# / np.sum(ground_truth == 1)
