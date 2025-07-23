@@ -83,6 +83,9 @@ venv/
 # written by setuptools_scm
 **/_version.py
 
+# model weights
+src/napari_convpaint/jafar/checkpoints/*.pth
+
 # additional
 /test_out*/
 **/_tests/model_dir
