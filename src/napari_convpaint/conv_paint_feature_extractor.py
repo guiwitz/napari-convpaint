@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from .conv_paint_param import Param
-from .conv_paint_utils import scale_img, rescale_features, reduce_to_patch_multiple
+from .conv_paint_utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape
 
 class FeatureExtractor:
     def __init__(self, model_name="vgg16", model=None, use_cuda=None, **kwargs):
@@ -221,7 +221,9 @@ class FeatureExtractor:
 
             # Make sure the downscaled part is a multiple of the patch size
             patch_size = self.get_patch_size()
+            pre_reduction_shape  = image_scaled.shape
             image_scaled = reduce_to_patch_multiple(image_scaled, patch_size)
+            reduced_shape = image_scaled.shape
 
             # Extract features as list for different channel_series (and layers if applicable)
             # Each element is [nb_features, z, w, h]
@@ -238,6 +240,19 @@ class FeatureExtractor:
                                 int(data.shape[2]/self.get_patch_size()),
                                 int(data.shape[3]/self.get_patch_size()))
             else:
+                # When not patched, but patch_size > 1, we handle possible cropping due to reduce_to_patch_multiple
+                if patch_size > 1 and reduced_shape[2:] != pre_reduction_shape[2:] :
+                    # Step 1: rescale to the reduced (cropped to patch multiple) shape
+                    features = [rescale_features(
+                                    feature_img=f,
+                                    target_shape=reduced_shape,
+                                    order=param.fe_order)
+                                for f in features]
+
+                    # Step 2: pad back to original pre_reduction_shape (but still downscaled)
+                    features = [pad_to_shape(f, pre_reduction_shape[2:] ) for f in features]
+
+                # Step 3: finally rescale to the full original shape
                 target_shape = data.shape
 
             features = [rescale_features(

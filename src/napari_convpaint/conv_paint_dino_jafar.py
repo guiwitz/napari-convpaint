@@ -88,18 +88,20 @@ class DinoJafarFeatures(FeatureExtractor):
                 "Patch size 14, overlap blending, CPU-accumulated HR features.")
 
     def get_default_params(self, param=None):
-        p = super().get_default_params(param)
-        p.fe_scalings = [1,8,14]
-        p.fe_order = 0
-        p.tile_image = False
-        p.tile_annotations = False
-        return p
+        param = super().get_default_params(param)
+        param.fe_scalings = [1,8,14]
+        param.fe_order = 0
+        param.tile_image = False
+        param.tile_annotations = False
+        return param
 
     def get_enforced_params(self, param=None):
-        p = super().get_enforced_params(param)
-        #if not p.fe_scalings:
-            #p.fe_scalings = [4]
-        return p
+        self.jafar_scalings = param.fe_scalings
+        param = super().get_enforced_params(param)
+        param.fe_scalings = [1]
+        #if not param.fe_scalings:
+            #param.fe_scalings = [4]
+        return param
 
     # ------------------------------------------------------------------ #
     # Public extraction entry points
@@ -126,62 +128,6 @@ class DinoJafarFeatures(FeatureExtractor):
             overlap_tokens=overlap_tokens,
         )
         return hr[0].cpu().numpy()  # [C,H,W]
-
-    def get_feature_pyramid(self, stack, param, patched=True):
-        """
-        Multi-scale pyramid without downsampling input; we instead vary the
-        *requested output resolution per patch* inside JAFAR and then
-        upsample coarse outputs back to full pixel resolution so all scales
-        align and can be concatenated channel-wise.
-
-        data: np.ndarray [3,Z,H,W]
-        returns: np.ndarray [F_total, Z, H, W]
-        """
-        # Get the number of channels the model expects (e.g., RGB = 3)
-        input_channels = self.get_num_input_channels()
-
-        # If the image has one the number of channels the model expects, use it directly
-        if stack.shape[0] in input_channels:
-            channel_series = [stack]
-        else:
-            # For each channel, create a replicate with the needed number of input channels
-            input_channels = min(input_channels)
-            channel_series = [np.tile(ch, (input_channels, 1, 1, 1)) for ch in stack]
-
-        # Get outputs for each channel_series
-        features_all_channels = []
-
-
-        for data in channel_series:
-            assert data.ndim == 4 and data.shape[0] == 3, "Expected data [3,Z,H,W]"
-            _, Z, H, W = data.shape
-            self._assert_multiples(H, W)
-            scales = param.fe_scalings if (param and param.fe_scalings) else [1]
-            scales = sorted({int(s) for s in scales if int(s) >= 1}) or [1]
-
-            patch_px, overlap_tokens = self._choose_patch_params(H, W, desired_patch_px=self.patch_size * 32, overlap_tokens=2)
-
-            feats_per_z = []
-            for z in range(Z):
-                plane = torch.tensor(data[:, z][None], dtype=torch.float32, device=self.device)  # [1,3,H,W]
-                plane = self._imagenet_normalize(plane)
-
-                hr_cat = self._extract_patched_multiscale(
-                    image_batch=plane,
-                    backbone=self.backbone,
-                    hr_head=self.model,
-                    patch_px=patch_px,
-                    overlap_tokens=overlap_tokens,
-                    scales=scales,
-                )  # (1, C_total, H, W) CPU
-                feats_per_z.append(hr_cat[0].cpu().numpy())
-            features = np.stack(feats_per_z, axis=1)  # [F_total, Z, H, W]
-
-            features_all_channels.append(features)
-        #concat along first axis 
-        features_all_channels = np.concatenate(features_all_channels, axis=0)  # [F_total, C, Z, H, W]
-        print(f"Extracted features shape: {features_all_channels.shape}")
-        return features_all_channels
 
     # ------------------------------------------------------------------ #
     # Helpers

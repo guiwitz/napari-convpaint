@@ -303,6 +303,7 @@ def reduce_to_patch_multiple(input, patch_size):
     """
     Reduces the input to the patch size multiple.
     Assumes that the input has spatial dimensions in last two dimensions.
+    In cases of uneven patch size, the bottom and right crops will be 1 pixel larger than top and left, respectively.
 
     Parameters:
     ----------
@@ -318,8 +319,6 @@ def reduce_to_patch_multiple(input, patch_size):
     """
     if patch_size == 1:
         return input
-    # Get the patch size from the feature extractor model
-    patch_size = patch_size
     # Get spatial dimensions
     h, w = input.shape[-2:]
     # What is the next smaller multiple of the patch size?
@@ -331,10 +330,10 @@ def reduce_to_patch_multiple(input, patch_size):
     # Otherwise, reduce the input to the patch size multiple
     h_crop_top = (h - new_h)//2
     w_crop_left = (w - new_w)//2
-    h_crop_bottom = h - new_h - h_crop_top
-    # Make sure we can also handle crops of size 0
+    h_crop_bottom = h - new_h - h_crop_top # in uneven cases, bottom crop will be 1 larger than top crop
+    w_crop_right = w - new_w - w_crop_left # in uneven cases, right crop will be 1 larger than left crop
+    # Transform bottom and right crop for slicing; also make sure we can handle crops of size 0
     h_idx_bottom = -h_crop_bottom if h_crop_bottom > 0 else None
-    w_crop_right = w - new_w - w_crop_left
     w_idx_right = -w_crop_right if w_crop_right > 0 else None
     input = input[..., h_crop_top:h_idx_bottom, w_crop_left:w_idx_right]
     return input
@@ -372,6 +371,76 @@ def pad(img, padding, input_type='img'):
     elif input_type == 'coords':
         # For coordinates, use 'constant' padding with -1
         return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='constant', constant_values=-1)
+    
+def pad_to_shape(feat, target_shape):
+    """
+    Pads the spatial dimensions (last two) of `feat` symmetrically to match `target_shape`.
+    In case of an odd number of pixels to add, bottom and right receive 1 more pixel than top and left.
+
+    This convention ensures alignment with reductions like `reduce_to_patch_multiple()`,
+    which crop more from bottom and right. Using this padding ensures spatial consistency
+    for later reconstruction or upsampling steps.
+
+    Parameters
+    ----------
+    feat : np.ndarray
+        Input array with spatial dimensions in the last two axes.
+    target_shape : tuple
+        Desired shape for the last two dimensions: (..., H_target, W_target)
+
+    Returns
+    -------
+    np.ndarray
+        Padded array matching the target shape.
+    """
+    pad = [(0, 0), (0, 0)]  # batch and channel dims
+    for i in range(2):  # spatial dims (height, width)
+        current = feat.shape[2 + i]
+        target = target_shape[i]
+        diff = max(target - current, 0)
+        pad_before = diff // 2
+        pad_after = diff - pad_before  # ensures bottom/right get the extra pixel if diff is odd
+        pad.append((pad_before, pad_after))
+    return np.pad(feat, pad, mode='constant')
+
+
+def crop_to_shape(arr, target_shape):
+    """
+    Crops the spatial dimensions (last two) of `arr` symmetrically to match `target_shape`.
+    In case of odd number of pixels to remove, top and left crops are 1 larger than bottom and right
+    to reverse a prior reduction that removed more from bottom/right (from reduce_to_patch_multiple).
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array with spatial dimensions in the last two axes.
+    target_shape : tuple
+        Desired shape for the last two dimensions: (..., H_target, W_target)
+
+    Returns
+    -------
+    np.ndarray
+        Cropped array matching the target shape.
+    """
+    current_h, current_w = arr.shape[-2:]
+    target_h, target_w = target_shape[-2:]
+
+    assert target_h <= current_h and target_w <= current_w, \
+        f"Target shape {target_shape[-2:]} must be <= current shape {arr.shape[-2:]}"
+
+    crop_h = current_h - target_h
+    crop_w = current_w - target_w
+
+    crop_top = (crop_h + 1) // 2  # top gets more when odd
+    crop_bottom = crop_h - crop_top
+    crop_left = (crop_w + 1) // 2  # left gets more when odd
+    crop_right = crop_w - crop_left
+
+    h_end = -crop_bottom if crop_bottom > 0 else None
+    w_end = -crop_right if crop_right > 0 else None
+
+    return arr[..., crop_top:h_end, crop_left:w_end]
+
 
 def get_annot_planes(img, annot=None, coords=None):
     """
