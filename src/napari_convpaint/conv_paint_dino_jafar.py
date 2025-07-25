@@ -120,14 +120,15 @@ class DinoJafarFeatures(FeatureExtractor):
 
         patch_px, overlap_tokens = self._choose_patch_params(H, W, desired_patch_px=self.patch_size * 32, overlap_tokens=2)
 
-        hr, _ = self._extract_patched(
-            image_batch=img,
-            backbone=self.backbone,
-            hr_head=self.model,
-            patch_px=patch_px,
-            overlap_tokens=overlap_tokens,
-        )
-        return hr[0].cpu().numpy()  # [C,H,W]
+        hr_cat = self._extract_patched_multiscale(
+                    image_batch=img,
+                    backbone=self.backbone,
+                    hr_head=self.model,
+                    patch_px=patch_px,
+                    overlap_tokens=overlap_tokens,
+                    scales=self.jafar_scalings,
+                )  # (1, C_total, H, W) CPU
+        return hr_cat[0].cpu().numpy()  # [C,H,W]
 
     # ------------------------------------------------------------------ #
     # Helpers
