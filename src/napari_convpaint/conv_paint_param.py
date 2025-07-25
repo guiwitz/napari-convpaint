@@ -32,7 +32,7 @@ class Param:
             name of the feature extractor model
         fe_layers : list[str]
             list of layers (names) to extract features from
-        fe_use_cuda : bool
+        fe_use_gpu : bool
             whether to use cuda (GPU) for feature extraction
         fe_scalings : list[int]
             list of scaling factors for the feature extractor, creating a pyramid of features
@@ -65,7 +65,7 @@ class Param:
 
     # Feature Extractor parameters
     fe_name: str = None
-    fe_use_cuda: bool = None
+    fe_use_gpu: bool = None
     fe_layers: list[str] = None
     fe_scalings: list[int] = None
     fe_order: int = None
@@ -75,7 +75,7 @@ class Param:
     clf_iterations: int = None
     clf_learning_rate: float = None
     clf_depth: int = None
-    clf_use_gpu: bool = None # NOTE: If this is None, fe_use_cuda is used...
+    clf_use_gpu: bool = None # NOTE: If this is None, fe_use_gpu is used...
     
     def get(self, key):
         """

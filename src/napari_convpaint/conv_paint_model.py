@@ -42,7 +42,7 @@ class ConvpaintModel:
         Param object with the model parameters, by default None
     fe_name : str, optional
         Name of the feature extractor model, by default None
-    fe_use_cuda : bool, optional
+    fe_use_gpu : bool, optional
         Whether to use CUDA for the feature extractor (if initialized by name), by default None
     fe_layers : list[str], optional
         List of layer names to extract features from (if initialized by name), by default None
@@ -72,7 +72,7 @@ class ConvpaintModel:
                   "dino-jafar": Param(fe_name="vit_small_patch14_reg4_dinov2"),
                   }
 
-    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_use_cuda=None, fe_layers=None, **kwargs):
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_use_gpu=None, fe_layers=None, **kwargs):
         """
         Initializes the Convpaint model by loading the specified model, parameters, or feature extractor.
 
@@ -97,7 +97,7 @@ class ConvpaintModel:
             Param object containing model parameters, by default None.
         fe_name : str, optional
             Name of the feature extractor model, by default None.
-        fe_use_cuda : bool, optional
+        fe_use_gpu : bool, optional
             Whether to use CUDA for the feature extractor, by default None.
         fe_layers : list[str], optional
             List of layers to extract features from, by default None.
@@ -122,7 +122,7 @@ class ConvpaintModel:
                                         #   'tile_image',
                                         #   'use_dask',
                                           'fe_name',
-                                        #   'fe_use_cuda',
+                                        #   'fe_use_gpu',
                                           'fe_layers',
                                           'fe_scalings',
                                           'fe_order',
@@ -140,7 +140,7 @@ class ConvpaintModel:
                                     #  'tile_image',
                                     #  'use_dask',
                                      'fe_name',
-                                    #  'fe_use_cuda',
+                                    #  'fe_use_gpu',
                                      'fe_layers',
                                      'fe_scalings',
                                      'fe_order',
@@ -171,11 +171,11 @@ class ConvpaintModel:
         elif param is not None:
             self._load_param(param)
         elif fe_name is not None:
-            self._set_fe(fe_name, fe_use_cuda, fe_layers)
+            self._set_fe(fe_name, fe_use_gpu, fe_layers)
             self._param = self.get_fe_defaults()
             self.set_params(ignore_warnings=True, # Here at initiation, it is intended to set FE parameters...
                             fe_layers = fe_layers, # Overwrite the layers with the given layers
-                            fe_use_cuda = fe_use_cuda, # Overwrite the cuda usage with the given cuda usage
+                            fe_use_gpu = fe_use_gpu, # Overwrite the cuda usage with the given cuda usage
                             **kwargs) # Overwrite the parameters with the given parameters
         else:
             cpm_defaults = ConvpaintModel.get_default_params()
@@ -263,7 +263,7 @@ class ConvpaintModel:
         def_param.fe_layers = ['features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))']
         # def_param.fe_name = "convnext"
         # def_param.fe_layers = [0,1]
-        def_param.fe_use_cuda = False
+        def_param.fe_use_gpu = False
         def_param.fe_scalings = [1, 2, 4]
         def_param.fe_order = 0
         def_param.fe_use_min_features = False
@@ -340,8 +340,8 @@ class ConvpaintModel:
                 "The parameter was not changed. To do so, either first reset the classifier by calling the reset_classifier() method.\n"
                 "Or, if you are aware of the consequences, you can also change the parameter without resetting by setting ignore_warnings to True.")
             return
-        if key in ['fe_name', 'fe_use_cuda', 'fe_layers'] and not ignore_warnings:
-            warnings.warn("Setting the parameters fe_name, fe_use_cuda, or fe_layers is not intended. " +
+        if key in ['fe_name', 'fe_use_gpu', 'fe_layers'] and not ignore_warnings:
+            warnings.warn("Setting the parameters fe_name, fe_use_gpu, or fe_layers is not intended. " +
                 "You should create a new ConvpaintModel instead.\n" +
                 "If you are aware of the consequences, you can set ignore_warnings to True to change the parameter anyway.")
             return
@@ -352,7 +352,7 @@ class ConvpaintModel:
         """
         Sets the parameters, given either as a Param object or as keyword arguments.
         Note that the model is not reset and no new FE model is created.
-        If fe_name, fe_use_cuda, and fe_layers change, you should create a new ConvpaintModel.
+        If fe_name, fe_use_gpu, and fe_layers change, you should create a new ConvpaintModel.
 
         Parameters:
         ----------
@@ -431,7 +431,7 @@ class ConvpaintModel:
         with open(pkl_path, 'rb') as f:
             data = pickle.load(f)
         new_param = data['param']
-        self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self._set_fe(new_param.fe_name, new_param.fe_use_gpu, new_param.fe_layers)
         self._param = new_param.copy()
         self.classifier = data['classifier']
         # If there is a features table and an annotations dictionary, load them
@@ -449,7 +449,7 @@ class ConvpaintModel:
         Only intended for internal use at model initiation.
         """
         new_param = Param.load(yml_path)
-        self._set_fe(new_param.fe_name, new_param.fe_use_cuda, new_param.fe_layers)
+        self._set_fe(new_param.fe_name, new_param.fe_use_gpu, new_param.fe_layers)
         self._param = new_param
 
     def _load_param(self, param: Param):
@@ -457,14 +457,14 @@ class ConvpaintModel:
         Loads the given param object into the model and sets the model accordingly.
         Only intended for internal use at model initiation.
         """
-        self._set_fe(param.fe_name, param.fe_use_cuda, param.fe_layers)
+        self._set_fe(param.fe_name, param.fe_use_gpu, param.fe_layers)
         self._param = self.get_fe_defaults()
         self.set_params(ignore_warnings=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
 
 ### FE METHODS
 
-    def _set_fe(self, fe_name=None, fe_use_cuda=None, fe_layers=None):
+    def _set_fe(self, fe_name=None, fe_use_gpu=None, fe_layers=None):
         """
         Sets the model based on the given FE parameters.
         Creates new feature extracture, and resets the classifier.
@@ -477,19 +477,19 @@ class ConvpaintModel:
 
         # Check if we need to create a new FE model
         fe_name_changed = fe_name is not None and fe_name != self._param.get("fe_name")
-        fe_use_cuda_changed = fe_use_cuda is not None and fe_use_cuda != self._param.get("fe_use_cuda")
+        fe_use_gpu_changed = fe_use_gpu is not None and fe_use_gpu != self._param.get("fe_use_gpu")
         fe_layers_changed = fe_layers is not None and fe_layers != self._param.get("fe_layers")
 
         # Create the feature extractor model
-        if fe_name_changed or fe_use_cuda_changed or fe_layers_changed:
+        if fe_name_changed or fe_use_gpu_changed or fe_layers_changed:
             self.fe_model = ConvpaintModel.create_fe(
                 name=fe_name,
-                use_cuda=fe_use_cuda,
+                use_cuda=fe_use_gpu,
                 layers=fe_layers
             )
         
         # Set the parameters
-        self._param.set(fe_name=fe_name, fe_use_cuda=fe_use_cuda, fe_layers=fe_layers)
+        self._param.set(fe_name=fe_name, fe_use_gpu=fe_use_gpu, fe_layers=fe_layers)
 
     @staticmethod
     def create_fe(name, use_cuda=None, layers=None):
@@ -926,7 +926,7 @@ class ConvpaintModel:
         """
         if not use_rf:
             # NOTE: THIS, FOR NOW, ASSUMES THAT GPU SHALL BE USED FOR CLF IF CHOSEN FOR FE
-            use_gpu = self._param.clf_use_gpu if self._param.clf_use_gpu is not None else self._param.fe_use_cuda
+            use_gpu = self._param.clf_use_gpu if self._param.clf_use_gpu is not None else self._param.fe_use_gpu
             task_type = conv_paint_utils.get_catboost_device(use_gpu)
             self.classifier = CatBoostClassifier(iterations=self._param.clf_iterations,
                                                  learning_rate=self._param.clf_learning_rate,

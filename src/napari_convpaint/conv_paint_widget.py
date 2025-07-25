@@ -49,7 +49,7 @@ class ConvPaintWidget(QWidget):
         self.default_cp_param = ConvpaintModel.get_default_params()
         # Create a temporary FE model for display
         self.temp_fe_model = ConvpaintModel.create_fe(self.default_cp_param.fe_name,
-                                                      self.default_cp_param.fe_use_cuda)
+                                                      self.default_cp_param.fe_use_gpu)
         
         self.third_party = third_party
         self.selected_channel = None
@@ -1472,7 +1472,7 @@ class ConvPaintWidget(QWidget):
         self.cp_model = new_model
         self.cp_model._param = new_param
         self.temp_fe_model = ConvpaintModel.create_fe(new_param.fe_name,
-                                                      new_param.fe_use_cuda)
+                                                      new_param.fe_use_gpu)
 
         # Adjust trained flag, save button, predict buttons etc., and update model description
         self.trained = save_file.suffix == '.pkl' and new_model.classifier is not None
@@ -1627,7 +1627,7 @@ class ConvPaintWidget(QWidget):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         # Create a temporary model to get the layers (to display) and default parameters
         new_fe_type = self.qcombo_fe_type.currentText()
-        current_cuda = self.cp_model.get_param("fe_use_cuda")
+        current_cuda = self.cp_model.get_param("fe_use_gpu")
         self.temp_fe_model = ConvpaintModel.create_fe(new_fe_type,
                                                       current_cuda)
 
@@ -1643,7 +1643,7 @@ class ConvPaintWidget(QWidget):
             "fe_name": self.qcombo_fe_type.setCurrentText,
             "fe_order": self.spin_interpolation_order.setValue,
             "fe_use_min_features": self.check_use_min_features.setChecked,
-            "fe_use_cuda": self.check_use_cuda.setChecked
+            "fe_use_gpu": self.check_use_cuda.setChecked
         }
         for attr, setter in val_to_setter.items():
             val = getattr(fe_defaults, attr, None)
@@ -1675,7 +1675,7 @@ class ConvPaintWidget(QWidget):
         new_layers = self._get_selected_layer_names() # includes re-writing to keys
         new_param.set(fe_name = self.qcombo_fe_type.currentText(),
                       fe_layers = new_layers,
-                      fe_use_cuda = self.check_use_cuda.isChecked(),
+                      fe_use_gpu = self.check_use_cuda.isChecked(),
                       fe_scalings = self.fe_scaling_factors.currentData(),
                       fe_order = self.spin_interpolation_order.value(),
                       fe_use_min_features = self.check_use_min_features.isChecked())
@@ -2120,7 +2120,7 @@ class ConvPaintWidget(QWidget):
             "fe_name": self.qcombo_fe_type.setCurrentText,
             "fe_order": self.spin_interpolation_order.setValue,
             "fe_use_min_features": self.check_use_min_features.setChecked,
-            "fe_use_cuda": self.check_use_cuda.setChecked,
+            "fe_use_gpu": self.check_use_cuda.setChecked,
             "clf_iterations": self.spin_iterations.setValue,
             "clf_learning_rate": self.spin_learning_rate.setValue,
             "clf_depth": self.spin_depth.setValue
@@ -2197,7 +2197,7 @@ class ConvPaintWidget(QWidget):
         self.fe_scaling_factors.setCurrentText(str(self.default_cp_param.fe_scalings))
         self.spin_interpolation_order.setValue(self.default_cp_param.fe_order)
         self.check_use_min_features.setChecked(self.default_cp_param.fe_use_min_features)
-        self.check_use_cuda.setChecked(self.default_cp_param.fe_use_cuda)
+        self.check_use_cuda.setChecked(self.default_cp_param.fe_use_gpu)
         # Set default values in param object (by mimicking a click on the "Set FE" button)
         self._on_set_fe_model()
 

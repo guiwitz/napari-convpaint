@@ -89,7 +89,7 @@ class ComboFeatures(FeatureExtractor):
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
         param.fe_name = self.model_name
-        param.fe_use_cuda = self.use_cuda
+        param.fe_use_gpu = self.use_cuda
         param.fe_layers = [0]
         param.fe_scalings = [1]
         param.fe_order = 0

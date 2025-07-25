@@ -89,7 +89,7 @@ class FeatureExtractor:
             
         # FE params
         def_param.fe_name= self.model_name
-        def_param.fe_use_cuda = False
+        def_param.fe_use_gpu = False
         def_param.fe_scalings = [1]
         def_param.fe_order = 0
         def_param.fe_use_min_features = False
