@@ -155,8 +155,11 @@ class ConvpaintModel:
         if not ConvpaintModel.FE_MODELS_TYPES_DICT:
             ConvpaintModel._init_fe_models_dict()
 
-        if (alias is not None) + (model_path is not None) + (param is not None) + (fe_name is not None) > 1:
-            raise ValueError('Please provide either an alias, a model path, a param object, or a model name but not multiples.')
+        num_kwargs_given = sum([x is not None for x in [fe_name, fe_use_gpu, fe_layers]]) + len(kwargs)
+        if (alias is not None) + (model_path is not None) + (param is not None) + num_kwargs_given > 1:
+            raise ValueError('Please provide either an alias, a model path, a param object, or ' +
+                             'kwargs describing the model (giving at least a feature extractor name) but not multiples.\n' +
+                             'You can still set parameters later using the set_params() method.')
 
         # If an alias is given, create an according model
         if alias is not None:
