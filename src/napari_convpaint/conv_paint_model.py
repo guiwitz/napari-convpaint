@@ -796,26 +796,6 @@ class ConvpaintModel:
             coords = [None for _ in data]  # No coordinates if not in memory mode
         # print("Annotations after padding:", len(annotations), "annot of shape", annotations[0].shape, "with values", [np.unique(a[0]) for a in annotations])
 
-        # Extract annotated planes and flatten them (treating as individual images)
-        if use_annots:
-            planes = [conv_paint_utils.get_annot_planes(d, a, c) for d, a, c in zip(data, annotations, coords)]
-            data = [plane for plane_tuple in planes for plane in plane_tuple[0]]
-            annotations = [plane for plane_tuple in planes for plane in plane_tuple[1]]
-        if memory_mode:
-            coords = [plane for plane_tuple in planes for plane in plane_tuple[2]]
-            # If img_ids are given, flatten them as well (corresponding id for each plane)
-            if img_ids is not None:
-                img_ids = [img_ids[i] for i, plane_tuple in enumerate(planes) for _ in range(len(plane_tuple[0]))]
-            else:
-                img_ids = [None] * len(data)
-            # print("Extracted annotated planes shapes:")
-            # print(data[0].shape, coords[0].shape)
-            # print(coords[0][:, 0, 20, 20])
-            # print(img_ids)
-        else:
-            coords = [None for _ in data]
-        # print("Annotations after extraction:", len(annotations), "annot of shape", annotations[0].shape, "with values", [np.unique(a[0]) for a in annotations])
-
         # --- Annotation plane extraction -----------------------------------------
         # Note: annotated planes are flattened (treating them as individual images)
         if use_annots:
