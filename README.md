@@ -95,7 +95,7 @@ The idea behind this napari plugin was first developed by [Lucien Hinderling](ht
 
 ## Cite Convpaint
 
-If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used in Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/) or [DINOv2](https://github.com/facebookresearch/dinov2).
+If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used in Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/), [DINOv2](https://github.com/facebookresearch/dinov2) or [JAFAR](https://github.com/PaulCouairon/JAFAR).
 
 Convpaint:
 ```
@@ -145,4 +145,15 @@ Suggested citations for feature extractors:
       url={https://arxiv.org/abs/2304.07193}
 }
 
+```
+```
+@misc{couairon2025jafar,
+      title={JAFAR: Jack up Any Feature at Any Resolution}, 
+      author={Paul Couairon and Loick Chambon and Louis Serrano and Jean-Emmanuel Haugeard and Matthieu Cord and Nicolas Thome},
+      year={2025},
+      eprint={2506.11136},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2506.11136}, 
+}
 ```
