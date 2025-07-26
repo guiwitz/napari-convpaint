@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 from IPython.display import clear_output
-from .conv_paint_utils import get_device, get_device_from_torch_model
+from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 from typing import List, Tuple
 import copy
@@ -45,20 +45,26 @@ class DinoJafarFeatures(FeatureExtractor):
     @staticmethod
     def create_model(model_name="vit_small_patch14_reg4_dinov2", use_cuda=False):
         """
-        Load backbone and JAFAR model head without Hydra, from .pth checkpoints.
+        Load DINOv2 backbone and JAFAR model head from remote .pth checkpoints using guided download.
         """
 
         device = get_device(use_cuda)
-        head_file = "vit_small_patch14_reg4_dinov2.pth"
 
-        project_root = Path().resolve().parents[0]
-        print(f"Project root: {project_root}")
-        ckpt_root = project_root / "napari-convpaint" / "src" / "napari_convpaint" / "jafar" / "checkpoints"
+        # Define filenames
+        backbone_file = "dinov2_vits14_reg4_pretrain.pth"
+        backbone_url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/" + backbone_file
 
-        # 1. Load backbone
+        jafar_file = "vit_small_patch14_reg4_dinov2.pth"
+        jafar_url = "https://github.com/PaulCouairon/JAFAR/releases/download/Weights/" + jafar_file
+
+        # Download checkpoints
+        _ = guided_model_download(backbone_file, backbone_url) # Just make sure the backbone is downloaded
+        jafar_ckpt = guided_model_download(jafar_file, jafar_url)
+
+        # --- Load backbone ---
         backbone = PretrainedViTWrapper(name=model_name).to(device)
 
-        # 2. Instantiate JAFAR head
+        # --- Instantiate JAFAR head ---
         model = JAFAR(
             input_dim=3,
             qk_dim=128,
@@ -69,9 +75,8 @@ class DinoJafarFeatures(FeatureExtractor):
             name="jafar"
         ).to(device)
 
-        # 3. Load JAFAR head weights
-        model_ckpt = ckpt_root / head_file
-        state = torch.load(model_ckpt, map_location=device,weights_only=False)
+        # --- Load JAFAR weights ---
+        state = torch.load(jafar_ckpt, map_location=device, weights_only=False)
         model.load_state_dict(state.get("jafar", state))
 
         return model.eval(), backbone.eval()
