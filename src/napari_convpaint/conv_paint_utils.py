@@ -1,7 +1,6 @@
 import warnings
 import torch
 import numpy as np
-from scipy.stats import mode
 from scipy.ndimage import gaussian_filter
 # from scipy.ndimage import median_filter
 import skimage.transform
@@ -701,6 +700,54 @@ def get_catboost_device(use_cuda=None):
             warnings.warn('CUDA is not available. Using CPU for CatBoost.')
     return 'CPU'
 
+def normalize_image_percentile(image: np.ndarray) -> np.ndarray:
+    """
+    Linearly rescale image intensities so that, per-channel,
+    the 1st percentile → 0.0 and the 99th percentile → 1.0.
+
+    Any values below the 1st percentile become 0.0; above the 99th
+    become 1.0.
+
+    Parameters:
+    ----------
+    image: np.ndarray with 2-4 dims.
+        - 2D: treated as single-channel.
+        - 3D or 4D: first axis is channels.
+
+    Returns:
+    ----------
+    np.ndarray, dtype float32, same shape as input.
+
+    Raises:
+    ----------
+    ValueError: if input.ndim not in [2,4].
+    """
+    if image.ndim < 2 or image.ndim > 4:
+        raise ValueError(f"Image must have 2-4 dimensions (got {image.ndim})")
+
+    # Prepare output
+    out = np.empty_like(image, dtype=np.float32)
+
+    if image.ndim == 2:
+        # single-channel case
+        p1, p99 = np.percentile(image, [1, 99])
+        span = max(p99 - p1, 1e-6)
+        out = (image.astype(np.float32) - p1) / span
+        return np.clip(out, 0.0, 1.0)
+
+    # multi-channel case
+    # image.shape[0] = number of channels
+    C = image.shape[0]
+    # for each channel, compute percentiles over all other dims
+    for c in range(C):
+        arr = image[c].astype(np.float32)
+        p1, p99 = np.percentile(arr, [1, 99])
+        span = max(p99 - p1, 1e-6)
+        channel_norm = (arr - p1) / span
+        out[c] = np.clip(channel_norm, 0.0, 1.0)
+
+    return out
+
 def normalize_image(image, image_mean, image_std):
     """
     Normalize a numpy array with 2-4 dimensions.
@@ -738,6 +785,100 @@ def normalize_image(image, image_mean, image_std):
     img_norm = (image - image_mean) / image_std
 
     return img_norm
+
+
+def normalize_image_imagenet(image):
+    """
+    Normalize a numpy array or torch tensor image to ImageNet stats.
+
+    For numpy (np.ndarray):
+      1) Cast to float32.
+      2) Bring values into [0,1] by:
+         - dividing uint8 by 255
+         - dividing uint16 by 65535
+         - otherwise min-max scaling floats
+      3) Applies per-channel ImageNet mean/std.
+
+    For torch (torch.Tensor):
+      1) Cast to float32.
+      2) Bring values into [0,1] by:
+         - dividing uint8 by 255
+         - dividing uint16 by 65535
+         - otherwise min-max scaling floats (with clamp_min)
+      3) Applies per-channel ImageNet mean/std on the same device.
+
+    Parameters:
+    ----------
+    image: np.ndarray or torch.Tensor of shape [3, H, W] or [3, Z, H, W],
+            dtype uint8, uint16, or float.
+
+    Returns:
+    ----------
+    np.ndarray or torch.Tensor: Same type as input (np.ndarray or torch.Tensor), same shape,
+        dtype float32, normalized so each channel has ImageNet mean [0.485,0.456,0.406] and
+        std [0.229,0.224,0.225].
+
+    Raises:
+    ----------
+    ValueError: if input is not np.ndarray or torch.Tensor, if ndim not in (3,4),
+                or if channel dimension != 3.
+    """
+    # dispatch on type
+    if isinstance(image, np.ndarray):
+        # ---------- numpy path ----------
+        x = image.astype(np.float32)
+        if image.ndim not in (3, 4):
+            raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")
+        if image.shape[0] != 3:
+            raise ValueError(f"First dimension must be 3 channels (got {image.shape[0]})")
+
+        # bring into [0,1]
+        if image.dtype == np.uint8:
+            x = x / 255.0
+        elif image.dtype == np.uint16:
+            x = x / 65535.0
+        else:
+            mn, mx = x.min(), x.max()
+            denom = max(mx - mn, 1e-6)
+            x = (x - mn) / denom
+
+        # ImageNet stats
+        spatial_dims = x.ndim - 1
+        shape = (3,) + (1,) * spatial_dims
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(shape)
+        std  = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(shape)
+
+        return (x - mean) / std
+
+    elif isinstance(image, torch.Tensor):
+        # ---------- torch path ----------
+        if image.ndim not in (3, 4):
+            raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")
+        if image.shape[0] != 3:
+            raise ValueError(f"First dimension must be 3 channels (got {image.shape[0]})")
+
+        device = image.device
+        x = image.float()
+
+        if image.dtype == torch.uint8:
+            x = x / 255.0
+        elif image.dtype == torch.uint16:
+            x = x / 65535.0
+        else:
+            mn = x.amin()
+            mx = x.amax()
+            denom = (mx - mn).clamp_min(1e-6)
+            x = (x - mn) / denom
+
+        spatial_dims = x.ndim - 1
+        shape = (3,) + (1,) * spatial_dims
+        mean = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float32).reshape(shape)
+        std  = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float32).reshape(shape)
+
+        return (x - mean) / std
+
+    else:
+        raise ValueError(f"Unsupported image type: {type(image)}")
     
 def compute_image_stats(image, ignore_n_first_dims=None):
     """

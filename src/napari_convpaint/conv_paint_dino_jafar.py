@@ -3,13 +3,10 @@ import warnings
 import numpy as np
 import torch
 import torch.nn.functional as F
-from pathlib import Path
-from IPython.display import clear_output
-from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download
+from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download, normalize_image_imagenet
 from .conv_paint_feature_extractor import FeatureExtractor
 from typing import List, Tuple
 import copy
-from pathlib import Path
 from napari_convpaint.jafar.layers import PretrainedViTWrapper, JAFAR
 
 AVAILABLE_MODELS = ["vit_small_patch14_reg4_dinov2"]
@@ -111,17 +108,16 @@ class DinoJafarFeatures(FeatureExtractor):
     # ------------------------------------------------------------------ #
     # Public extraction entry points
     # ------------------------------------------------------------------ #
-    def get_features_from_plane(self, image: np.ndarray):
+    def get_features_from_plane(self, img: np.ndarray):
         """
         Extract features for a single Z plane (RGB). Shape: [3,H,W] -> [F,H,W].
         Dynamic patch size with single (implicit) scale = 1.
         """
-        assert image.ndim == 3 and image.shape[0] == 3, "Expected image [3,H,W]"
-        H, W = image.shape[1:]
+        assert img.ndim == 3 and img.shape[0] == 3, "Expected image [3,H,W]"
+        H, W = img.shape[1:]
         self._assert_multiples(H, W)
-
-        img = torch.tensor(image[None], dtype=torch.float32, device=self.device)  # [1,3,H,W]
-        img = self._imagenet_normalize(img)
+        img = normalize_image_imagenet(img)
+        img = torch.tensor(img[None], dtype=torch.float32, device=self.device)  # [1,3,H,W]
 
         patch_px, overlap_tokens = self._choose_patch_params(H, W, desired_patch_px=self.patch_size * 32, overlap_tokens=2)
 
@@ -138,47 +134,6 @@ class DinoJafarFeatures(FeatureExtractor):
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
-    
-    def _imagenet_normalize(self, img: torch.Tensor) -> torch.Tensor:
-        """
-        Normalize a torch tensor image to ImageNet stats.
-        1) Brings values into [0,1] by:
-        - dividing uint8 by 255
-        - dividing uint16 by 65535
-        - otherwise min/max scaling floats
-        2) Applies per-channel ImageNet mean/std.
-        
-        Args:
-            img: Tensor of shape [C, H, W] or [C, Z, H, W], dtype uint8, uint16, or float.
-        
-        Returns:
-            Tensor, same shape & device, dtype float32, normalized.
-        """
-        device = img.device
-        # Step 1: cast to float32
-        x = img.float()
-
-        # Bring into [0,1]
-        if img.dtype == torch.uint8:
-            x = x / 255.0
-        elif img.dtype == torch.uint16:
-            x = x / 65535.0
-        else:
-            # float input: min–max scale
-            mn = x.amin()
-            mx = x.amax()
-            # avoid zero division
-            denom = (mx - mn).clamp_min(1e-6)
-            x = (x - mn) / denom
-
-        # Step 2: ImageNet normalization
-        # shape: (3, 1, 1) for [C,H,W] or (3,1,1,1) for [C,Z,H,W]
-        spatial_dims = x.ndim - 1
-        shape = (3,) + (1,) * spatial_dims
-        mean = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float32).reshape(shape)
-        std  = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float32).reshape(shape)
-
-        return (x - mean) / std
 
     def _assert_multiples(self, H: int, W: int):
         ps = self.patch_size

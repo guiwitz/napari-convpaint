@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device
+from .conv_paint_utils import get_device, normalize_image_percentile
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
 from cellpose import models
@@ -27,6 +27,10 @@ class CellposeFeatures(FeatureExtractor):
     
     def get_description(self):
         return "Model specialized in cell segmentation."
+    
+    def gives_patched_features(self) -> bool:
+        # Requires image divisible by 8x8 patches as input, but returns non-patched features
+        return False
 
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
@@ -42,6 +46,7 @@ class CellposeFeatures(FeatureExtractor):
         return [2]
 
     def get_features_from_plane(self, image):
+        image = normalize_image_percentile(image)
 
         image_expanded = np.expand_dims(image, axis=0)
         tensor = torch.from_numpy(image_expanded).float()
