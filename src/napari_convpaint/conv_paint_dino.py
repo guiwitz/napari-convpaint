@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device, get_device_from_torch_model, scale_img, guided_model_download
+from .conv_paint_utils import get_device, get_device_from_torch_model, scale_img, guided_model_download, normalize_image_imagenet
 from .conv_paint_feature_extractor import FeatureExtractor
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
@@ -96,36 +96,14 @@ class DinoFeatures(FeatureExtractor):
         return [features]
 
     def prep_img(self, image):
-        
+    
         patch_size = self.get_patch_size()
         assert len(image.shape) == 4
         assert image.shape[0] == 3
         assert image.shape[-2] % patch_size == 0
         assert image.shape[-1] % patch_size == 0
 
-        # 1) Normalize to 0-1 range
-        # for uint8 or uint16 images, get divide by max value
-        if image.dtype == np.uint8:
-            image = image.astype(np.float32)
-            image = image / 255
-        elif image.dtype == np.uint16:
-            image = image.astype(np.float32)
-            image = image / 65535
-        # else just min max normalize to 0-1.
-        else:
-            # print(image.shape)
-            image = image.astype(np.float32)
-            divisor = np.max(image) - np.min(image)
-            if divisor == 0:
-                divisor = 1e-6
-            image = (image - np.min(image)) / divisor
-
-        # 2) normalize to imagenet stats (given the image is normalized to 0-1 range)
-        mean = np.array([0.485, 0.456, 0.406])
-        std = np.array([0.229, 0.224, 0.225])
-        mean = mean[:, None, None, None]
-        std = std[:, None, None, None]
-        image = (image - mean) / std
+        image = normalize_image_imagenet(image)
 
         # Crop image to make sure it is divisible by patch size
         # NOTE: This is not necessary (it's old code), but it does not hurt either
