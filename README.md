@@ -56,8 +56,7 @@ probas = cp_model.predict_probas(image)
 
 ## License
 
-Distributed under the terms of the [BSD-3] license,
-"napari-convpaint" is free and open source software
+Distributed under the terms of the [BSD-3] license, "napari-convpaint" is free and open source software, except for the code in the `jafar/` directory, which is adapted from an [Apache License 2.0–licensed project](https://github.com/PaulCouairon/JAFAR), see `jafar/LICENSE`.
 
 ## Contributing
 
