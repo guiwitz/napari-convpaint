@@ -119,13 +119,13 @@ class DinoJafarFeatures(FeatureExtractor):
         img = normalize_image_imagenet(img)
         img = torch.tensor(img[None], dtype=torch.float32, device=self.device)  # [1,3,H,W]
 
-        patch_px, overlap_tokens = self._choose_patch_params(H, W, desired_patch_px=self.patch_size * 32, overlap_tokens=2)
+        tile_px, overlap_tokens = self._choose_tile_params(H, W, desired_tile_px=self.patch_size * 32, overlap_tokens=2)
 
-        hr_cat = self._extract_patched_multiscale(
+        hr_cat = self._extract_tiled_multiscale(
                     image_batch=img,
                     backbone=self.backbone,
                     hr_head=self.model,
-                    patch_px=patch_px,
+                    tile_px=tile_px,
                     overlap_tokens=overlap_tokens,
                     scales=self.jafar_scalings,
                 )  # (1, C_total, H, W) CPU
@@ -143,46 +143,46 @@ class DinoJafarFeatures(FeatureExtractor):
                 "ConvpaintModel should pad beforehand."
             )
 
-    def _choose_patch_params(
+    def _choose_tile_params(
         self,
         H: int,
         W: int,
-        desired_patch_px: int,
+        desired_tile_px: int,
         overlap_tokens: int,
     ) -> Tuple[int, int]:
         """
-        Decide actual patch_px (multiple of self.patch_size) <= min(H,W, desired_patch_px).
+        Decide actual tile_px (multiple of self.patch_size) <= min(H,W, desired_tile_px).
         Adjust overlap_tokens if necessary so stride > 0.
         """
         ps = self.patch_size
         max_fit = (min(H, W) // ps) * ps
         if max_fit == 0:
             # Extremely small edge case
-            patch_px = ps
+            tile_px = ps
         else:
-            patch_px = min(desired_patch_px, max_fit)
+            tile_px = min(desired_tile_px, max_fit)
 
         # Ensure overlap_tokens yields positive stride
-        # stride = patch_px - overlap_tokens*ps
-        max_overlap_tokens = (patch_px // ps) - 1  # need at least one stride
+        # stride = tile_px - overlap_tokens*ps
+        max_overlap_tokens = (tile_px // ps) - 1  # need at least one stride
         if max_overlap_tokens < 0:
             max_overlap_tokens = 0
         if overlap_tokens > max_overlap_tokens:
             overlap_tokens = max_overlap_tokens
 
-        return patch_px, overlap_tokens
+        return tile_px, overlap_tokens
 
     # ------------------------------------------------------------------ #
     # Multi-scale extraction
     # ------------------------------------------------------------------ #
     @torch.inference_mode()
-    def _extract_patched_multiscale(
+    def _extract_tiled_multiscale(
         self,
         image_batch: torch.Tensor,
         backbone,
         hr_head,
         *,
-        patch_px: int,
+        tile_px: int,
         overlap_tokens: int,
         scales: List[int],
     ):
@@ -191,7 +191,7 @@ class DinoJafarFeatures(FeatureExtractor):
         ps = self.patch_size
 
         ov_px = overlap_tokens * ps
-        stride = patch_px - ov_px
+        stride = tile_px - ov_px
         assert stride > 0, "Invalid stride (overlap too large)."
 
         hr_head_cpu = copy.deepcopy(hr_head).to("cpu").eval()
@@ -199,28 +199,28 @@ class DinoJafarFeatures(FeatureExtractor):
         lr_full, _ = backbone(image_batch)
 
         if ov_px == 0:
-            w2d = torch.ones(patch_px, patch_px, device=dev, dtype=torch.float32)
+            w2d = torch.ones(tile_px, tile_px, device=dev, dtype=torch.float32)
         else:
             ramp = torch.linspace(0, 1, ov_px + 1, device=dev, dtype=torch.float32)[1:]
-            flat = torch.ones(patch_px - 2 * ov_px, device=dev, dtype=torch.float32)
+            flat = torch.ones(tile_px - 2 * ov_px, device=dev, dtype=torch.float32)
             w1d = torch.cat([ramp, flat, ramp.flip(0)])
             w2d = w1d[:, None] * w1d[None, :]
 
         def tok_slice(px):
-            return slice(px // ps, (px + patch_px) // ps)
+            return slice(px // ps, (px + tile_px) // ps)
 
-        if H <= patch_px:
+        if H <= tile_px:
             grid_h = [0]
         else:
-            grid_h = list(range(0, H - patch_px + 1, stride))
-            if grid_h[-1] != H - patch_px:
-                grid_h.append(H - patch_px)
-        if W <= patch_px:
+            grid_h = list(range(0, H - tile_px + 1, stride))
+            if grid_h[-1] != H - tile_px:
+                grid_h.append(H - tile_px)
+        if W <= tile_px:
             grid_w = [0]
         else:
-            grid_w = list(range(0, W - patch_px + 1, stride))
-            if grid_w[-1] != W - patch_px:
-                grid_w.append(W - patch_px)
+            grid_w = list(range(0, W - tile_px + 1, stride))
+            if grid_w[-1] != W - tile_px:
+                grid_w.append(W - tile_px)
 
         hr_sums = [None] * len(scales)
         weight_cpu = torch.zeros((1, 1, H, W), dtype=torch.float32, device="cpu")
@@ -228,24 +228,24 @@ class DinoJafarFeatures(FeatureExtractor):
         for b in range(B):
             for top in grid_h:
                 for left in grid_w:
-                    img_patch = image_batch[b:b+1, :, top:top+patch_px, left:left+patch_px]
-                    lr_patch = lr_full[b:b+1, :, tok_slice(top), tok_slice(left)]
+                    img_tile = image_batch[b:b+1, :, top:top+tile_px, left:left+tile_px]
+                    lr_tile = lr_full[b:b+1, :, tok_slice(top), tok_slice(left)]
 
                     per_scale_feats = []
                     for s in scales:
-                        out_h = max(1, patch_px // s)
+                        out_h = max(1, tile_px // s)
                         try:
-                            feat = hr_head(img_patch, lr_patch, (out_h, out_h))
+                            feat = hr_head(img_tile, lr_tile, (out_h, out_h))
                         except RuntimeError as e:
                             if "MPS" in str(e) or "weight type" in str(e):
-                                feat = hr_head_cpu(img_patch.cpu(), lr_patch.cpu(), (out_h, out_h)).to(dev)
+                                feat = hr_head_cpu(img_tile.cpu(), lr_tile.cpu(), (out_h, out_h)).to(dev)
                             else:
                                 raise
-                        if out_h != patch_px:
-                            feat = F.interpolate(feat, size=(patch_px, patch_px), mode="nearest")
-                        per_scale_feats.append(feat)  # (1,Cs,patch_px,patch_px)
+                        if out_h != tile_px:
+                            feat = F.interpolate(feat, size=(tile_px, tile_px), mode="nearest")
+                        per_scale_feats.append(feat)  # (1,Cs,tile_px,tile_px)
 
-                    feat_cat = torch.cat(per_scale_feats, dim=1)  # (1, ΣC, patch_px, patch_px)
+                    feat_cat = torch.cat(per_scale_feats, dim=1)  # (1, ΣC, tile_px, tile_px)
                     if hr_sums[0] is None:
                         total_C = feat_cat.shape[1]
                         assert total_C % len(scales) == 0, "Channel count not divisible by #scales."
@@ -259,9 +259,9 @@ class DinoJafarFeatures(FeatureExtractor):
                         weighted = chunk * w2d
                         h_eff, w_eff = weighted.shape[-2:]
                         hr_sums[i][b, :, top:top+h_eff, left:left+w_eff] += weighted.cpu()
-                    weight_cpu[:, :, top:top+patch_px, left:left+patch_px] += w2d.cpu()
+                    weight_cpu[:, :, top:top+tile_px, left:left+tile_px] += w2d.cpu()
 
-                    del img_patch, lr_patch, per_scale_feats, feat_cat, chunks, weighted
+                    del img_tile, lr_tile, per_scale_feats, feat_cat, chunks, weighted
                     if torch.backends.mps.is_available():
                         torch.mps.empty_cache()
 
