@@ -1627,21 +1627,20 @@ class ConvpaintModel:
         and that the image is padded to a multiple of the patch size times at all scalings,
         if the FE model uses patches.
         """
+        # Get the maximum scaling factor, base padding size and patch_size from the param and feature extractor
         fe_scalings = param.fe_scalings
-        # Get the base padding size from the feature extractor
-        fe_pad   = self.fe_model.get_padding()
-        # Get the maximum scaling factor
         max_scale = np.max(fe_scalings)
-        # We need to pad at least the feature extractor's padding at the maximum scaling factor
+        fe_pad   = self.fe_model.get_padding()
+        fe_patch = self.fe_model.get_patch_size()
+
+        # We need to pad at least the feature extractor's padding at the maximum scaling factor on each side
         min_pad = fe_pad * max_scale
         min_h = img_shape[-2] + 2 * min_pad
         min_w = img_shape[-1] + 2 * min_pad
 
-        # Get the patch size from the feature extractor
-        fe_patch = self.fe_model.get_patch_size()
-        # Get all scalings and calculate the least common multiple
+        # Calculate the least common multiple (LCM) of the feature extractor's scalings
         scalings_lcm = lcm(*fe_scalings)
-        # We need to pad to a multiple of the patch size at the lcm scaling factor
+        # We need to pad to a multiple of the patch size at the lcm scaling factor (as it will be downscaled accordingly)
         patch_multiple = scalings_lcm * fe_patch
 
         # Calculate the padding sizes for each dimension
@@ -1649,16 +1648,19 @@ class ConvpaintModel:
         padded_w = ( (min_w + patch_multiple - 1) // patch_multiple ) * patch_multiple # (patch_multiple - (min_w % patch_multiple)) % patch_multiple
         pad_h = padded_h - img_shape[-2]  # Height padding
         pad_w = padded_w - img_shape[-1]  # Width padding
+
         # Ensure that the padding is at least the minimum padding and a multiple of the lcm_scaled patch size
         assert pad_h >= 2 * min_pad, f"Padding height {pad_h} is less than minimum padding 2x{min_pad}."
         assert pad_w >= 2 * min_pad, f"Padding width {pad_w} is less than minimum padding 2x{min_pad}."
         assert padded_h % patch_multiple == 0, f"Padded height {padded_h} is not a multiple of patch size {patch_multiple}."
         assert padded_w % patch_multiple == 0, f"Padded width {padded_w} is not a multiple of patch size {patch_multiple}."
+
         # Distribute to left/right and top/bottom, the bottom and right being 1 larger in uneven cases
         pad_top = pad_h // 2
         pad_bottom = pad_h - pad_top
         pad_left = pad_w // 2
         pad_right = pad_w - pad_left
+
         # Return the overall padding sizes for the image
         return (pad_top, pad_bottom, pad_left, pad_right)
 
