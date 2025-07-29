@@ -1619,25 +1619,6 @@ class ConvpaintModel:
                 new_param.set_single(key, enforced_params.get(key))
         return new_param
     
-    def _get_total_pad_size(self, param):
-        """
-        Returns the required padding size for the feature extraction.
-
-        If the feature extractor produces patched features (patch-size resolution),
-        we add half a patch to avoid border-shrink. If it already outputs full-pixel
-        resolution (like JAFAR), we skip that extra half-patch.
-        The result is then scaled by the maximum FE scaling factor.
-        """
-        # Base pad from the FE (models may need extra context)
-        fe_pad   = self.fe_model.get_padding()
-        # Patch size (e.g. 14 for DINOv2); ensure sufficient padding for reduction to patch multiple
-        fe_patch = self.fe_model.get_patch_size()
-        # Highest scaling factor; this is used to scale the padding
-        max_scale = np.max(param.fe_scalings)
-        # If the FE model gives patched features, we need to add half a patch size
-        total_pad = (fe_pad + fe_patch // 2) * max_scale
-        return total_pad
-    
     def _get_overall_paddings(self, param, img_shape: Tuple[int, ...]) -> Tuple[int, int, int, int]:
         """
         Returns the overall padding sizes for the image.
