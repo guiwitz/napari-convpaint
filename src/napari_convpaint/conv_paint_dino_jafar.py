@@ -138,10 +138,6 @@ class DinoJafarFeatures(FeatureExtractor):
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
-    def _imagenet_normalize(self, img: torch.Tensor) -> torch.Tensor:
-        mean = torch.tensor([0.485, 0.456, 0.406], device=img.device, dtype=img.dtype)[None, :, None, None]
-        std  = torch.tensor([0.229, 0.224, 0.225], device=img.device, dtype=img.dtype)[None, :, None, None]
-        return (img - mean) / std
     
     def _imagenet_normalize(self, img: torch.Tensor) -> torch.Tensor:
         """
@@ -220,81 +216,6 @@ class DinoJafarFeatures(FeatureExtractor):
             overlap_tokens = max_overlap_tokens
 
         return patch_px, overlap_tokens
-
-    # ------------------------------------------------------------------ #
-    # Core patch extraction (single scale)
-    # ------------------------------------------------------------------ #
-    @torch.inference_mode()
-    def _extract_patched(
-        self,
-        image_batch: torch.Tensor,
-        backbone,
-        hr_head,
-        *,
-        patch_px: int,
-        overlap_tokens: int = 1,
-    ):
-        B, _, H, W = image_batch.shape
-        dev = image_batch.device
-        ps = self.patch_size
-        ov_px = overlap_tokens * ps
-        stride = patch_px - ov_px
-        assert stride > 0, "Invalid stride (overlap too large for patch size)."
-
-        lr_full, _ = backbone(image_batch)
-
-        dtype = image_batch.dtype
-        if ov_px == 0:
-            w2d = torch.ones(patch_px, patch_px, device=dev, dtype=dtype)
-        else:
-            ramp = torch.linspace(0, 1, ov_px + 1, device=dev, dtype=dtype)[1:]
-            flat = torch.ones(patch_px - 2 * ov_px, device=dev, dtype=dtype)
-            w1d = torch.cat([ramp, flat, ramp.flip(0)])
-            w2d = w1d[:, None] * w1d[None, :]
-
-        def tok_slice(px):
-            return slice(px // ps, (px + patch_px) // ps)
-
-        hr_sum = None
-        w_acc = torch.zeros((1, 1, H, W), device="cpu", dtype=dtype)
-
-        # Grids (allow partial coverage along big dimension if other is small)
-        if H <= patch_px:
-            grid_h = [0]
-        else:
-            grid_h = list(range(0, H - patch_px + 1, stride))
-            if grid_h[-1] != H - patch_px:
-                grid_h.append(H - patch_px)
-        if W <= patch_px:
-            grid_w = [0]
-        else:
-            grid_w = list(range(0, W - patch_px + 1, stride))
-            if grid_w[-1] != W - patch_px:
-                grid_w.append(W - patch_px)
-
-        for b in range(B):
-            for top in grid_h:
-                for left in grid_w:
-                    img_patch = image_batch[b:b+1, :, top:top+patch_px, left:left+patch_px]
-                    lr_patch = lr_full[b:b+1, :, tok_slice(top), tok_slice(left)]
-
-                    hr_patch = hr_head(img_patch, lr_patch, (patch_px, patch_px))  # (1,C,patch_px,patch_px)
-
-                    if hr_sum is None:
-                        C_hr = hr_patch.shape[1]
-                        hr_sum = torch.zeros((B, C_hr, H, W), device="cpu", dtype=dtype)
-
-                    weighted = (hr_patch[0] * w2d[:hr_patch.shape[-2], :hr_patch.shape[-1]]).cpu()
-                    hr_sum[b, :, top:top+hr_patch.shape[-2], left:left+hr_patch.shape[-1]] += weighted
-                    w_acc[:, :, top:top+hr_patch.shape[-2], left:left+hr_patch.shape[-1]] += w2d[:hr_patch.shape[-2], :hr_patch.shape[-1]].cpu()
-
-                    del img_patch, lr_patch, hr_patch, weighted
-                    if torch.backends.mps.is_available():
-                        torch.mps.empty_cache()
-
-        eps = 1e-8
-        hr_out = hr_sum / w_acc.clamp(min=eps)
-        return hr_out, lr_full.cpu()
 
     # ------------------------------------------------------------------ #
     # Multi-scale extraction
