@@ -6,7 +6,7 @@ from .conv_paint_nnlayers import Hookmodel
 # from .conv_paint_ilastik import IlastikFeatures
 from .conv_paint_gaussian import GaussianFeatures
 # from .conv_paint_cellpose import CellposeFeatures
-from math import gcd
+from math import lcm
 
 # AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_ila', 'combo_dino_gauss', 'combo_dino_cellpose', 'combo_vgg_ila']
 AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_gauss']
@@ -106,7 +106,7 @@ class ComboFeatures(FeatureExtractor):
     def get_patch_size(self):
         ps1 = self.model1.get_patch_size()
         ps2 = self.model2.get_patch_size()
-        self.patch_size = abs(ps1 * ps2) // gcd(ps1, ps2) # = lcm(ps1, ps2)
+        self.patch_size = lcm(ps1, ps2)
         return self.patch_size
     
     def gives_patched_features(self):

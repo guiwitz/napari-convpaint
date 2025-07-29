@@ -8,6 +8,7 @@ import skimage
 import torch
 import pandas as pd
 from typing import Tuple
+from math import lcm
 
 from napari_convpaint.conv_paint_nnlayers import AVAILABLE_MODELS as NN_MODELS
 from napari_convpaint.conv_paint_gaussian import AVAILABLE_MODELS as GAUSSIAN_MODELS
@@ -611,7 +612,7 @@ class ConvpaintModel:
         clf : CatBoostClassifier or RandomForestClassifier
             Trained classifier
         """
-        clf = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
+        clf, _, _ = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm)
         return clf
 
@@ -783,15 +784,17 @@ class ConvpaintModel:
         # Record originals after resampling but BEFORE padding for reshaping and rescaling later
         self.pre_pad_shapes = [d.shape for d in data]  # list of (C,Z,H,W)
         # Get the correct padding size for the feature extraction    
-        padding = self._get_total_pad_size(params_for_extract)
+        # padding = self._get_total_pad_size(params_for_extract)
+        paddings = [self._get_overall_paddings(params_for_extract, d.shape) for d in data]
         # Pad the images and annotations with the correct padding size
-        data = [conv_paint_utils.pad(d, padding) for d in data]
+        # data = [conv_paint_utils.pad(d, padding) for d in data]
+        data = [conv_paint_utils.pad(d, p, input_type="img") for d, p in zip(data, paddings)]
         # Save the padded shapes for reshaping/rescaling later
         self.padded_shapes = [d.shape for d in data]
         if use_annots:
-            annotations = [conv_paint_utils.pad(a, padding, input_type="labels") for a in annotations]
+            annotations = [conv_paint_utils.pad(a, p, input_type="labels") for a, p in zip(annotations, paddings)]
         if memory_mode:
-            coords = [conv_paint_utils.pad(c, padding, input_type="coords") for c in coords]        
+            coords = [conv_paint_utils.pad(c, p, input_type="coords") for c, p in zip(coords, paddings)]
             # print("Padded data shapes:")
             # print(data[0].shape, coords[0].shape)
             # print(coords[0][:, 0, 20, 20])
@@ -825,8 +828,8 @@ class ConvpaintModel:
         if params_for_extract.tile_annotations:
             if use_annots:
                 coords = [None for _ in data] if coords is None else coords
-                tiles = [conv_paint_utils.tile_annot(d, a, c, padding, plot_tiles=False)
-                        for d, a, c in zip(data, annotations, coords)]
+                tiles = [conv_paint_utils.tile_annot(d, a, c, p, plot_tiles=False)
+                        for d, a, c, p in zip(data, annotations, coords, paddings)]
                 data        = [t for trio in tiles for t in trio[0]]
                 annotations = [t for trio in tiles for t in trio[1]]
                 if memory_mode:
@@ -870,7 +873,8 @@ class ConvpaintModel:
                 padded_shapes[i],
                 pre_pad_shapes[i],
                 original_shapes[i],
-                class_preds=False
+                class_preds=False,
+                patched_features=self.fe_model.gives_patched_features()
             )
             for i in range(len(features))
         ]
@@ -979,10 +983,10 @@ class ConvpaintModel:
 
         if not memory_mode:
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
+            feature_parts, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, in_channels=in_channels, skip_norm=skip_norm)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [conv_paint_utils.get_features_targets(f, a)
-                        for f, a in zip(features, annot_parts)] # f and t are linearized
+                        for f, a in zip(feature_parts, annot_parts)] # f and t are linearized
             features = [ft[0] for ft in f_t_tuples] # Create a list of features
             targets = [ft[1] for ft in f_t_tuples] # Create a list of targets
             features = np.concatenate(features, axis=0) # Concatenate the features into a single array
@@ -990,9 +994,9 @@ class ConvpaintModel:
 
         else: # memory mode
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            features, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
+            feature_parts, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
             # Get all annotations and features from the table
-            features, targets = self._register_and_get_all_features_annots(features, annot_parts, coords, img_ids, scale)
+            features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
 
         # Check if we have features and targets, and that we have at least two classes
         if len(features) == 0 or len(targets) == 0:
@@ -1005,7 +1009,7 @@ class ConvpaintModel:
         self._clf_train(features, targets,
                                use_rf=use_rf, allow_writing_files=allow_writing_files)
 
-        return self.classifier
+        return self.classifier, feature_parts, annot_parts
 
     def reset_training(self):
         """
@@ -1039,11 +1043,15 @@ class ConvpaintModel:
             List of new annotations with the same shape as the input annotations,
             where existing annotations are set to zero in the new annotations.
         """
-
+        # Allow for single inputs and in that case make both inputs lists
+        if isinstance(annotations, np.ndarray):
+            annotations = [annotations]
+        if isinstance(img_ids, str):
+            img_ids = [img_ids]
         if not len(annotations) == len(img_ids):
             raise ValueError('Annotations and image IDs must have the same length.')
 
-        # First update the table with the new annotations and features
+        # First update the table with the new annotations
         all_new_annots = []
         for a, id in zip(annotations, img_ids):
             dict_key = f"{id}_scale{scale}"
@@ -1103,7 +1111,19 @@ class ConvpaintModel:
         features : list[np.ndarray]
             List of all features with the same shape as the input features,
             where existing features were kept and new features were added.
+        annotations : list[np.ndarray]
+            List of all annotations with the same shape as the input annotations,
+            where existing annotations were kept and new annotations were added.
         """
+        # Allow for single inputs and in that case make both inputs lists
+        if isinstance(features, np.ndarray):
+            features = [features]
+        if isinstance(annotations, np.ndarray):
+            annotations = [annotations]
+        if isinstance(coords, np.ndarray):
+            coords = [coords]
+        if isinstance(img_ids, str):
+            img_ids = [img_ids]
         if not (len(features) == len(annotations)
                 and len(features) == len(img_ids) 
                 and len(features) == len(coords)):
@@ -1153,7 +1173,7 @@ class ConvpaintModel:
         if self.classifier is None:
             raise ValueError('No trained classifier found.')
 
-        # Check if we process annotations and if we have only a single image input
+        # Check if we have only a single image input
         single_input = isinstance(data, np.ndarray) or isinstance(data, torch.Tensor)
         input_shapes = [data.shape] if single_input else [d.shape for d in data]
 
@@ -1193,30 +1213,34 @@ class ConvpaintModel:
             else:
                 return probas
 
-    def _predict_image(self, image, return_proba=True):
+    def _predict_image(self, image, return_proba=True, feature_img=None):
         """
         Backend method to predict images without tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
         Reshapes the predictions to the original image shape, without the channel dimension,
         but always keeps the Z dim --> [C, Z, H, W] for class probas, [Z, H, W] for segmentation.
+        A feature image can be given, in which case the features are used for prediction.
+        If no feature image is given, the features are extracted from the image using the feature extractor
         NOTE: This allows to use this method interchangably with _parallel_predict_image,
               but also within the _parallel_predict_image method for each tile.
         """
-        features = self.get_feature_image(image,
-                                        restore_input_form=False,
-                                        in_channels=None, # already extracted outside
-                                        skip_norm=True)  # already normalized outside
+        # Check if features are given, if not, extract them
+        if feature_img is None:
+            feature_img = self.get_feature_image(image,
+                                            restore_input_form=False,
+                                            in_channels=None, # already extracted outside
+                                            skip_norm=True)  # already normalized outside
 
-        num_f = features[0].shape[0] if isinstance(features, list) else features.shape[0]
+        num_f = feature_img[0].shape[0] if isinstance(feature_img, list) else feature_img.shape[0]
         num_f_clf = self.classifier.n_features_in_ if self.classifier is not None else 0
         if num_f != num_f_clf:
             raise ValueError(
-                "Extracted features have a different length than classifier expects "
+                f"Extracted features ({num_f}) have a different length than classifier expects ({num_f_clf}). "
                 "(channel count mismatch / changed fe_scalings or channels)."
             )
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
-        predictions = [self._clf_predict(f, return_proba=True) for f in features]
+        predictions = [self._clf_predict(f, return_proba=True) for f in feature_img]
         # Reshape the predictions to the original image shape
         padded_shapes = self.padded_shapes # Saved when extracting features
         pre_pad_shapes = self.pre_pad_shapes # Saved when extracting features
@@ -1225,7 +1249,8 @@ class ConvpaintModel:
                                             padded_shapes[i],
                                             pre_pad_shapes[i],
                                             original_shapes[i],
-                                            class_preds=False)
+                                            class_preds=False,
+                                            patched_features=self.fe_model.gives_patched_features())
                          for i in range(len(predictions))]
 
         # If we want classes, take the argmax of the probabilities
@@ -1355,6 +1380,52 @@ class ConvpaintModel:
         
         return predicted_image_complete
 
+    def _self_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False, add_seg=False):
+        """
+        Extracts features from the image and uses them to both train and predict the image.
+        Currently, only works for single images of which all slices are annotated.
+        Also currently does not support memory mode.
+        """
+
+        # Make sure all slices are annotated if multiple slices are given
+        valid_slices = np.any(annotations > 0, axis=(-2, -1))
+        # Check that all slices are valid
+        if not np.all(valid_slices):
+            raise ValueError("Not all slices are annotated. Currently only annotated slices can be used for self_prediction.")
+
+        # Save the old parameters, so we can change it specifically for this method
+        old_params = self._param.copy()
+        # Turn off the tiling of annotations, since we want to extract the entire image to be reused for prediction
+        self._param.set_single('tile_annotations', False)
+
+        # Train, and get the features at the same time
+        # Note: This is a hack to use the training method for prediction, but it works
+        _, feature_parts, _ = self._train(
+            data=image, annotations=annotations, memory_mode=False,
+            use_rf=use_rf, allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm
+        )
+        feature_img = np.concatenate(feature_parts, axis=1)
+
+        # Prediction expects a list of patched features, but training extracts per-pixel
+        p = self.fe_model.get_patch_size()
+        feature_img_for_pred = [feature_img[..., ::p, ::p]]
+        # Predict the image using the features extracted
+        # Note: This is a hack to use the prediction method for prediction, but it works
+        probas = self._predict_image(
+            image, return_proba=True, feature_img=feature_img_for_pred)
+
+        # Restore input dimensionality (especially see if we want to remove z dimension)
+        probas = self._restore_dims(probas, image.shape)
+
+        # Reset the parameters to the old ones
+        self._param = old_params
+
+        # Determine what to return
+        if add_seg:
+            seg = self._probas_to_classes(probas)
+            return probas, seg
+        else:
+            return probas
 
 ### HELPER METHODS
 
@@ -1548,24 +1619,50 @@ class ConvpaintModel:
                 new_param.set_single(key, enforced_params.get(key))
         return new_param
     
-    def _get_total_pad_size(self, param):
+    def _get_overall_paddings(self, param, img_shape: Tuple[int, ...]) -> Tuple[int, int, int, int]:
         """
-        Returns the required padding size for the feature extraction.
-
-        If the feature extractor produces patched features (patch-size resolution),
-        we add half a patch to avoid border-shrink. If it already outputs full-pixel
-        resolution (like JAFAR), we skip that extra half-patch.
-        The result is then scaled by the maximum FE scaling factor.
+        Returns the overall padding sizes for the image.
+        This takes into account the feature extractor's padding, its patch size and the image shape.
+        Makes sure, padding is at least the FE's padding at the largest downscaling factor,
+        and that the image is padded to a multiple of the patch size times at all scalings,
+        if the FE model uses patches.
         """
-        # Base pad from the FE (models may need extra context)
+        # Get the maximum scaling factor, base padding size and patch_size from the param and feature extractor
+        fe_scalings = param.fe_scalings
+        max_scale = np.max(fe_scalings)
         fe_pad   = self.fe_model.get_padding()
-        # Patch size (e.g. 14 for DINOv2); ensure sufficient padding for reduction to patch multiple
         fe_patch = self.fe_model.get_patch_size()
-        # Highest scaling factor; this is used to scale the padding
-        max_scale = np.max(param.fe_scalings)
-        # If the FE model gives patched features, we need to add half a patch size
-        total_pad = (fe_pad + fe_patch // 2) * max_scale
-        return total_pad
+
+        # We need to pad at least the feature extractor's padding at the maximum scaling factor on each side
+        min_pad = fe_pad * max_scale
+        min_h = img_shape[-2] + 2 * min_pad
+        min_w = img_shape[-1] + 2 * min_pad
+
+        # Calculate the least common multiple (LCM) of the feature extractor's scalings
+        scalings_lcm = lcm(*fe_scalings)
+        # We need to pad to a multiple of the patch size at the lcm scaling factor (as it will be downscaled accordingly)
+        patch_multiple = scalings_lcm * fe_patch
+
+        # Calculate the padding sizes for each dimension
+        padded_h = ( (min_h + patch_multiple - 1) // patch_multiple ) * patch_multiple # (patch_multiple - (min_h % patch_multiple)) % patch_multiple
+        padded_w = ( (min_w + patch_multiple - 1) // patch_multiple ) * patch_multiple # (patch_multiple - (min_w % patch_multiple)) % patch_multiple
+        pad_h = padded_h - img_shape[-2]  # Height padding
+        pad_w = padded_w - img_shape[-1]  # Width padding
+
+        # Ensure that the padding is at least the minimum padding and a multiple of the lcm_scaled patch size
+        assert pad_h >= 2 * min_pad, f"Padding height {pad_h} is less than minimum padding 2x{min_pad}."
+        assert pad_w >= 2 * min_pad, f"Padding width {pad_w} is less than minimum padding 2x{min_pad}."
+        assert padded_h % patch_multiple == 0, f"Padded height {padded_h} is not a multiple of patch size {patch_multiple}."
+        assert padded_w % patch_multiple == 0, f"Padded width {padded_w} is not a multiple of patch size {patch_multiple}."
+
+        # Distribute to left/right and top/bottom, the bottom and right being 1 larger in uneven cases
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+
+        # Return the overall padding sizes for the image
+        return (pad_top, pad_bottom, pad_left, pad_right)
 
     def _restore_shape(
         self,
@@ -1574,6 +1671,7 @@ class ConvpaintModel:
         pre_pad_shapes: Tuple[int, ...],
         original_shape: Tuple[int, ...],
         class_preds: bool = False,
+        patched_features = False
     ) -> np.ndarray:
         """
         Reshape outputs (prediction, probabilities, features) back to original spatial size,
@@ -1591,13 +1689,16 @@ class ConvpaintModel:
             The original shape before any padding and rescaling: (..., Z, H_orig, W_orig)
         class_preds : bool
             If True, we’re dealing with integer class labels (use nearest‐neighbor).
+        patched_features : bool
+            If True, the features were extracted on a patch‐size resolution (e.g. DINOv2),
+            so we need to rescale the outputs to the patch resolution before upsampling.
         """
         # Prepare the variables
         padded_z, padded_h, padded_w = padded_shape[-3:]
 
         # 1) Reshape to (possibly patched) spatial dimensions
         # If FE was patched, outputs are on a coarser grid
-        if self.fe_model.gives_patched_features():
+        if patched_features:
             p = self.fe_model.get_patch_size()
             patch_h = padded_h // p
             patch_w = padded_w // p
@@ -1611,7 +1712,7 @@ class ConvpaintModel:
 
         # 2) Upsample from grid to pixel resolution (but still downsampled and padded)
         # Note: This does nothing if the image is already at pixel resolution (= not "patched")
-        if self.fe_model.gives_patched_features():
+        if patched_features:
             patch_multi_h = patch_h * p
             patch_multi_w = patch_w * p
         else:
