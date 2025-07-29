@@ -237,10 +237,11 @@ class FeatureExtractor:
             if patched:
                 target_shape = (data.shape[0],
                                 data.shape[1],
-                                int(data.shape[2]/self.get_patch_size()),
-                                int(data.shape[3]/self.get_patch_size()))
+                                data.shape[2]//self.get_patch_size(),
+                                data.shape[3]//self.get_patch_size())
             else:
                 # When not patched, but patch_size > 1, we handle possible cropping due to reduce_to_patch_multiple
+                # NOTE: this should not be necessary if the inputs are already multiples of the patch size at all scales
                 if patch_size > 1 and reduced_shape[2:] != pre_reduction_shape[2:] :
                     # Step 1: rescale to the reduced (cropped to patch multiple) shape
                     features = [rescale_features(
@@ -252,7 +253,7 @@ class FeatureExtractor:
                     # Step 2: pad back to original pre_reduction_shape (but still downscaled)
                     features = [pad_to_shape(f, pre_reduction_shape[2:] ) for f in features]
 
-                # Step 3: finally rescale to the full original shape
+                # Rescale to the full original shape
                 target_shape = data.shape
 
             features = [rescale_features(
