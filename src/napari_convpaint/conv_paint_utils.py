@@ -299,6 +299,9 @@ def rescale_outputs(output_img, output_shape, order=0):
     rescaled_output = skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
     return rescaled_output
 
+
+### CROPPING, PADDING, TILING & ANNOTATION EXTRACTION
+
 def reduce_to_patch_multiple(input, patch_size):
     """
     Reduces the input to the patch size multiple.
@@ -338,9 +341,6 @@ def reduce_to_patch_multiple(input, patch_size):
     input = input[..., h_crop_top:h_idx_bottom, w_crop_left:w_idx_right]
     return input
 
-
-### PADDING, TILING & ANNOTATION EXTRACTION
-
 def pad(img, padding, input_type='img'):
     """
     Pads the image with the padding size given.
@@ -351,8 +351,10 @@ def pad(img, padding, input_type='img'):
     ----------
     img : np.ndarray
         Input image to be padded. Must have spatial dimensions as the last two dimensions.
-    padding : int
+    padding : int or tuple
         Padding size to be added to the image.
+        If an int is provided, it is applied to all sides.
+        If a tuple is provided, it should be of the form (pad_top, pad_bottom, pad_left, pad_right).
     use_labels : bool
         If True, use constant padding for labels. Default is False.
 
@@ -361,16 +363,27 @@ def pad(img, padding, input_type='img'):
     padded_img : np.ndarray
         Padded image.
     """
+    if isinstance(padding, int):
+        padding = ((0, 0), (padding, padding), (padding, padding))
+    elif isinstance(padding, tuple) and len(padding) == 2:
+        # If padding is a tuple of two ints, apply it to both height and width
+        padding = ((0, 0), (padding[0], padding[0]), (padding[1], padding[1]))
+    elif isinstance(padding, tuple) and len(padding) == 4:
+        # If padding is a tuple of four ints, apply it to all sides
+        padding = ((0, 0), (padding[0], padding[1]), (padding[2], padding[3]))
+    # Adjust the padding to the input
+    if input_type in ['img', 'coords']:
+        padding = ((0, 0),) + padding  # Add batch and channel dimensions
     # Pad the image with the padding size
     if input_type == 'img':
         # For images, use 'reflect' padding
-        return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='reflect')
+        return np.pad(img, padding, mode='reflect')
     elif input_type == 'labels':
         # For labels, use 'constant' padding with 0
-        return np.pad(img, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
+        return np.pad(img, padding, mode='constant')
     elif input_type == 'coords':
         # For coordinates, use 'constant' padding with -1
-        return np.pad(img, ((0, 0), (0, 0), (padding, padding), (padding, padding)), mode='constant', constant_values=-1)
+        return np.pad(img, padding, mode='constant', constant_values=-1)
     
 def pad_to_shape(feat, target_shape):
     """
@@ -495,8 +508,10 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
         Input image to be tiled. Must have spatial dimensions as the last two dimensions.
     annot : np.ndarray
         Input annotation to use for tiling. Must have spatial dimensions as the last two dimensions.
-    padding : int
+    padding : int or tuple
         Padding size to be added to the bounding box of the annotation.
+        If an int is provided, it is applied to all sides.
+        If a tuple is provided, it should be of the form (pad_top, pad_bottom, pad_left, pad_right).
 
     Returns:
     ----------
@@ -505,6 +520,7 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
     annot_tiles : list of np.ndarray
         List of annotation tiles that contain the annotations.
     """
+    pad_top, pad_bottom, pad_left, pad_right = (padding, padding, padding, padding) if isinstance(padding, int) else padding
     # Find the bounding boxes of the annotations
     annot_regions = skimage.morphology.label(annot > 0)
     regions = skimage.measure.regionprops(annot_regions)
@@ -529,10 +545,10 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
             im_to_show[y_min, x_min:x_max] = 1
             im_to_show[y_max-1, x_min:x_max] = 1
 
-        x_min -= padding
-        x_max += padding
-        y_min -= padding
-        y_max += padding
+        y_min -= pad_top
+        y_max += pad_bottom
+        x_min -= pad_left
+        x_max += pad_right
 
         if plot_tiles:
             # Draw the bounding box WITH PADDING on the image
@@ -732,7 +748,7 @@ def normalize_image(image, image_mean, image_std):
     if image.ndim < 2 or image.ndim > 4:
         raise ValueError("Array must have 2-4 dimensions")
     
-    # Avoid division by zero 
+    # Avoid division by zero
     image_std = np.maximum(image_std, 1e-6)
 
     img_norm = (image - image_mean) / image_std
