@@ -1234,6 +1234,7 @@ class ConvpaintModel:
             )
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
+        feature_img = feature_img if isinstance(feature_img, list) else [feature_img]
         predictions = [self._clf_predict(f, return_proba=True) for f in feature_img]
         # Reshape the predictions to the original image shape
         padded_shapes = self.padded_shapes # Saved when extracting features
@@ -1407,16 +1408,18 @@ class ConvpaintModel:
             use_rf=use_rf, allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm
         )
         feature_img = np.concatenate(feature_parts, axis=1)
+        print("Feature image shape:", feature_img.shape)
 
         # Prediction expects a list of patched features, but training extracts per-pixel
-        p = self.fe_model.get_patch_size()
-        feature_img_for_pred = [feature_img[..., ::p, ::p]]
+        if self.fe_model.gives_patched_features():
+            p = self.fe_model.get_patch_size()
+            feature_img = [feature_img[..., ::p, ::p]]
         # Predict the image using the features extracted
         # Note: This is a hack to use the prediction method for prediction, but it works
         probas = self._predict_image(
-            image, return_proba=True, feature_img=feature_img_for_pred)
+            image, return_proba=True, feature_img=feature_img)
         
-        # Create an probability image with the original shape of the image and the results in the annotated slices
+        # Create a probability image with the original shape of the image and the results in the annotated slices
         if annotations.ndim > 2:
             probas_img = np.zeros((probas.shape[0],) + annotations.shape, dtype=probas.dtype)
             probas_img[..., annot_slice_mask, :, :] = probas
