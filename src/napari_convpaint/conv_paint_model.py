@@ -456,7 +456,12 @@ class ConvpaintModel:
         Loads the model from a yml file.
         Only intended for internal use at model initiation.
         """
-        new_param = Param.load(yml_path)
+        new_param = ConvpaintModel.get_default_params() # Start with the default parameters
+        loaded_param = Param.load(yml_path)
+        if loaded_param is not None:
+            # Only set the parameters that are not None in the loaded_param
+            params_to_set = {key: value for key, value in loaded_param.__dict__.items() if value is not None}
+            new_param.set(**params_to_set)
         self._set_fe(new_param.fe_name, new_param.fe_use_gpu, new_param.fe_layers)
         self._param = new_param
 
