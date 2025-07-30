@@ -90,7 +90,8 @@ class Hookmodel(FeatureExtractor):
 
     def get_description(self):
         if self.model_name == 'vgg16':
-            desc = "CNN model. First layers extract low-level features. Add pyramid scalings to include broader context."
+            desc = "CNN model trained on ImageNet data. First layers extract low-level features."
+            desc += "\nAdd pyramid scalings to include broader context."
             desc += "\nGood for: differentiating textures, colours, brightness etc."
         elif self.model_name == 'efficient_netb0':
             desc = "EfficientNet model trained on ImageNet data."
@@ -112,7 +113,7 @@ class Hookmodel(FeatureExtractor):
             param.fe_layers = self.selectable_layer_keys[:1] # Use the first layer by default
         elif self.model_name == 'convnext':
             param.fe_scalings = [1,2]
-            param.fe_layers = self.selectable_layer_keys[:2]
+            param.fe_layers = self.selectable_layer_keys[:3] # Use the first 3 layers by default
 
         param.tile_annotations = True # Overwrite non-FE settings
 
