@@ -364,12 +364,16 @@ def pad(img, padding, input_type='img'):
     """
     if isinstance(padding, int):
         padding = ((0, 0), (padding, padding), (padding, padding))
-    elif isinstance(padding, tuple) and len(padding) == 2:
+    elif isinstance(padding, tuple) and len(padding) == 2 and isinstance(padding[0], int) and isinstance(padding[1], int):
         # If padding is a tuple of two ints, apply it to both height and width
         padding = ((0, 0), (padding[0], padding[0]), (padding[1], padding[1]))
-    elif isinstance(padding, tuple) and len(padding) == 4:
+    elif isinstance(padding, tuple) and len(padding) == 4 and all(isinstance(p, int) for p in padding):
         # If padding is a tuple of four ints, apply it to all sides
         padding = ((0, 0), (padding[0], padding[1]), (padding[2], padding[3]))
+    elif isinstance(padding, tuple) and len(padding) == 2 and isinstance(padding[0], tuple) and isinstance(padding[1], tuple):
+        # If padding is a tuple of two tuples, apply it to height and width separately
+        padding = ((0, 0),) + padding
+
     # Adjust the padding to the input
     if input_type in ['img', 'coords']:
         padding = ((0, 0),) + padding  # Add batch and channel dimensions
@@ -519,7 +523,18 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
     annot_tiles : list of np.ndarray
         List of annotation tiles that contain the annotations.
     """
-    pad_top, pad_bottom, pad_left, pad_right = (padding, padding, padding, padding) if isinstance(padding, int) else padding
+    if isinstance(padding, int):
+        pad_top, pad_bottom, pad_left, pad_right = (padding, padding, padding, padding)
+    elif isinstance(padding, tuple) and len(padding) == 2 and len(padding[0]) == 2:
+        pad_top, pad_bottom, pad_left, pad_right = (side for dim in padding for side in dim)
+    elif isinstance(padding, tuple) and len(padding) == 4:
+        pad_top, pad_bottom, pad_left, pad_right = padding
+    elif isinstance(padding, tuple) and len(padding) == 2 and isinstance(padding[0], int):
+        pad_top, pad_left = padding # Use first number for vertical padding, second for horizontal
+        pad_bottom, pad_right = padding # And pad the same on both sides
+    else:
+        raise ValueError(f"Padding must be an int or a tuple of 2 or 4 ints, got {padding}.")
+    
     # Find the bounding boxes of the annotations
     annot_regions = skimage.morphology.label(annot > 0)
     regions = skimage.measure.regionprops(annot_regions)

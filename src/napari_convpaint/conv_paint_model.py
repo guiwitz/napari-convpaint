@@ -783,11 +783,9 @@ class ConvpaintModel:
         # --- Padding ----------------------------
         # Record originals after resampling but BEFORE padding for reshaping and rescaling later
         self.pre_pad_shapes = [d.shape for d in data]  # list of (C,Z,H,W)
-        # Get the correct padding size for the feature extraction    
-        # padding = self._get_total_pad_size(params_for_extract)
+        # Get the correct padding size for the feature extraction
         paddings = [self._get_overall_paddings(params_for_extract, d.shape) for d in data]
         # Pad the images and annotations with the correct padding size
-        # data = [conv_paint_utils.pad(d, padding) for d in data]
         data = [conv_paint_utils.pad(d, p, input_type="img") for d, p in zip(data, paddings)]
         # Save the padded shapes for reshaping/rescaling later
         self.padded_shapes = [d.shape for d in data]
@@ -795,12 +793,8 @@ class ConvpaintModel:
             annotations = [conv_paint_utils.pad(a, p, input_type="labels") for a, p in zip(annotations, paddings)]
         if memory_mode:
             coords = [conv_paint_utils.pad(c, p, input_type="coords") for c, p in zip(coords, paddings)]
-            # print("Padded data shapes:")
-            # print(data[0].shape, coords[0].shape)
-            # print(coords[0][:, 0, 20, 20])
         else:
             coords = [None for _ in data]  # No coordinates if not in memory mode
-        # print("Annotations after padding:", len(annotations), "annot of shape", annotations[0].shape, "with values", [np.unique(a[0]) for a in annotations])
 
         # --- Annotation plane extraction -----------------------------------------
         # Note: annotated planes are flattened (treating them as individual images)
@@ -1380,7 +1374,7 @@ class ConvpaintModel:
         
         return predicted_image_complete
 
-    def _self_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False, add_seg=False):
+    def _train_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False, add_seg=False):
         """
         Extracts features from the image and uses them to both train and predict the image.
         Currently, only works for single images of which all slices are annotated.
@@ -1388,20 +1382,28 @@ class ConvpaintModel:
         """
 
         # Make sure all slices are annotated if multiple slices are given
-        valid_slices = np.any(annotations > 0, axis=(-2, -1))
+        annot_slice_mask = np.any(annotations > 0, axis=(-2, -1))
         # Check that all slices are valid
-        if not np.all(valid_slices):
-            raise ValueError("Not all slices are annotated. Currently only annotated slices can be used for self_prediction.")
+        # if not np.all(annot_slices):
+        #     raise ValueError("Not all slices are annotated. Currently only annotated slices can be used for self_prediction.")
+        # Extract the annotated image slices
+        if annotations.ndim > 2:
+            annot_img = image[..., annot_slice_mask, :, :]
+            annot_annot = annotations[..., annot_slice_mask, :, :]
+            assert annot_img.shape[-3:] == annot_annot.shape, "Annotated image and annotations must have the same (spatial) shape."
+        else:
+            annot_img = image
+            annot_annot = annotations
 
         # Save the old parameters, so we can change it specifically for this method
         old_params = self._param.copy()
-        # Turn off the tiling of annotations, since we want to extract the entire image to be reused for prediction
+        # Turn off the tiling of annotations, since we want to extract the entire image to be re-used for prediction
         self._param.set_single('tile_annotations', False)
 
         # Train, and get the features at the same time
         # Note: This is a hack to use the training method for prediction, but it works
-        _, feature_parts, _ = self._train(
-            data=image, annotations=annotations, memory_mode=False,
+        _, feature_parts, _ = self._train( # feature_parts corresponds to the annotated feature image slices (since no tiling)
+            data=annot_img, annotations=annot_annot, memory_mode=False,
             use_rf=use_rf, allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm
         )
         feature_img = np.concatenate(feature_parts, axis=1)
@@ -1413,19 +1415,26 @@ class ConvpaintModel:
         # Note: This is a hack to use the prediction method for prediction, but it works
         probas = self._predict_image(
             image, return_proba=True, feature_img=feature_img_for_pred)
+        
+        # Create an probability image with the original shape of the image and the results in the annotated slices
+        if annotations.ndim > 2:
+            probas_img = np.zeros((probas.shape[0],) + annotations.shape, dtype=probas.dtype)
+            probas_img[..., annot_slice_mask, :, :] = probas
+        else:
+            probas_img = probas
 
         # Restore input dimensionality (especially see if we want to remove z dimension)
-        probas = self._restore_dims(probas, image.shape)
+        probas_img = self._restore_dims(probas_img, image.shape)
 
         # Reset the parameters to the old ones
         self._param = old_params
 
         # Determine what to return
         if add_seg:
-            seg = self._probas_to_classes(probas)
-            return probas, seg
+            seg = self._probas_to_classes(probas_img)
+            return probas_img, seg
         else:
-            return probas
+            return probas_img
 
 ### HELPER METHODS
 
@@ -1644,12 +1653,12 @@ class ConvpaintModel:
         patch_multiple = scalings_lcm * fe_patch
 
         # Calculate the padding sizes for each dimension
-        padded_h = ( (min_h + patch_multiple - 1) // patch_multiple ) * patch_multiple # (patch_multiple - (min_h % patch_multiple)) % patch_multiple
-        padded_w = ( (min_w + patch_multiple - 1) // patch_multiple ) * patch_multiple # (patch_multiple - (min_w % patch_multiple)) % patch_multiple
-        pad_h = padded_h - img_shape[-2]  # Height padding
-        pad_w = padded_w - img_shape[-1]  # Width padding
+        padded_h = ( (min_h + patch_multiple - 1) // patch_multiple ) * patch_multiple
+        padded_w = ( (min_w + patch_multiple - 1) // patch_multiple ) * patch_multiple
+        pad_h = padded_h - img_shape[-2]
+        pad_w = padded_w - img_shape[-1]
 
-        # Ensure that the padding is at least the minimum padding and a multiple of the lcm_scaled patch size
+        # Ensure that the padding is at least the minimum padding on each side, and a multiple of the lcm-scaled patch size
         assert pad_h >= 2 * min_pad, f"Padding height {pad_h} is less than minimum padding 2x{min_pad}."
         assert pad_w >= 2 * min_pad, f"Padding width {pad_w} is less than minimum padding 2x{min_pad}."
         assert padded_h % patch_multiple == 0, f"Padded height {padded_h} is not a multiple of patch size {patch_multiple}."
@@ -1662,7 +1671,7 @@ class ConvpaintModel:
         pad_right = pad_w - pad_left
 
         # Return the overall padding sizes for the image
-        return (pad_top, pad_bottom, pad_left, pad_right)
+        return (pad_top, pad_bottom), (pad_left, pad_right)
 
     def _restore_shape(
         self,
