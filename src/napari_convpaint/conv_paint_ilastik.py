@@ -26,8 +26,8 @@ FILTERS = tuple(FILTER_LIST[row](SCALE_LIST[col]) for row, col in sorted(ALL_FIL
 FILTER_SET = FilterSet(filters=FILTERS)
 
 class IlastikFeatures(FeatureExtractor):
-    def __init__(self, model_name='ilastik_2d', use_cuda=False, **kwargs):
-        super().__init__(model_name=model_name, use_cuda=use_cuda)
+    def __init__(self, model_name='ilastik_2d', use_gpu=False, **kwargs):
+        super().__init__(model_name=model_name, use_gpu=use_gpu)
         self.padding = FILTER_SET.kernel_size // 2
 
     def get_description(self):

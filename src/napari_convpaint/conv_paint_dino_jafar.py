@@ -26,8 +26,8 @@ class DinoJafarFeatures(FeatureExtractor):
     {github.com/PaulCouairon/JAFAR/}
     """
 
-    def __init__(self, model_name="vit_small_patch14_reg4_dinov2", use_cuda=False):
-        super().__init__(model_name=model_name, use_cuda=use_cuda)
+    def __init__(self, model_name="vit_small_patch14_reg4_dinov2", use_gpu=False):
+        super().__init__(model_name=model_name, use_gpu=use_gpu)
         self.patch_size = 14          # token size of ViT
         self.padding    = 0           # model-internal extra pad (none)
         self.num_input_channels = [3] # RGB
@@ -40,12 +40,12 @@ class DinoJafarFeatures(FeatureExtractor):
     # Load JAFAR upscaler and DINOv2 backbone
     # ------------------------------------------------------------------ #
     @staticmethod
-    def create_model(model_name="vit_small_patch14_reg4_dinov2", use_cuda=False):
+    def create_model(model_name="vit_small_patch14_reg4_dinov2", use_gpu=False):
         """
         Load DINOv2 backbone and JAFAR model head from remote .pth checkpoints using guided download.
         """
 
-        device = get_device(use_cuda)
+        device = get_device(use_gpu)
 
         # Define filenames
         backbone_file = "dinov2_vits14_reg4_pretrain.pth"

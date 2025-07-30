@@ -663,14 +663,14 @@ def get_features_targets(features, annot):
 
 ### DEVICE & NORMALIZATION
 
-def get_device(use_cuda=None):
+def get_device(use_gpu=None):
     """
     Get the device to use for PyTorch operations.
     If CUDA is available, use the first available GPU. If MPS is available, use it.
 
     Parameters:
     ----------
-    use_cuda : bool, optional
+    use_gpu : bool, optional
         If True, use CUDA if available. If False, use CPU. Default is None.
 
     Returns:
@@ -678,7 +678,7 @@ def get_device(use_cuda=None):
     device : torch.device
         The device to use for PyTorch operations.
     """
-    if use_cuda:
+    if use_gpu:
         if torch.cuda.is_available():
             return torch.device('cuda:0')  # use first available GPU
         elif torch.backends.mps.is_available(): #check if mps is available
@@ -709,14 +709,14 @@ def get_device_from_torch_model(model):
         except StopIteration:
             return torch.device("unknown")
 
-def get_catboost_device(use_cuda=None):
+def get_catboost_device(use_gpu=None):
     """
     Get the device to use for CatBoost operations.
     If CUDA is available, use the first available GPU. If MPS is available, use it.
 
     Parameters:
     ----------
-    use_cuda : bool, optional
+    use_gpu : bool, optional
         If True, use CUDA if available. If False, use CPU. Default is None.
 
     Returns:
@@ -724,7 +724,7 @@ def get_catboost_device(use_cuda=None):
     device : str
         The device to use for CatBoost operations.
     """
-    if use_cuda:
+    if use_gpu:
         if torch.cuda.is_available():
             return 'GPU'
         else:

@@ -5,8 +5,8 @@ from .conv_paint_feature_extractor import FeatureExtractor
 AVAILABLE_MODELS = ['gaussian_features']
 
 class GaussianFeatures(FeatureExtractor):
-    def __init__(self, model_name='gaussian_features', use_cuda=False, sigma=3, **kwargs):
-        super().__init__(model_name=model_name, use_cuda=use_cuda)
+    def __init__(self, model_name='gaussian_features', use_gpu=False, sigma=3, **kwargs):
+        super().__init__(model_name=model_name, use_gpu=use_gpu)
         self.sigma = sigma
         self.padding = 2*sigma # Padding established empirically to avoid edge effects
 

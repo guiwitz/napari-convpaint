@@ -10,9 +10,9 @@ AVAILABLE_MODELS = [] # List the available model names here
 # 2) DEFINE THE INITIALIZATION, DESCRIPTION AND DEFAULT PARAMETERS
 class GaussianFeatures(FeatureExtractor):
     # Define the initiation method
-    def __init__(self, model_name='gaussian_features', use_cuda=False):
+    def __init__(self, model_name='gaussian_features', use_gpu=False):
         # Sets some default parameters and chooses the itialization method
-        super().__init__(model_name=model_name, use_cuda=use_cuda)
+        super().__init__(model_name=model_name, use_gpu=use_gpu)
 
         # Define specifications for the feature extractor model, if necessary
         # self.padding = 0

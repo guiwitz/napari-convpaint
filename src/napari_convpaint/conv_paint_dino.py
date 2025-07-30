@@ -6,10 +6,10 @@ from .conv_paint_feature_extractor import FeatureExtractor
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
 
 class DinoFeatures(FeatureExtractor):
-    def __init__(self, model_name='dinov2_vits14_reg', use_cuda=False):
+    def __init__(self, model_name='dinov2_vits14_reg', use_gpu=False):
         
-        # Sets self.model_name and self.use_cuda and creates the model
-        super().__init__(model_name=model_name, use_cuda=use_cuda)
+        # Sets self.model_name and self.use_gpu and creates the model
+        super().__init__(model_name=model_name, use_gpu=use_gpu)
         
         self.patch_size = 14
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
@@ -19,7 +19,7 @@ class DinoFeatures(FeatureExtractor):
         self.device = get_device_from_torch_model(self.model)
 
     @staticmethod
-    def create_model(model_name, use_cuda=False):
+    def create_model(model_name, use_gpu=False):
         # Validate for forks to prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
         torch.hub._validate_not_a_forked_repo=lambda a, b, c: True
 
@@ -36,7 +36,7 @@ class DinoFeatures(FeatureExtractor):
 
         # Set model to evaluation mode and move it to the correct device
         model.eval()
-        model = model.to(get_device(use_cuda))
+        model = model.to(get_device(use_gpu))
 
         return model
 
@@ -49,7 +49,7 @@ class DinoFeatures(FeatureExtractor):
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
         param.fe_name = self.model_name
-        param.fe_use_gpu = self.use_cuda
+        param.fe_use_gpu = self.use_gpu
         param.fe_layers = []
         param.fe_scalings = [1]
         param.fe_order = 0
@@ -74,7 +74,7 @@ class DinoFeatures(FeatureExtractor):
             features_dict = self.model.forward_features(image_tensor)
         features = features_dict['x_norm_patchtokens']
 
-        if self.use_cuda:
+        if self.use_gpu:
             features = features.cpu()
 
         # Move features first, and reshape to spatial dimensions

@@ -11,18 +11,18 @@ AVAILABLE_MODELS = ['cellpose_backbone']
 
 class CellposeFeatures(FeatureExtractor):
 
-    def __init__(self, model_name='cellpose_backbone', model=None, use_cuda=False):
+    def __init__(self, model_name='cellpose_backbone', model=None, use_gpu=False):
 
-        super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
+        super().__init__(model_name=model_name, model=model, use_gpu=use_gpu)
         self.patch_size = 8
 
         self.device = self.model.device if self.model is not None else None
 
     @staticmethod
-    def create_model(model_name, use_cuda=False):
+    def create_model(model_name, use_gpu=False):
         # Load the cellpose model
         model_cellpose = models.CellposeModel(model_type='tissuenet_cp3',
-                                              gpu=use_cuda)
+                                              gpu=use_gpu)
         return model_cellpose.net
     
     def get_description(self):
@@ -35,7 +35,7 @@ class CellposeFeatures(FeatureExtractor):
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
         param.fe_name = self.model_name
-        param.fe_use_gpu = self.use_cuda
+        param.fe_use_gpu = self.use_gpu
         param.fe_layers = []
         param.fe_scalings = [1]
         param.fe_order = 0

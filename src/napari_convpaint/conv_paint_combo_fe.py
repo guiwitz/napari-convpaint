@@ -36,7 +36,7 @@ class ComboFeatures(FeatureExtractor):
     ----------
     model_name : str
         Name of the model, e.g. 'combo_dino_vgg'.
-    use_cuda : bool
+    use_gpu : bool
         If True, use the GPU for feature extraction.
 
     Attributes
@@ -50,36 +50,36 @@ class ComboFeatures(FeatureExtractor):
     device : str
         Device used for feature extraction.
     """
-    def __init__(self, model_name='combo_dino_vgg', use_cuda=False):
+    def __init__(self, model_name='combo_dino_vgg', use_gpu=False):
         
-        # Sets self.model_name and self.use_cuda and creates the model
-        # Use "use_cuda=False" to force CPU mode; and move them manually below
-        super().__init__(model_name=model_name, use_cuda=False)
+        # Sets self.model_name and self.use_gpu and creates the model
+        # Use "use_gpu=False" to force CPU mode; and move them manually below
+        super().__init__(model_name=model_name, use_gpu=False)
 
         self.model1, self.model2 = self.model
         self.feature_extraction = False
 
         # Move all models to the device manually to ensure they are all on the same...
-        self.use_cuda = use_cuda
-        self.device = get_device(use_cuda)
+        self.use_gpu = use_gpu
+        self.device = get_device(use_gpu)
         for fe in self.model:
             if fe.model is None:
                 continue
             fe.model = fe.model.to(self.device)
             fe.model.eval()
             fe.device = self.device
-            fe.use_cuda = self.use_cuda
+            fe.use_gpu = self.use_gpu
 
     @staticmethod
-    def create_model(model_name, use_cuda=False):
+    def create_model(model_name, use_gpu=False):
         constructors = COMBOS[model_name]['constructors']
         names = COMBOS[model_name]['model names']
         if len(constructors) != 2:
             raise ValueError(f"Expected 2 constructors, got {len(constructors)}")
         if len(names) != 2:
             raise ValueError(f"Expected 2 model names, got {len(names)}")
-        model1 = constructors[0](model_name=names[0], use_cuda=use_cuda)
-        model2 = constructors[1](model_name=names[1], use_cuda=use_cuda)
+        model1 = constructors[0](model_name=names[0], use_gpu=use_gpu)
+        model2 = constructors[1](model_name=names[1], use_gpu=use_gpu)
         return (model1, model2)
 
     def get_description(self):
@@ -89,7 +89,7 @@ class ComboFeatures(FeatureExtractor):
     def get_default_params(self, param=None):
         param = super().get_default_params(param=param)
         param.fe_name = self.model_name
-        param.fe_use_gpu = self.use_cuda
+        param.fe_use_gpu = self.use_gpu
         param.fe_layers = [0]
         param.fe_scalings = [1]
         param.fe_order = 0

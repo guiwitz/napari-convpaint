@@ -18,7 +18,7 @@ class Hookmodel(FeatureExtractor):
         Name of model to use. Currently only 'vgg16' and 'efficient_netb0' are supported.
     model : torch model, optional
         Model to extract features from, by default None
-    use_cuda : bool, optional
+    use_gpu : bool, optional
         Use cuda, by default False
     layers : list of str or int, optional
         List of layer keys (if string) or indices (int) to extract features from, by default None
@@ -35,9 +35,9 @@ class Hookmodel(FeatureExtractor):
         List of hooked layers, their names, and their indices in the model (if applicable)
     """
 
-    def __init__(self, model_name='vgg16', model=None, use_cuda=None, layers=None):
+    def __init__(self, model_name='vgg16', model=None, use_gpu=None, layers=None):
         
-        super().__init__(model_name=model_name, model=model, use_cuda=use_cuda)
+        super().__init__(model_name=model_name, model=model, use_gpu=use_gpu)
 
         # REGISTER DEVICE OF THE MODEL
         self.device = get_device_from_torch_model(self.model)
@@ -52,7 +52,7 @@ class Hookmodel(FeatureExtractor):
             self.register_hooks(self.get_default_params().fe_layers)
 
     @staticmethod
-    def create_model(model_name, use_cuda=False):
+    def create_model(model_name, use_gpu=False):
 
         # CREATE VGG16 MODEL
         if model_name == 'vgg16':
@@ -84,7 +84,7 @@ class Hookmodel(FeatureExtractor):
         
         # Set model to evaluation mode and move it to the correct device
         model.eval()
-        model = model.to(get_device(use_cuda))
+        model = model.to(get_device(use_gpu))
 
         return model
 

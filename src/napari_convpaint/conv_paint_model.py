@@ -488,7 +488,7 @@ class ConvpaintModel:
         if fe_name_changed or fe_use_gpu_changed or fe_layers_changed:
             self.fe_model = ConvpaintModel.create_fe(
                 name=fe_name,
-                use_cuda=fe_use_gpu,
+                use_gpu=fe_use_gpu,
                 layers=fe_layers
             )
         
@@ -496,7 +496,7 @@ class ConvpaintModel:
         self._param.set(fe_name=fe_name, fe_use_gpu=fe_use_gpu, fe_layers=fe_layers)
 
     @staticmethod
-    def create_fe(name, use_cuda=None, layers=None):
+    def create_fe(name, use_gpu=None, layers=None):
         """
         Creates a feature extractor model based on the given parameters.
         Distinguishes between different types of feature extractors such as Hookmodels
@@ -506,7 +506,7 @@ class ConvpaintModel:
         ----------
         name : str
             Name of the feature extractor model
-        use_cuda : bool, optional
+        use_gpu : bool, optional
             Whether to use CUDA for the feature extractor
         layers : list[str], optional
             List of layer names to extract features from, by default None
@@ -526,13 +526,13 @@ class ConvpaintModel:
         if fe_model_class is Hookmodel:
             fe_model = fe_model_class(
                 model_name=name,
-                use_cuda=use_cuda,
+                use_gpu=use_gpu,
                 layers=layers
         )
         else:
             fe_model = fe_model_class(
                 model_name=name,
-                use_cuda=use_cuda
+                use_gpu=use_gpu
             )
 
         # Check if the model was created successfully

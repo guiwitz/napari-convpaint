@@ -4,7 +4,7 @@ from .conv_paint_param import Param
 from .conv_paint_utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape
 
 class FeatureExtractor:
-    def __init__(self, model_name="vgg16", model=None, use_cuda=None, **kwargs):
+    def __init__(self, model_name="vgg16", model=None, use_gpu=None, **kwargs):
         """
         Initializing a feature extractor. This is a superclass for all feature extractors.
 
@@ -14,12 +14,12 @@ class FeatureExtractor:
             The name of the model to use. If model is not None, this parameter is ignored.
         model : object
             The model to use. If not None, this model is used instead of creating a new model.
-        use_cuda : bool
+        use_gpu : bool
             Whether to use CUDA or not. If not provided, the default is False.
         """
 
         self.model_name = model_name
-        self.use_cuda = use_cuda
+        self.use_gpu = use_gpu
 
         # Define specifications for the feature extractor model
         self.padding = 0
@@ -35,10 +35,10 @@ class FeatureExtractor:
             self.model = model
         # ELSE CREATE MODEL
         else:
-            self.model = self.create_model(model_name, use_cuda=use_cuda)
+            self.model = self.create_model(model_name, use_gpu=use_gpu)
 
     @staticmethod
-    def create_model(model_name, use_cuda=None):
+    def create_model(model_name, use_gpu=None):
         """
         This method is intended to be overridden by subclasses to load the specific model.
 
