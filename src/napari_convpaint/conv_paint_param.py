@@ -28,6 +28,10 @@ class Param:
             if True, extract only features of bounding boxes around annotated areas
         tile_image : bool
             if True, extract features in tiles (for large images)
+        use_dask : bool
+            if True, use dask for parallel processing
+        unpatch_order : int
+            order of interpolation for unpatching the output (default is 1, i.e. bilinear interpolation)
         fe_name : str
             name of the feature extractor model
         fe_layers : list[str]
@@ -62,6 +66,7 @@ class Param:
     tile_annotations: bool = None
     tile_image: bool = None
     use_dask: bool = None
+    unpatch_order: int = None # Order of interpolation for unpatching the output (default is 1, i.e. bilinear interpolation)
 
     # Feature Extractor parameters
     fe_name: str = None

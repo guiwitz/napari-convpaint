@@ -122,6 +122,7 @@ class ConvpaintModel:
                                         #   'tile_annotations',
                                         #   'tile_image',
                                         #   'use_dask',
+                                        #   'unpatch_order',
                                           'fe_name',
                                         #   'fe_use_gpu',
                                           'fe_layers',
@@ -140,6 +141,7 @@ class ConvpaintModel:
                                     #  'tile_annotations',
                                     #  'tile_image',
                                     #  'use_dask',
+                                    # 'unpatch_order',
                                      'fe_name',
                                     #  'fe_use_gpu',
                                      'fe_layers',
@@ -261,6 +263,8 @@ class ConvpaintModel:
         def_param.seg_smoothening = 1
         def_param.tile_annotations = True
         def_param.tile_image = False
+        def_param.use_dask = False
+        def_param.unpatch_order = 1
 
         # FE parameters
         def_param.fe_name = "vgg16"
@@ -766,6 +770,7 @@ class ConvpaintModel:
         if use_annots:
             annotations = [conv_paint_utils.scale_img(a, factor, input_type="labels", upscale=upscale)
                         for a in annotations]
+            
 
         # --- Memory mode: annotation registering & updating ---------------------------------------
         if memory_mode:
@@ -1408,7 +1413,6 @@ class ConvpaintModel:
             use_rf=use_rf, allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm
         )
         feature_img = np.concatenate(feature_parts, axis=1)
-        print("Feature image shape:", feature_img.shape)
 
         # Prediction expects a list of patched features, but training extracts per-pixel
         if self.fe_model.gives_patched_features():
@@ -1735,9 +1739,10 @@ class ConvpaintModel:
                 outputs_image, output_shape=new_shape)
         else:
             new_shape = (num_outputs, padded_z, patch_multi_h, patch_multi_w)
+            order = self._param.unpatch_order
             outputs_image = conv_paint_utils.rescale_outputs(
                 outputs_image, output_shape=new_shape,
-                order=1)
+                order=order)
 
         # 3) Remove padding
         # Ensure to only remove the part of padding that was not removed by reduce_to_patch_multiple in the FE model

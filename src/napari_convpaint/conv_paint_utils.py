@@ -144,34 +144,36 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
     if input_type == 'img':
         # Apply a small Gaussian blur to avoid aliasing
         sigma = 0.4 * scaling_factor
-        blurred_img = gaussian_filter(image, sigma=(0, 0, sigma, sigma))  # assuming shape (..., H, W)
+        sigma = [0] * (image.ndim - 2) + [sigma, sigma]  # Add zeros for batch and channel dimensions
+        blurred_img = gaussian_filter(image, sigma=sigma)  # assuming shape (..., H, W)
         # Downsample by striding
-        scaled_img = blurred_img[..., ::scaling_factor, ::scaling_factor]
+        H, W = image.shape[-2:]
+        start_h = (H % scaling_factor) // 2 # Move the start such that the image is centered
+        start_w = (W % scaling_factor) // 2 # Move the start such that the image is centered
+        scaled_img = blurred_img[..., start_h::scaling_factor, start_w::scaling_factor]
         # from matplotlib import pyplot as plt
         # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
         # ax[0].imshow(image[0,0,...], cmap='gray')
         # ax[1].imshow(blurred_img[0,0,...], cmap='gray')
         # ax[2].imshow(scaled_img[0,0,...], cmap='gray')
-        # plt.show()
+        plt.show()
         return scaled_img
 
-    # # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
-    # # Slice the last two dimensions
-    slice_start = ((image.shape[-2] % scaling_factor) // 2,
-                     (image.shape[-1] % scaling_factor) // 2)
-    slice_size = (image.shape[-2] // scaling_factor * scaling_factor,
-                image.shape[-1] // scaling_factor * scaling_factor)
-    sliced_img = image[
-        ..., 
-        slice_start[0]:slice_start[0] + slice_size[0],
-        slice_start[1]:slice_start[1] + slice_size[1]
-    ]
-    # Reshape to group elements for downscaling
-    stacked_blocks = sliced_img.reshape(
-        *image.shape[:-2],  # Preserve all leading dimensions
-        slice_size[0] // scaling_factor, scaling_factor,
-        slice_size[1] // scaling_factor, scaling_factor
-    )    
+    # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
+    # First, we pad to the next multiple of the scaling factor, distributing on each side (with 1 pixel more on bottom/right if uneven)
+    if image.shape[-2] % scaling_factor != 0 or image.shape[-1] % scaling_factor != 0:
+        # Calculate padding sizes
+        pad_h = (scaling_factor - (image.shape[-2] % scaling_factor)) % scaling_factor
+        pad_w = (scaling_factor - (image.shape[-1] % scaling_factor)) % scaling_factor
+        pad_top, pad_left = pad_h // 2, pad_w // 2
+        pad_bot, pad_right = pad_h - pad_top, pad_w - pad_left
+        # Pad the image
+        image = pad(image, (pad_top, pad_bot, pad_left, pad_right), input_type=input_type)
+    # Slice the last two dimensions
+    slice_start = (0, 0) #((image.shape[-2] % scaling_factor) // 2,
+                    #  (image.shape[-1] % scaling_factor) // 2)
+    slice_size = (image.shape[-2] // scaling_factor * scaling_factor, # These should now be equal to image shape, since we padded ...
+                image.shape[-1] // scaling_factor * scaling_factor) # ... to the next multiple of the scaling factor
 
     if input_type == 'labels':
         classes_before = np.unique(image)
@@ -203,10 +205,27 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         classes_after = np.unique(scaled_img)
         if len(classes_before) != len(classes_after):
             warnings.warn(f"Classes have changed after downscaling from {classes_before} to {classes_after}.")
+
+        # from matplotlib import pyplot as plt
+        # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        # ax[0].imshow(image[0,...], cmap='gray')
+        # ax[1].imshow(scaled_img[0,...], cmap='gray')
+        # plt.show()
         return scaled_img
 
     elif input_type == 'coords':
-        scaled_img = np.min(stacked_blocks, axis=(-3, -1))
+        sliced_img = image[
+            ..., 
+            slice_start[0]:slice_start[0] + slice_size[0],
+            slice_start[1]:slice_start[1] + slice_size[1]
+        ]
+        # Reshape to group elements for downscaling
+        stacked_blocks = sliced_img.reshape(
+            *image.shape[:-2],  # Preserve all leading dimensions
+            slice_size[0] // scaling_factor, scaling_factor,
+            slice_size[1] // scaling_factor, scaling_factor
+        )
+        scaled_img = np.max(stacked_blocks, axis=(-3, -1)) # Take max so we ignore the padding with -1 values
         return scaled_img
 
     else:
@@ -354,8 +373,9 @@ def pad(img, padding, input_type='img'):
         Padding size to be added to the image.
         If an int is provided, it is applied to all sides.
         If a tuple is provided, it should be of the form (pad_top, pad_bottom, pad_left, pad_right).
-    use_labels : bool
-        If True, use constant padding for labels. Default is False.
+    input_type : str
+        Type of the input image. Determines how to pad the image:
+        If "img", use 'reflect' padding, if "labels", use 'constant' padding with 0, if "coords", use 'constant' padding with -1.
 
     Returns:
     ----------
@@ -363,20 +383,19 @@ def pad(img, padding, input_type='img'):
         Padded image.
     """
     if isinstance(padding, int):
-        padding = ((0, 0), (padding, padding), (padding, padding))
+        padding = ((padding, padding), (padding, padding))
     elif isinstance(padding, tuple) and len(padding) == 2 and isinstance(padding[0], int) and isinstance(padding[1], int):
         # If padding is a tuple of two ints, apply it to both height and width
-        padding = ((0, 0), (padding[0], padding[0]), (padding[1], padding[1]))
+        padding = ((padding[0], padding[0]), (padding[1], padding[1]))
     elif isinstance(padding, tuple) and len(padding) == 4 and all(isinstance(p, int) for p in padding):
         # If padding is a tuple of four ints, apply it to all sides
-        padding = ((0, 0), (padding[0], padding[1]), (padding[2], padding[3]))
+        padding = ((padding[0], padding[1]), (padding[2], padding[3]))
     elif isinstance(padding, tuple) and len(padding) == 2 and isinstance(padding[0], tuple) and isinstance(padding[1], tuple):
         # If padding is a tuple of two tuples, apply it to height and width separately
-        padding = ((0, 0),) + padding
+        padding = padding
 
     # Adjust the padding to the input
-    if input_type in ['img', 'coords']:
-        padding = ((0, 0),) + padding  # Add batch and channel dimensions
+    padding = ((0, 0),) * (img.ndim - 2) + padding  # Add batch and channel dimensions if necessary
     # Pad the image with the padding size
     if input_type == 'img':
         # For images, use 'reflect' padding
