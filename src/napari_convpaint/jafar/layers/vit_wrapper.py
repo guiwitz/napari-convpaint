@@ -48,7 +48,7 @@ class PretrainedViTWrapper(nn.Module):
         self,
         name,
         norm: bool = True,
-        stride: int | None = None,
+        stride = None,
         dynamic_img_size: bool = True,
         dynamic_img_pad: bool = False,
         **kwargs,
