@@ -690,7 +690,7 @@ def get_device(use_gpu=None):
     Parameters:
     ----------
     use_gpu : bool, optional
-        If True, use CUDA if available. If False, use CPU. Default is None.
+        If True, use GPU if available. If False, use CPU. Default is None.
 
     Returns:
     ----------

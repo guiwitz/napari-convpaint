@@ -37,7 +37,7 @@ class Param:
         fe_layers : list[str]
             list of layers (names) to extract features from
         fe_use_gpu : bool
-            whether to use cuda (GPU) for feature extraction
+            whether to use GPU for feature extraction
         fe_scalings : list[int]
             list of scaling factors for the feature extractor, creating a pyramid of features
             (features are upscaled accordingly before input to classifier)

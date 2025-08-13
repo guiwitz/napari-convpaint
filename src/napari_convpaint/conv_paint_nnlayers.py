@@ -19,7 +19,7 @@ class Hookmodel(FeatureExtractor):
     model : torch model, optional
         Model to extract features from, by default None
     use_gpu : bool, optional
-        Use cuda, by default False
+        Use gpu, by default False
     layers : list of str or int, optional
         List of layer keys (if string) or indices (int) to extract features from, by default None
 

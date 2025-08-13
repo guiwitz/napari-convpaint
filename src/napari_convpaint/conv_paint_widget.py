@@ -333,8 +333,8 @@ class ConvPaintWidget(QWidget):
         self.check_use_min_features.setToolTip('Use same number of features from each layer. Otherwise use all features from each layer.')
         self.fe_group.glayout.addWidget(self.check_use_min_features, 6, 0, 1, 1)
 
-        # Add use cuda checkbox to FE group
-        self.check_use_gpu = QCheckBox('Use cuda')
+        # Add use gpu checkbox to FE group
+        self.check_use_gpu = QCheckBox('Use GPU')
         self.check_use_gpu.setChecked(False)
         self.check_use_gpu.setToolTip('Use GPU for training and segmentation')
         self.fe_group.glayout.addWidget(self.check_use_gpu, 6, 1, 1, 1)
@@ -1627,9 +1627,9 @@ class ConvPaintWidget(QWidget):
         """Update GUI to show selectable layers of model chosen from drop-down."""
         # Create a temporary model to get the layers (to display) and default parameters
         new_fe_type = self.qcombo_fe_type.currentText()
-        current_cuda = self.cp_model.get_param("fe_use_gpu")
+        current_gpu = self.cp_model.get_param("fe_use_gpu")
         self.temp_fe_model = ConvpaintModel.create_fe(new_fe_type,
-                                                      current_cuda)
+                                                      current_gpu)
 
         # Update the GUI to show the FE layers of the temp model
         self._update_gui_fe_layer_choice_from_temp_model()

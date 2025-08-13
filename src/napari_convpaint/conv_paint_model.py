@@ -44,7 +44,7 @@ class ConvpaintModel:
     fe_name : str, optional
         Name of the feature extractor model, by default None
     fe_use_gpu : bool, optional
-        Whether to use CUDA for the feature extractor (if initialized by name), by default None
+        Whether to use GPU for the feature extractor (if initialized by name), by default None
     fe_layers : list[str], optional
         List of layer names to extract features from (if initialized by name), by default None
     **kwargs : additional parameters
@@ -83,7 +83,7 @@ class ConvpaintModel:
         2. By providing a saved model path (model_path) to load a pre-trained model.
         This can be a .pkl file (holding the clf and FE models) or .yml file (defining the model parameters).
         3. By providing a Param object, which contains model parameters.
-        4. By providing the name of the feature extractor, CUDA usage, and feature extraction layers, in which case
+        4. By providing the name of the feature extractor, GPU usage, and feature extraction layers, in which case
         the additional kwargs will be used to override the defaults of the feature extractor model.
         
         If none of the options are provided, a default Convpaint model will be created.
@@ -99,7 +99,7 @@ class ConvpaintModel:
         fe_name : str, optional
             Name of the feature extractor model, by default None.
         fe_use_gpu : bool, optional
-            Whether to use CUDA for the feature extractor, by default None.
+            Whether to use GPU for the feature extractor, by default None.
         fe_layers : list[str], optional
             List of layers to extract features from, by default None.
         **kwargs : additional parameters, used when initialzing the model by name
@@ -181,7 +181,7 @@ class ConvpaintModel:
             self._param = self.get_fe_defaults()
             self.set_params(ignore_warnings=True, # Here at initiation, it is intended to set FE parameters...
                             fe_layers = fe_layers, # Overwrite the layers with the given layers
-                            fe_use_gpu = fe_use_gpu, # Overwrite the cuda usage with the given cuda usage
+                            fe_use_gpu = fe_use_gpu, # Overwrite the gpu usage with the given gpu usage
                             **kwargs) # Overwrite the parameters with the given parameters
         else:
             cpm_defaults = ConvpaintModel.get_default_params()
@@ -516,7 +516,7 @@ class ConvpaintModel:
         name : str
             Name of the feature extractor model
         use_gpu : bool, optional
-            Whether to use CUDA for the feature extractor
+            Whether to use GPU for the feature extractor
         layers : list[str], optional
             List of layer names to extract features from, by default None
 

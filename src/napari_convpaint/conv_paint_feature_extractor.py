@@ -15,7 +15,7 @@ class FeatureExtractor:
         model : object
             The model to use. If not None, this model is used instead of creating a new model.
         use_gpu : bool
-            Whether to use CUDA or not. If not provided, the default is False.
+            Whether to use GPU or not. If not provided, the default is False.
         """
 
         self.model_name = model_name
