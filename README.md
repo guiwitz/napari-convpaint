@@ -9,10 +9,11 @@
 
 
 ![overview conv-paint](/images/overview_github.png)
-This tool, that comes both as a napari plugin and an intuitive Python API, can be used to segment objects or structures in images based on a few examples for the classes provided by the user in form of scribbles onto the image. Following an idea similar to other tools like ilastik, its main strength lies in its capability to use features from basically any model that creates meaningful features describing an image: from neural networks like VGG16 to foundational ViTs such as DINOV2, but also popular models such as Ilastik or Cellpose. This enables the segmentation of virtually any type of image, from simple to complex - without the need of switching and learning new tools.
+This tool, that comes both as a napari plugin and an intuitive Python API, can be used to segment objects or structures in images based on a few examples for the classes provided by the user in form of scribbles onto the image.
 
-**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint] of the paper (https://doi.org/10.1101/2024.09.12.610926).**
+Following an idea similar to other tools like ilastik, its main strength lies in its capability to use features from basically any model that creates meaningful features describing an image: from neural networks like VGG16 to foundational ViTs such as DINOV2, but also popular models such as Ilastik or Cellpose. This enables the segmentation of virtually any type of image, from simple to complex - without the need of switching and learning new tools.
 
+**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint of the paper](https://doi.org/10.1101/2024.09.12.610926).**
 
 ![overview conv-paint](/images/network_github.png)
 
@@ -36,11 +37,13 @@ These are the scribble annotations provided for training:
 And this is the resulting Convpaint segmentation:
 <video src="https://github.com/user-attachments/assets/6a2be1fe-25cc-4af1-9f50-aab9bc4123d9"></video>
 
-Check out the documentation or the paper for more usecases!
+Check out the [documentation](https://guiwitz.github.io/napari-convpaint/book/Landing.html) or the [paper](https://doi.org/10.1101/2024.09.12.610926) for more usecases!
 
 ## API
 
-You can use the Convpaint API in a fashion very similar to the napari plugin. The ConvpaintModel class combines a feature extractor and a classifier model, and holds all the parameters defining the model. Initialize a ConvpaintModel object, train its classifier and use it to segment an image:
+You can use the Convpaint API in a fashion very similar to the napari plugin. The `ConvpaintModel` class combines a feature extractor and a classifier model, and holds all the parameters defining the model.
+
+Initialize a `ConvpaintModel` object, train its classifier and use it to segment an image:
 
 ```Python
 cp_model = ConvpaintModel("dino") # alternatively use vgg, cellpose or gaussian
@@ -48,7 +51,7 @@ cp_model.train(image, annotations)
 segmentation = cp_model.segment(image)
 ```
 
-There are many other options, such as predicting all classes as separate probabilities (see below). Please refer to the documentation for more details.
+There are many other options, such as predicting all classes as separate *probabilities* (see below). Please refer to the [documentation](https://guiwitz.github.io/napari-convpaint/book/Landing.html) for more details.
 
 ```Python
 probas = cp_model.predict_probas(image)
