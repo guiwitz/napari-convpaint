@@ -9,9 +9,9 @@
 
 
 ![overview conv-paint](/images/overview_github.png)
-This napari plugin can be used to segment objects or structures in images based on a few brush strokes providing examples of the classes. Based on the same idea as other tools like ilastik, its main strength is that it can use features from pretrained neural networks like VGG16 or DINOV2, enabling the segmentation of more complex images.
+This tool, that comes both as a napari plugin and an intuitive Python API, can be used to segment objects or structures in images based on a few examples for the classes provided by the user in form of scribbles onto the image. Following an idea similar to other tools like ilastik, its main strength lies in its capability to use features from basically any model that creates meaningful features describing an image: from neural networks like VGG16 to foundational ViTs such as DINOV2, but also popular models such as Ilastik or Cellpose. This enables the segmentation of virtually any type of image, from simple to complex - without the need of switching and learning new tools.
 
-**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint](https://doi.org/10.1101/2024.09.12.610926).**
+**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint] of the paper (https://doi.org/10.1101/2024.09.12.610926).**
 
 
 ![overview conv-paint](/images/network_github.png)
@@ -22,7 +22,7 @@ You can install `napari-convpaint` via [pip]:
 
     pip install napari-convpaint
 
-*Note: If you are running into an error that vispy requires a certain C++ version, but you want to avoid this, you can install vispy via `conda install vispy` and then install `napari-convpaint` via `pip` to avoid this.*
+*Note: If you are running into an error that vispy requires a certain C++ version, you can install vispy via `conda install vispy` and then install `napari-convpaint` via `pip` to avoid this.*
 
 To install the latest development version:
 
@@ -40,7 +40,7 @@ Check out the documentation or the paper for more usecases!
 
 ## API
 
-You can now use the API in a fashion very similar to the napari plugin. The ConvpaintModel class combines a feature extractor and a classifier model, and holds all the parameters defining the model. Initialize a ConvpaintModel object, train its classifier and use it to segment an image:
+You can use the Convpaint API in a fashion very similar to the napari plugin. The ConvpaintModel class combines a feature extractor and a classifier model, and holds all the parameters defining the model. Initialize a ConvpaintModel object, train its classifier and use it to segment an image:
 
 ```Python
 cp_model = ConvpaintModel("dino") # alternatively use vgg, cellpose or gaussian
@@ -48,7 +48,7 @@ cp_model.train(image, annotations)
 segmentation = cp_model.segment(image)
 ```
 
-There are many other options, such as predicting all class probabilities (see below) and we will update the documentation and notebook examples soon. In the meantime feel free to test it yourself.
+There are many other options, such as predicting all classes as separate probabilities (see below). Please refer to the documentation for more details.
 
 ```Python
 probas = cp_model.predict_probas(image)
@@ -94,7 +94,7 @@ The idea behind this napari plugin was first developed by [Lucien Hinderling](ht
 
 ## Cite Convpaint
 
-If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used in Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/), [DINOv2](https://github.com/facebookresearch/dinov2) or [JAFAR](https://github.com/PaulCouairon/JAFAR).
+If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used within Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/), [DINOv2](https://github.com/facebookresearch/dinov2) or [JAFAR](https://github.com/PaulCouairon/JAFAR).
 
 Convpaint:
 ```
