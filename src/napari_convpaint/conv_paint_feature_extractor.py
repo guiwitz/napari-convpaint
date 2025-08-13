@@ -131,6 +131,17 @@ class FeatureExtractor:
             enf_param = param.copy()
         return enf_param
     
+    def get_name(self):
+        """
+        Get the name of the feature extractor.
+
+        Returns:
+        ----------
+        name : str
+            The name of the feature extractor.
+        """
+        return self.model_name
+    
     def get_padding(self):
         """
         Get the padding that shall be applied around the image before feature extraction.
