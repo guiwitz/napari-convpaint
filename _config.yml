@@ -1,5 +1,5 @@
-title: napari-convpaint
-author: Ana Stojiljkovic, Lucien Hinderling, Roman Schwob and Guillaume Witz 
+title: Convpaint
+author: Roman Schwob, Lucien Hinderling, Ana Stojiljkovic and Guillaume Witz
 logo: images/logo.png
 
 execute:
@@ -8,5 +8,3 @@ execute:
 sphinx:
   config:
     html_extra_path: ['.','books/images']
-
-

@@ -11,11 +11,14 @@ parts:
     - file: book/Timelapse
     - file: book/RGB
     - file: book/Workflow
-    - file: book/Multifiles
+    # - file: book/Multifiles
     - file: book/Animal_tracking
     - file: book/IMC_data
     - file: book/Calcium_waves
+  - caption: Convpaint API
+    chapters:
+    - file: book/convpaint_api
   - caption: In-depth explanations
     chapters:
     - file: book/Description
-    - file: book/convpaint_api
+    - file: book/Params_settings
