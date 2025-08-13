@@ -1636,7 +1636,8 @@ class ConvpaintModel:
         for key in enforced_params.get_keys():
             if (enforced_params.get(key) is not None and
                 old_param.get(key) != enforced_params.get(key)):
-                warnings.warn(f'Parameter {key} is enforced by the feature extractor model.')
+                model_name = self.fe_model.get_name()
+                warnings.warn(f'Parameter {key} is enforced by the feature extractor model ({model_name}).')
                 new_param.set_single(key, enforced_params.get(key))
         return new_param
     
