@@ -22,3 +22,4 @@ parts:
     chapters:
     - file: book/Description
     - file: book/Params_settings
+    - file: book/FE_descriptions
