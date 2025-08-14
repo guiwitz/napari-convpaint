@@ -278,7 +278,7 @@ class ConvpaintModel:
 
         # Classifier parameters
         def_param.classifier = None
-        def_param.clf_iterations = 50
+        def_param.clf_iterations = 100
         def_param.clf_learning_rate = 0.1
         def_param.clf_depth = 5
 
