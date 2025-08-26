@@ -411,7 +411,7 @@ class ConvpaintModel:
                     'classifier': self.classifier,
                     'param': self._param,
                     'table': self.table,
-                    'annnotations': self.annot_dict
+                    'annotations': self.annot_dict
                 }
                 pickle.dump(data, f)
 
@@ -443,7 +443,7 @@ class ConvpaintModel:
         self._param = new_param.copy()
         self.classifier = data['classifier']
         # If there is a features table and an annotations dictionary, load them
-        if 'table' in data and 'annnotations' in data:
+        if 'table' in data and 'annotations' in data:
             if not isinstance(data['table'], pd.DataFrame):
                 raise ValueError('Table must be a pandas DataFrame.')
             if not isinstance(data['annotations'], dict):
