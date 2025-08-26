@@ -1121,6 +1121,9 @@ class ConvPaintWidget(QWidget):
     def _on_add_annot_layer(self, event=None, force_add=True):
         """Add empty annotation and segmentation layers if not already present."""
         self._add_empty_annot(event, force_add)
+        img = self._get_selected_img(check=True)
+        if img is None:
+            return
         labels_layer = self.annotation_layer_selection_widget.value
         labels_layer.events.colormap.connect(self._on_change_annot_cmap)
         self.update_all_labels_and_cmaps()
