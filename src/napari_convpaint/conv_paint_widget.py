@@ -1457,7 +1457,7 @@ class ConvPaintWidget(QWidget):
         # Check if the new multichannel setting is compatible with data
         data = self._get_selected_img()
         data_dims = self._get_data_dims(data)
-        if data_dims in ['2D', '2D_RGB', '3D_RGB'] and new_param.multi_channel_img:
+        if data_dims in ['2D'] and new_param.multi_channel_img:
             warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}. ' +
                             'This might cause problems.')
         # Check if the loaded normalization setting is compatible with data
