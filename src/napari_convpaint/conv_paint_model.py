@@ -25,30 +25,15 @@ from . import conv_paint_utils
 
 class ConvpaintModel:
     """
-    Base Convpaint model class that combines a feature extraction and a classifier.
-    Consists of a feature extractor model, a classifier and a Param object,
-    which defines the details of the model procedures.
-    Model can be initialized with an alias, a model path, a param object, or a feature extractor name.
-    If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
-    If neither an alias, a model path, a param object, nor a feature extractor name is given,
-    a default Conpaint model is created (defined in the get_default_params() method).
+    The `ConvpaintModel` class is the core of Convpaint and **combines feature extraction with pixel classification**.
+    It is the main class **used for both the Convpaint napari plugin and the Convpaint API**.
+    This setup allows for a similar workflow in both environments and lets the user **transition between them seamlessly**.
 
-    Parameters:
-    ----------
-    alias : str, optional
-        Alias of a predefined model, by default None
-    model_path : str, optional
-        Path to a saved model, by default None
-    param : Param, optional
-        Param object with the model parameters, by default None
-    fe_name : str, optional
-        Name of the feature extractor model, by default None
-    fe_use_gpu : bool, optional
-        Whether to use GPU for the feature extractor (if initialized by name), by default None
-    fe_layers : list[str], optional
-        List of layer names to extract features from (if initialized by name), by default None
-    **kwargs : additional parameters
-        Additional parameters to override defaults for the model or feature extractor
+    Each `ConvpaintModel` instance in essence consists of three **components**:
+
+    - a `feature extractor` model, defined in a separate class
+    - a `classifier`, which is responsible for the final pixel classification
+    - a `Param` object, which defines the details of the model procedures, and is also defined in a separate class
     """
 
     FE_MODELS_TYPES_DICT = {}
@@ -70,42 +55,42 @@ class ConvpaintModel:
                   "dino": Param(fe_name="dinov2_vits14_reg"),
                   "gaussian": Param(fe_name="gaussian_features"),
                   "cellpose": Param(fe_name="cellpose_backbone"),
-                  "dino-jafar": Param(fe_name="vit_small_patch14_reg4_dinov2"),
+                  "ilastik": Param(fe_name="ilastik_2d"),
+                  "dino-jafar": Param(fe_name="dino_jafar_small"),
                   }
 
-    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_use_gpu=None, fe_layers=None, **kwargs):
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, **kwargs):
         """
-        Initializes the Convpaint model by loading the specified model, parameters, or feature extractor.
+        **Initializes a Convpaint model**. This can be done with an alias, a model path, a param object, or a feature extractor name.
+        If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
 
-        The constructor can be initialized in four ways:
-        1. By providing an alias (e.g., "vgg-s", "dino", "gaussian", etc.), in which case a corresponding model
+        If neither an alias, a model path, a param object, nor a feature extractor name is given,
+        a **default Convpaint model** is created (defined in the `get_default_params()` method).
+
+        The four **ways for initialization** in detail:
+
+        1. By providing an **alias** (e.g., "vgg-s", "dino", "gaussian", etc.), in which case a corresponding model
         configuration will be loaded.
-        2. By providing a saved model path (model_path) to load a pre-trained model.
-        This can be a .pkl file (holding the clf and FE models) or .yml file (defining the model parameters).
-        3. By providing a Param object, which contains model parameters.
-        4. By providing the name of the feature extractor, GPU usage, and feature extraction layers, in which case
-        the additional kwargs will be used to override the defaults of the feature extractor model.
+        2. By providing a **saved model path** (model_path) to load a model defined earlier.
+        This can be a .pkl file (holding the FE model, classifier and Param object) or .yml file (only defining the model parameters).
+        3. By providing a **Param object**, which contains model parameters.
+        4. By providing the **name of the feature extractor** and other parameters such as GPU usage, and feature extraction layers,
+        in which case these kwargs will override the defaults of the feature extractor model.
         
-        If none of the options are provided, a default Convpaint model will be created.
-
-        Parameters:
+        Parameters
         ----------
         alias : str, optional
-            The alias of a predefined model, by default None.
+            Alias of a predefined model configuration
         model_path : str, optional
-            Path to a saved model file, by default None.
+            Path to a saved model configuration
         param : Param, optional
-            Param object containing model parameters, by default None.
+            Param object with the model parameters (see Param class for details)
         fe_name : str, optional
-            Name of the feature extractor model, by default None.
-        fe_use_gpu : bool, optional
-            Whether to use GPU for the feature extractor, by default None.
-        fe_layers : list[str], optional
-            List of layers to extract features from, by default None.
-        **kwargs : additional parameters, used when initialzing the model by name
-            Additional parameters to override defaults for the model or feature extractor.
+            Name of the feature extractor model
+        **kwargs : additional parameters, optional
+            Additional parameters to override defaults for the model or feature extractor (see Param class for details)
 
-        Raises:
+        Raises
         ------
         ValueError
             If more than one of alias, model_path, param, or fe_name is provided.
@@ -115,6 +100,7 @@ class ConvpaintModel:
         self._param = Param()
         self.reset_training()
         self.num_trainings = 0
+        self.num_features = 0
         self._params_to_reset_training = ['multi_channel_img',
                                           'normalize',
                                         #   'image_downsample',
@@ -158,13 +144,17 @@ class ConvpaintModel:
         if not ConvpaintModel.FE_MODELS_TYPES_DICT:
             ConvpaintModel._init_fe_models_dict()
 
-        num_kwargs_given = sum([x is not None for x in [fe_name, fe_use_gpu, fe_layers]]) + len(kwargs)
-        if (alias is not None) + (model_path is not None) + (param is not None) + num_kwargs_given > 1:
+        num_kwargs_given =  + len(kwargs)
+        if (alias is not None) + (model_path is not None) + (param is not None) + (fe_name is not None) > 1:
             raise ValueError('Please provide either an alias, a model path, a param object, or ' +
-                             'kwargs describing the model (giving at least a feature extractor name) but not multiples.\n' +
+                             'a feature extractor name (and optionally additional kwargs) but not multiples.\n' +
                              'You can still set parameters later using the set_params() method.')
+        
+        if len(kwargs) > 0 and fe_name is None:
+            raise ValueError('Providing kwargs is only intended when a feature extractor name is specified ' +
+                             '(not with any other initialization method).')
 
-        # If an alias is given, create an according model
+        # If an alias is given, create an corresponding model
         if alias is not None:
             if alias in ConvpaintModel.std_models:
                 param = ConvpaintModel.std_models[alias]
@@ -177,6 +167,8 @@ class ConvpaintModel:
         elif param is not None:
             self._load_param(param)
         elif fe_name is not None:
+            fe_use_gpu = kwargs.pop('fe_use_gpu', None)
+            fe_layers = kwargs.pop('fe_layers', None)
             self._set_fe(fe_name, fe_use_gpu, fe_layers)
             self._param = self.get_fe_defaults()
             self.set_params(ignore_warnings=True, # Here at initiation, it is intended to set FE parameters...
@@ -225,11 +217,7 @@ class ConvpaintModel:
         """
         Returns a dictionary of all available feature extractors; names as keys and types as values.
 
-        Parameters:
-        ----------
-        None
-
-        Returns:
+        Returns
         ----------
         models_dict : dict
             Dictionary of all available feature extractors; names as keys and types as values.
@@ -242,11 +230,7 @@ class ConvpaintModel:
         """
         Returns a param object, which defines the default Convpaint model.
 
-        Parameters:
-        ----------
-        None
-
-        Returns:
+        Returns
         ----------
         def_param : Param
             Param object with the default Convpaint model parameters.
@@ -288,12 +272,12 @@ class ConvpaintModel:
         """
         Returns the value of the given parameter key.
 
-        Parameters:
+        Parameters
         ----------
         key : str
             Key of the parameter to get
         
-        Returns:
+        Returns
         ----------
         param_value : any
             Value of the parameter with the given key
@@ -303,13 +287,9 @@ class ConvpaintModel:
     
     def get_params(self):
         """
-        Returns all parameters of the model (= a copy of the Param object).
+        Returns all parameters of the model in form of a copy of the Param object.
 
-        Parameters:
-        ----------
-        None
-
-        Returns:
+        Returns
         ----------
         param : Param
             Copy of the Param object with all parameters of the model
@@ -320,17 +300,18 @@ class ConvpaintModel:
     def set_param(self, key, val, ignore_warnings=False):
         """
         Sets the value of the given parameter key.
-        Raises a warning if key FE parameters are set (intended only for initiation),
-        unless ignore_warnings is True.
 
-        Parameters:
+        Raises a warning if key FE parameters are set (intended only for initiation),
+        unless ignore_warnings is set to True.
+
+        Parameters
         ----------
         key : str
             Key of the parameter to set
         val : any
             Value to set the parameter to
         ignore_warnings : bool, optional
-            Whether to suppress the warning for setting FE parameters, by default False
+            Whether to suppress the warning for setting FE parameters
         """
         if not key in Param.get_keys():
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
@@ -359,15 +340,16 @@ class ConvpaintModel:
     def set_params(self, param=None, ignore_warnings=False, **kwargs):
         """
         Sets the parameters, given either as a Param object or as keyword arguments.
+
         Note that the model is not reset and no new FE model is created.
         If fe_name, fe_use_gpu, and fe_layers change, you should create a new ConvpaintModel.
 
-        Parameters:
+        Parameters
         ----------
         param : Param, optional
-            Param object with the parameters to set, by default None
+            Param object with the parameters to set
         ignore_warnings : bool, optional
-            Whether to suppress the warning for setting FE parameters, by default False
+            Whether to suppress the warning for setting FE parameters
         **kwargs : parameters as keyword arguments
             Parameters to set as keyword arguments (instead of a Param object)
         
@@ -386,19 +368,22 @@ class ConvpaintModel:
 
     def save(self, model_path, create_pkl=True, create_yml=True):
         """
-        Saves the model to a pkl an/or yml file.
+        Saves the model to a pkl and/or yml file.
+
         The pkl file includes the classifier and the param object, as well as the
-        features and targets (from continuous training).
+        features and targets (when using memory_mode).
         The yml file includes only the parameters of the model.
 
-        Parameters:
+        Note: Loading a saved model is only intended at model initiation.
+
+        Parameters
         ----------
         model_path : str
             Path to save the model to.
         create_pkl : bool, optional
-            Whether to create a pkl file, by default True
+            Whether to create a pkl file
         create_yml : bool, optional
-            Whether to create a yml file, by default True
+            Whether to create a yml file
         """
         if model_path[-4:] == ".pkl" or model_path[-4:] == ".yml":
             model_path = model_path[:-4]
@@ -411,7 +396,9 @@ class ConvpaintModel:
                     'classifier': self.classifier,
                     'param': self._param,
                     'table': self.table,
-                    'annotations': self.annot_dict
+                    'annotations': self.annot_dict,
+                    'num_features': self.num_features,
+                    'num_trainings': self.num_trainings
                 }
                 pickle.dump(data, f)
 
@@ -421,7 +408,7 @@ class ConvpaintModel:
 
     def _load(self, model_path):
         """
-        Loads the model from a file. Guesses the file type based on the file ending.
+        Loads the model from a file based on its extension.
         Only intended for internal use at model initiation.
         """
         if model_path[-4:] == ".pkl":
@@ -438,10 +425,12 @@ class ConvpaintModel:
         """
         with open(pkl_path, 'rb') as f:
             data = pickle.load(f)
-        new_param = data['param']
+        new_param = data.get('param', None)
         self._set_fe(new_param.fe_name, new_param.fe_use_gpu, new_param.fe_layers)
         self._param = new_param.copy()
-        self.classifier = data['classifier']
+        self.classifier = data.get('classifier', None)
+        self.num_features = data.get('num_features', self.classifier.n_features_in_)
+        self.num_trainings = data.get('num_trainings', 0)
         # If there is a features table and an annotations dictionary, load them
         if 'table' in data and 'annotations' in data:
             if not isinstance(data['table'], pd.DataFrame):
@@ -479,8 +468,8 @@ class ConvpaintModel:
 
     def _set_fe(self, fe_name=None, fe_use_gpu=None, fe_layers=None):
         """
-        Sets the model based on the given FE parameters.
-        Creates new feature extracture, and resets the classifier.
+        Sets the FE model based on the given FE parameters.
+        Creates new feature extractor, and resets the classifier.
         Only intended for internal use at model initiation.
         """
 
@@ -508,19 +497,24 @@ class ConvpaintModel:
     def create_fe(name, use_gpu=None, layers=None):
         """
         Creates a feature extractor model based on the given parameters.
+        
+        Importantly, the feature extractor model is returned, but not saved in the model.
+        If you want to initialize a ConvpaintModel with this feature extractor,
+        create a new instance of ConvpaintModel and specify the feature extractor parameters.
+
         Distinguishes between different types of feature extractors such as Hookmodels
         and initializes them accordingly.
 
-        Parameters:
+        Parameters
         ----------
         name : str
             Name of the feature extractor model
         use_gpu : bool, optional
             Whether to use GPU for the feature extractor
         layers : list[str], optional
-            List of layer names to extract features from, by default None
+            List of layer names to extract features from
 
-        Returns:
+        Returns
         ----------
         fe_model : FeatureExtractor
             The created feature extractor model
@@ -552,14 +546,11 @@ class ConvpaintModel:
 
     def get_fe_defaults(self):
         """
-        Return the default params for the feature extractor.
-        Where they are not sepecified, the default Convpaint params are used.
+        Returns the default parameters of the feature extractor.
 
-        Parameters:
-        ----------
-        None
+        Where they are not sepecified by the feature extractor model, the default Convpaint params are used.
 
-        Returns:
+        Returns
         ---------
         new_param : Param
             Conpaint model defaults adjusted to the feature extractor defaults
@@ -572,11 +563,7 @@ class ConvpaintModel:
         """
         Returns the keys of the feature extractor layers (None if the model uses no layers).
 
-        Parameters:
-        ----------
-        None
-
-        Returns:
+        Returns
         ---------
         keys : list[str] or None
             List of keys of the feature extractor layers, or None if the model uses no layers
@@ -590,11 +577,14 @@ class ConvpaintModel:
     def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False):
         """
         Trains the Convpaint model's classifier given images and annotations.
-        Uses the Parameter and the FeatureExtractor model to extract features.
+
+        Uses the FeatureExtractor model to extract features according to
+        the criteria specified in the Param object.
         Then uses the features of annotated pixels to train the classifier.
+        
         Trains the internal classifier, which is also returned.
 
-        Parameters:
+        Parameters
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to train the classifier on or list of images
@@ -602,24 +592,24 @@ class ConvpaintModel:
             Annotations to train the classifier on or list of annotations
             Image and annotation lists must correspond to each other
         memory_mode : bool, optional
-            Whether to use memory mode, by default False
+            Whether to use memory mode
             If True, the annotations are registered and updated, and only features for new pixels are extracted
         img_ids : str or list[str], optional
-            Image IDs to register the annotations with, by default None
+            Image IDs to register the annotations with (when using memory_mode)
         use_rf : bool, optional
-            Whether to use a RandomForestClassifier instead of a CatBoostClassifier, by default False
+            Whether to use a RandomForestClassifier instead of a CatBoostClassifier
         allow_writing_files : bool, optional
-            Whether to allow writing files for the CatBoostClassifier, by default False
+            Whether to allow writing files for the CatBoostClassifier
         in_channels : list[int], optional
-            List of channels to use for training, by default None
+            List of channels to use for training
         skip_norm : bool, optional
-            Whether to skip normalization of the images before training, by default False
+            Whether to skip normalization of the images before training
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
 
-        Returns:
+        Returns
         ----------
-        clf : CatBoostClassifier or RandomForestClassifier
-            Trained classifier
+            clf : CatBoostClassifier or RandomForestClassifier
+                Trained classifier (also saved inside the model instance)
         """
         clf, _, _ = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm)
@@ -627,23 +617,24 @@ class ConvpaintModel:
 
     def segment(self, image, in_channels=None, skip_norm=False, use_dask=False):
         """
-        Segments images by predicting its most probable classes using the trained classifier.
+        Segments images by predicting the most probable class of each pixel using the trained classifier.
+
         Uses the feature extractor model to extract features from the image.
         Predicts the classes of the pixels in the image using the trained classifier.
 
-        Parameters:
+        Parameters
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to segment or list of images
         in_channels : list[int], optional
-            List of channels to use for segmentation, by default None
+            List of channels to use for segmentation
         skip_norm : bool, optional
-            Whether to skip normalization of the images before segmentation, by default False
+            Whether to skip normalization of the images before segmentation
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
         use_dask : bool, optional
-            Whether to use dask for parallel processing, by default False
+            Whether to use dask for parallel processing
 
-        Returns:
+        Returns
         ----------
         seg : np.ndarray or list[np.ndarray]
             Segmented image or list of segmented images (according to the input)
@@ -655,22 +646,23 @@ class ConvpaintModel:
     def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
-        Uses the feature extractor model to extract features from the image.
-        Estimates the probablity of each class based on the features and the trained classifier.
 
-        Parameters:
+        Uses the feature extractor model to extract features from the image.
+        Estimates the probability of each class based on the features and the trained classifier.
+
+        Parameters
         ----------
         image : np.ndarray or list[np.ndarray]
             Image to predict probabilities for or list of images
         in_channels : list[int], optional
-            List of channels to use for prediction, by default None
+            List of channels to use for prediction
         skip_norm : bool, optional
-            Whether to skip normalization of the images before prediction, by default False
+            Whether to skip normalization of the images before prediction
             If True, the images are not normalized according to the parameter `normalize` in the model parameters
         use_dask : bool, optional
-            Whether to use dask for parallel processing, by default False
+            Whether to use dask for parallel processing
 
-        Returns:
+        Returns
         ----------
         probas : np.ndarray or list[np.ndarray]
             Predicted probabilities of the classes of the pixels in the image or list of images
@@ -681,15 +673,16 @@ class ConvpaintModel:
         return probas
 
 
-    def get_feature_image(self, data, annotations=None, memory_mode=False,
-                      restore_input_form=True, img_ids=None, in_channels=None,
-                      skip_norm=False):
+    def get_feature_image(self, data, annotations=None, restore_input_form=True,
+                          memory_mode=False, img_ids=None,
+                          in_channels=None, skip_norm=False):
         """
         Returns the features of images extracted by the feature extractor model.
 
         Extract (and optionally reshape) feature images.
 
         Processing pipeline:
+
         1. Prepare dims -> list of [C,Z,H,W]
         2. Optional channel subset
         3. Optional normalization
@@ -698,41 +691,43 @@ class ConvpaintModel:
         6. Padding (if needed)
         7. (If annotations) extract planes / optionally tile
         8. FE extraction
-        9. If restore_input_form & not annotations: reshape + remove base padding + remove patch-multiple pad (via _restore_shape)
+        9. Optional reshaping: If restore_input_form & not annotations
+           -> reshape + remove base padding + remove patch-multiple pad (via _restore_shape)
         10. Restore original dimension semantics (drop singleton Z when appropriate)
 
         Returns either a single feature array or lists (and optionally annotations / coords when
         restore_input_form=False).
-                Parameters:
+
+        Parameters
         ----------
         data : np.ndarray or list[np.ndarray]
             Image(s) to extract features from
         annotations : np.ndarray or list[np.ndarray], optional
-            Annotations to extract features from, by default None
-            Image and annotation lists must correspond to each other
+            Annotations to extract features from.
+            Image and annotation lists must correspond to each other.
         restore_input_form : bool, optional
-            Whether to restore the input form of the features, by default True
-            If True, no annotations are returned
+            Whether to restore the input form of the features.
+            If True, no annotations are returned.
             If False, features are returned in their original form if no annotations are given,
-            or paired with the processed annotations if they are given
+            or paired with the processed annotations if they are given.
         memory_mode : bool, optional
-            Whether to use memory mode, by default False
-            If True, the annotations are registered and updated, and only features for new pixels are extracted
+            Whether to use memory mode.
+            If True, the annotations are registered and updated, and only features for new pixels are extracted.
         img_ids : str or list[str], optional
-            Image IDs to register the annotations with, by default None (assuming a single image input)
+            Image IDs to register the annotations with (when using memory_mode)
         in_channels : list[int], optional
-            List of channels to use for feature extraction, by default None
+            List of channels to use for feature extraction
         skip_norm : bool, optional
-            Whether to skip normalization of the images before feature extraction, by default False
-            If True, the images are not normalized according to the parameter `normalize` in the model parameters
+            Whether to skip normalization of the images before feature extraction.
+            If True, the images are not normalized according to the parameter `normalize` in the model parameters.
 
-        Returns:
+        Returns
         ----------
         features : np.ndarray or list[np.ndarray]
-            Extracted features of the image(s) or list of images
-            Features dimension is added first
+            Extracted features of the image(s) or list of features for each image if input is a list.
+            Features dimension is added first.
         annotations : np.ndarray or list[np.ndarray], optional
-            Processed annotations of the image(s) or list of images, if annotations are given
+            Processed annotations of the image(s) or list of images, if annotations are given.
         """
 
         # --- Basic bookkeeping ---------------------------------------------------
@@ -896,24 +891,29 @@ class ConvpaintModel:
     def _clf_train(self, features, targets, use_rf=False, allow_writing_files=False):
         """
         Trains a classifier given a set of features and targets.
+
         If use_rf is False, a CatBoostClassifier is trained, otherwise a RandomForestClassifier.
         The trained classifier is saved in the model, but also returned.
 
-        Parameters:
+        When using CatBoost, the model is trained on the GPU if specified in the clf_use_gpu parameter.
+        If this parameter is not specified, the model will infer GPU usage from the fe_use_gpu parameter.
+        If this is not specified either, or RandomForest is used, the model will be trained on the CPU.
+
+        Parameters
         ----------
         features : np.ndarray
             Features to train the classifier on
         targets : np.ndarray
             Targets to train the classifier on
         use_rf : bool, optional
-            Whether to use a RandomForestClassifier, by default False
+            Whether to use a RandomForestClassifier instead of a CatBoostClassifier
         allow_writing_files : bool, optional
-            Allow writing files for the CatBoostClassifier, by default False
+            Allow writing files for the CatBoostClassifier
 
-        Returns:
+        Returns
         ----------
         clf : CatBoostClassifier or RandomForestClassifier
-            Trained classifier
+            Trained classifier (also saved in the model instance)
         """
         if not use_rf:
             # NOTE: THIS, FOR NOW, ASSUMES THAT GPU SHALL BE USED FOR CLF IF CHOSEN FOR FE
@@ -934,6 +934,7 @@ class ConvpaintModel:
                 self._param.classifier = 'RandomForest'
 
         clf = self.classifier
+        self.num_features = features.shape[1] if isinstance(features, np.ndarray) else features[0].shape[1] if isinstance(features, list) else None
         return clf
     
     def _clf_predict(self, features, return_proba=True):
@@ -942,18 +943,19 @@ class ConvpaintModel:
         Returns an image containing the probabilities of each class for each pixel.
         If return_proba is False, the predicted class is returned instead.
 
-        Parameters:
+        Parameters
         ----------
         features : np.ndarray
             Features to use for the prediction; features dimension is expected first
         return_proba : bool, optional
-            Whether to return the prediction as class probabilities, by default True
+            Whether to return the prediction as class probabilities
 
-        Returns:
+        Returns
         ----------
         predictions : np.ndarray
-            Predicted classes or probabilities of the classes for each pixel in the image
-            Class dimension is added first (if return_proba is True)
+            Predicted classes or probabilities of the classes for each pixel in the image.
+            Pixel dimension is linearized (width*height),
+            class dimension is added first (if return_proba is True).
         """
         nb_features = features.shape[0] # [nb_features, width, height]
 
@@ -973,9 +975,14 @@ class ConvpaintModel:
     def reset_classifier(self):
         """
         Resets the classifier of the model.
+
+        - Resets the classifier object to None
+        - Resets possible path to the classifier saved in the Param object
+        - Resets the training features used with memory_mode
         """
         self.classifier = None
         self._param.classifier = None
+        self.reset_training()
 
 
 ### BACKEND TRAINING AND PREDICTION METHODS
@@ -987,7 +994,7 @@ class ConvpaintModel:
 
         if not memory_mode:
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, in_channels=in_channels, skip_norm=skip_norm)
+            feature_parts, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, in_channels=in_channels, skip_norm=skip_norm)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [conv_paint_utils.get_features_targets(f, a)
                         for f, a in zip(feature_parts, annot_parts)] # f and t are linearized
@@ -998,7 +1005,7 @@ class ConvpaintModel:
 
         else: # memory mode
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, memory_mode=memory_mode, restore_input_form=False, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
+            feature_parts, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
 
@@ -1010,38 +1017,34 @@ class ConvpaintModel:
             raise ValueError('Not enough classes found in the targets. At least two classes are required for training.')
 
         # Train the classifier
-        self._clf_train(features, targets,
-                               use_rf=use_rf, allow_writing_files=allow_writing_files)
+        self._clf_train(features, targets, use_rf=use_rf, allow_writing_files=allow_writing_files)
 
         return self.classifier, feature_parts, annot_parts
 
     def reset_training(self):
         """
-        Resets the features and targets of the model. These can be used to
+        Resets the features and targets of the model which are used to
         iteratively train the model with the option memory_mode.
-
-        Parameters:
-        ----------
-        None
         """
         self.table = pd.DataFrame(columns=['img_id', 'scale', 'coordinates', 'label', 'features_array'])
         self.table.index.name = "row_key"
         self.annot_dict = {}
+        self.num_trainings = 0
 
     def _register_and_update_annots(self, annotations, img_ids, scale=1):
         """
         Registers new annotations in the table and deletes existing ones from the new annotations.
 
-        Parameters:
+        Parameters
         ----------
         annotations : list[np.ndarray]
             List of annotations to register, each with shape [C, Z, H, W]
         img_ids : list[str]
             List of image IDs corresponding to the annotations, each as a string
         scale : int, optional
-            Scale factor, used for creating the unique table entries, by default 1
+            Scale factor, used for creating the unique table entries
 
-        Returns:
+        Returns
         ----------
         all_new_annots : list[np.ndarray]
             List of new annotations with the same shape as the input annotations,
@@ -1095,9 +1098,10 @@ class ConvpaintModel:
     def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids, scale=1):
         """
         Registers new features in the table and returns all features and annotations.
+
         IMPORTANT: This assumes that double entries have been removed from the annotations and old entries from the table.
 
-        Parameters:
+        Parameters
         ----------
         features : list[np.ndarray]
             List of features to register, each with shape [C, Z, H, W]
@@ -1108,9 +1112,9 @@ class ConvpaintModel:
         img_ids : list[str]
             List of image IDs corresponding to the annotations, each as a string
         scale : int
-            Scale factor, used for creating the unique table entries, by default 1
+            Scale factor, used for creating the unique table entries
         
-        Returns:
+        Returns
         ----------
         features : list[np.ndarray]
             List of all features with the same shape as the input features,
@@ -1159,15 +1163,22 @@ class ConvpaintModel:
             self.table = pd.concat([self.table, new_entries_df])
 
         # Now extract all features and annotations from the table
-        features = list(self.table['features_array'].values)
-        annotations = list(self.table['label'].values)
+        features_list = list(self.table['features_array'].values)
+        annotations_list = list(self.table['label'].values)
+
+        # Convert features to 2D array: [num_entries, num_features]
+        features = np.stack(features_list, axis=0)
+        # Convert annotations to 1D array
+        annotations = np.array(annotations_list)
 
         return features, annotations
 
     def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
+
         Returns the class probabilities and optionally the segmentation of the images.
+
         Results are reshaped to the original image shape, and dimensions are restored to the ones
         of the original image, without the channel dimension,
         but with the class dimension (for class probabilities) added first.
@@ -1221,13 +1232,17 @@ class ConvpaintModel:
         """
         Backend method to predict images without tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
+
         Reshapes the predictions to the original image shape, without the channel dimension,
         but always keeps the Z dim --> [C, Z, H, W] for class probas, [Z, H, W] for segmentation.
+
         A feature image can be given, in which case the features are used for prediction.
-        If no feature image is given, the features are extracted from the image using the feature extractor
+        If no feature image is given, the features are extracted from the image using the feature extractor.
+
         NOTE: This allows to use this method interchangably with _parallel_predict_image,
               but also within the _parallel_predict_image method for each tile.
         """
+
         # Check if features are given, if not, extract them
         if feature_img is None:
             feature_img = self.get_feature_image(image,
@@ -1236,7 +1251,7 @@ class ConvpaintModel:
                                             skip_norm=True)  # already normalized outside
 
         num_f = feature_img[0].shape[0] if isinstance(feature_img, list) else feature_img.shape[0]
-        num_f_clf = self.classifier.n_features_in_ if self.classifier is not None else 0
+        num_f_clf = self.num_features
         if num_f != num_f_clf:
             raise ValueError(
                 f"Extracted features ({num_f}) have a different length than classifier expects ({num_f_clf}). "
@@ -1270,8 +1285,10 @@ class ConvpaintModel:
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
+
         Reshapes the predictions to the original image shape, without the channel dimension,
         but always keeps the Z dim --> [C, Z, H, W] for class probas, [Z, H, W] for segmentation.
+
         NOTE: As opposed to other methods, this method only takes single images as input.
         """
 
@@ -1388,15 +1405,14 @@ class ConvpaintModel:
     def _train_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False, in_channels=None, skip_norm=False, add_seg=False):
         """
         Extracts features from the image and uses them to both train and predict the image.
-        Currently, only works for single images of which all slices are annotated.
-        Also currently does not support memory mode.
+
+        If multiple planes are given, only the annotated planes will be processed and predicted.
+
+        Currently does not support image tiling and memory mode.
         """
 
-        # Make sure all slices are annotated if multiple slices are given
+        # Find lanes/slices containing annotations
         annot_slice_mask = np.any(annotations > 0, axis=(-2, -1))
-        # Check that all slices are valid
-        # if not np.all(annot_slices):
-        #     raise ValueError("Not all slices are annotated. Currently only annotated slices can be used for self_prediction.")
         # Extract the annotated image slices
         if annotations.ndim > 2:
             annot_img = image[..., annot_slice_mask, :, :]
@@ -1452,7 +1468,7 @@ class ConvpaintModel:
 
     def _run_model_checks(self):
         """
-        Run checks on the model to ensure that it is ready to be used.
+        Runs checks on the model to ensure that it is ready to be used.
         """
         if self.fe_model is None:
             raise ValueError('No feature extractor model set. Please set a feature extractor model first.')
@@ -1460,9 +1476,11 @@ class ConvpaintModel:
     def _prep_dims(self, data, annotations=None, get_coords=False):
         """
         Preprocess the dimensions of the data and annotations (if given).
+
         Ensures the data and annotations have the correct number of dimensions,
         where the data is a list of images with [C, Z, H, W] shape,
         and the annotations are a list of images with [Z, H, W] shape.
+        
         Assumes that a possible channels dimension is the first one.
         Handles both single images/annotations and lists of images/annotations.
         """
@@ -1490,6 +1508,12 @@ class ConvpaintModel:
         if len(img_list) != len(annot_list):
             raise ValueError('Data and annotations lists must have the same length.')
         
+        # Ensure annotations are integer values
+        for i, annot in enumerate(annot_list):
+            if annot is not None and np.issubdtype(annot.dtype, np.integer) == False:
+                warnings.warn(f'Annotations for image {i} are not of type int. Converting to int32.')
+                annot_list[i] = annot.astype(np.int32)
+
         # Check and preprocess the dimensions of each data and annotations pairs
         prep_imgs, prep_annots = zip(*[
             self._prep_dims_single(item, annot)
@@ -1514,13 +1538,15 @@ class ConvpaintModel:
         
     def _prep_dims_single(self, img, annotations=None):
         """
-        Preprocess the dimensions of the img and annotations (if given).
+        Preprocesses the dimensions of the img and annotations (if given).
+
         Ensures the data and annotations have the correct number of dimensions,
         where the data is a list of images with [C, Z, H, W] shape,
         and the annotations are a list of images with [Z, H, W] shape.
+
         Assumes that a possible channels dimension is the first one.
         
-        Returns: img, annotations (= None if not given)
+        Returns img, annotations (= None if not given)
         """
         num_dims = img.ndim
         if num_dims == 2:
@@ -1540,7 +1566,7 @@ class ConvpaintModel:
         elif num_dims == 4:
             pass  # Image is already in [C, Z, H, W] format
         else:
-            raise Exception('Image has wrong number of dimensions')
+            raise ValueError('Image has wrong number of dimensions')
         
         # Check if there are 4 actual dimensions (> 1), and if so, make sure multi_channel_img is True
         num_real_dims = np.sum(np.array(img.shape) > 1)
@@ -1562,16 +1588,17 @@ class ConvpaintModel:
             # Annotations are already in [Z, H, W] format
             pass
         else:
-            raise Exception(f'Annotations have wrong number of dimensions ({num_dims_annots})')
+            raise ValueError(f'Annotations have wrong number of dimensions ({num_dims_annots})')
 
         if img.shape[1:] != annotations.shape:
-            raise Exception(f'Image and annotations have different dimensions: {img.shape[1:]} vs {annotations.shape}')
+            raise ValueError(f'Image and annotations have different dimensions: {img.shape[1:]} vs {annotations.shape}')
 
         return img, annotations
     
     def _check_in_channels(self, data, in_channels=None):
         """
-        Check if the conditions for using the given in_channels are met, and raise an error if not.
+        Checks if the conditions for using the given in_channels are met, and raise an error if not.
+        Assumes that the channels dimension is the first one.
         """
         if in_channels is None:
             print("No in_channels given for _check_in_channels.")
@@ -1595,7 +1622,7 @@ class ConvpaintModel:
     
     def _norm_single_image(self, img):
         """
-        Normalize a single image.
+        Normalizes a single image.
         Assumes that the image is in [C, Z, H, W] format.
         """
         if img.ndim != 4:
@@ -1607,12 +1634,13 @@ class ConvpaintModel:
         else:
             norm_mode = self._param.normalize
         
-        # If normalization is off (= 1), we do not normalize
+        # If normalization mode is 1, no normalization is applied
         if norm_mode == 1:
             return img
 
         # Otherwise we generally normalize each channel separately
-        # if normalization is "by image" (= 3), we additionally keep the z dimension
+        # This means that if we normalize by stack (= 2), we ignore the C dimension (= first)
+        # If normalization is "by image" (= 3), we additionally keep the Z dimension
         num_ignored_channels = 2 if norm_mode == 3 else 1
         mean, sd = conv_paint_utils.compute_image_stats(img, ignore_n_first_dims=num_ignored_channels)
         
@@ -1641,9 +1669,10 @@ class ConvpaintModel:
                 new_param.set_single(key, enforced_params.get(key))
         return new_param
     
-    def _get_overall_paddings(self, param, img_shape: Tuple[int, ...]) -> Tuple[int, int, int, int]:
+    def _get_overall_paddings(self, param, img_shape: Tuple[int, ...]):
         """
-        Returns the overall padding sizes for the image.
+        Returns the overall padding sizes for the image in form ((top, bottom), (left, right)).
+
         This takes into account the feature extractor's padding, its patch size and the image shape.
         Makes sure, padding is at least the FE's padding at the largest downscaling factor,
         and that the image is padded to a multiple of the patch size times at all scalings,
@@ -1686,17 +1715,13 @@ class ConvpaintModel:
         # Return the overall padding sizes for the image
         return (pad_top, pad_bottom), (pad_left, pad_right)
 
-    def _restore_shape(
-        self,
-        outputs: np.ndarray,
-        padded_shape: Tuple[int, ...],
-        pre_pad_shapes: Tuple[int, ...],
-        original_shape: Tuple[int, ...],
-        class_preds: bool = False,
-        patched_features = False
-    ) -> np.ndarray:
+    def _restore_shape(self, outputs: np.ndarray, 
+                             padded_shape: Tuple[int, ...],
+                             pre_pad_shapes: Tuple[int, ...],
+                             original_shape: Tuple[int, ...],
+                             class_preds: bool = False, patched_features: bool = False):
         """
-        Reshape outputs (prediction, probabilities, features) back to original spatial size,
+        Reshapes outputs (prediction, probabilities, features) back to original spatial size,
         removing the padding and rescaling.
 
         Parameters
@@ -1714,6 +1739,12 @@ class ConvpaintModel:
         patched_features : bool
             If True, the features were extracted on a patch‐size resolution (e.g. DINOv2),
             so we need to rescale the outputs to the patch resolution before upsampling.
+
+        Returns
+        ----------
+        outputs_image : np.ndarray
+            The reshaped and upsampled output image.
+            Form [Z, H, W] for class predictions, [C, Z, H, W] for other outputs.
         """
         # Prepare the variables
         padded_z, padded_h, padded_w = padded_shape[-3:]
@@ -1777,7 +1808,7 @@ class ConvpaintModel:
 
     def _probas_to_classes(self, probas):
         """
-        Convert probabilities to classes. Smoothen output if requested.
+        Converts probabilities to classes. Smoothen output if requested in parameters.
         """
         class_labels = self.classifier.classes_
         max_prob = np.argmax(probas, axis=0)
@@ -1794,7 +1825,7 @@ class ConvpaintModel:
 
     def _restore_dims(self, pred, original_shape):
         """
-        Restore the dimensions of the prediction to the original shape.
+        Restores the dimensions of the prediction to the original shape.
         """
         is_2d = len(original_shape) == 2
         is_3d = len(original_shape) == 3
