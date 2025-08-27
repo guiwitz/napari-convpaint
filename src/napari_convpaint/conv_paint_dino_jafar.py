@@ -9,7 +9,7 @@ from typing import List, Tuple
 import copy
 from napari_convpaint.jafar.layers import PretrainedViTWrapper, JAFAR
 
-AVAILABLE_MODELS = ["vit_small_patch14_reg4_dinov2"]
+AVAILABLE_MODELS = ["dino_jafar_small"]
 
 class DinoJafarFeatures(FeatureExtractor):
     """
@@ -26,7 +26,7 @@ class DinoJafarFeatures(FeatureExtractor):
     {github.com/PaulCouairon/JAFAR/}
     """
 
-    def __init__(self, model_name="vit_small_patch14_reg4_dinov2", use_gpu=False):
+    def __init__(self, model_name="dino_jafar_small", use_gpu=False):
         super().__init__(model_name=model_name, use_gpu=use_gpu)
         self.patch_size = 14          # token size of ViT
         self.padding    = 0           # model-internal extra pad (none)
@@ -40,7 +40,7 @@ class DinoJafarFeatures(FeatureExtractor):
     # Load JAFAR upscaler and DINOv2 backbone
     # ------------------------------------------------------------------ #
     @staticmethod
-    def create_model(model_name="vit_small_patch14_reg4_dinov2", use_gpu=False):
+    def create_model(model_name="dino_jafar_small", use_gpu=False):
         """
         Load DINOv2 backbone and JAFAR model head from remote .pth checkpoints using guided download.
         """
@@ -59,7 +59,8 @@ class DinoJafarFeatures(FeatureExtractor):
         jafar_ckpt = guided_model_download(jafar_file, jafar_url)
 
         # --- Load backbone ---
-        backbone = PretrainedViTWrapper(name=model_name).to(device)
+        internal_names = {"dino_jafar_small": "vit_small_patch14_reg4_dinov2"}
+        backbone = PretrainedViTWrapper(name=internal_names[model_name]).to(device)
 
         # --- Instantiate JAFAR head ---
         model = JAFAR(

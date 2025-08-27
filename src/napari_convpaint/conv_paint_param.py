@@ -7,52 +7,58 @@ import yaml
 @dataclass
 class Param:
     """
-    Object storing relevant information regarding the processing,
-    e.g. the window size (padding), the analyzed data, the type of segmentation used.
+    The Param object organizes the **parameters that control the behavior of the feature extraction and classification processes**.
+    
+    It therefore defines the **processing and results** of the ConvpaintModel.
+    
+    These parameters can be adjusted to optimize the **performance** of the model for specific use cases.
 
-    Parameters saved in a Param object:
-    ----------------
-        classifier : str
-            path to the classifier model
-        multi_channel_img : bool = None
-            interpret the first dimension as channels
-        normalize : int
-            normalization mode
-            1: no normalization, 2: normalize stack, 3: normalize each image
-        image_downsample : int
-            factor for downscaling the image right after input
-            (predicted classes are upsampled accordingly for output)
-        seg_smoothening : int
-            factor for smoothening the segmentation output with a Majority filter
-        tile_annotations : bool
-            if True, extract only features of bounding boxes around annotated areas
-        tile_image : bool
-            if True, extract features in tiles (for large images)
-        use_dask : bool
-            if True, use dask for parallel processing
-        unpatch_order : int
-            order of interpolation for unpatching the output (default is 1, i.e. bilinear interpolation)
-        fe_name : str
-            name of the feature extractor model
-        fe_layers : list[str]
-            list of layers (names) to extract features from
-        fe_use_gpu : bool
-            whether to use GPU for feature extraction
-        fe_scalings : list[int]
-            list of scaling factors for the feature extractor, creating a pyramid of features
-            (features are upscaled accordingly before input to classifier)
-        fe_order : int
-            interpolation order used for the upscaling of features for the pyramid
-        fe_use_min_features : bool
-            if True, use the minimum number of features among all layers
-        clf_iterations : int
-            number of iterations for the classifier
-        clf_learning_rate : float
-            learning rate for the classifier
-        clf_depth : int = None
-            depth of the classifier
-        clf_use_gpu : bool = None
-            whether to use GPU for the classifier
+    Parameters
+    ----------
+    classifier : str
+        Path to the classifier model (if saved, otherwise None)
+    multi_channel_img : bool = None
+        Interpret the first dimension as channels (as opposed to z or time)
+    normalize : int
+        Normalization mode:
+            1 = no normalization,
+            2 = normalize stack,
+            3 = normalize each image
+    image_downsample : int
+        Factor for downscaling the image right after input
+        (predicted classes are upsampled accordingly for output)
+    seg_smoothening : int
+        Factor for smoothening the segmentation output with a Majority filter
+    tile_annotations : bool
+        If True, extract only features of bounding boxes around annotated areas when training
+    tile_image : bool
+        If True, extract features in tiles when running predictions (for large images)
+    use_dask : bool
+        If True, use dask for parallel processing (currently only used when tiling images)
+    unpatch_order : int
+        Order of interpolation for unpatching the output of patch-based FEs (default = 1 = bilinear interpolation)
+    fe_name : str
+        Name of the feature extractor model
+    fe_layers : list[str]
+        List of layers (names or indices among available layers) to extract features from
+    fe_use_gpu : bool
+        Whether to use GPU for feature extraction
+    fe_scalings : list[int]
+        List of scaling factors for the feature extractor, creating a pyramid of features
+        (features are rescaled accordingly before input to classifier)
+    fe_order : int
+        Interpolation order used for the upscaling of features of the pyramid
+    fe_use_min_features : bool
+        If True, use the minimum number of features among all layers (simply taking the first x features)
+    clf_iterations : int
+        Number of iterations for the classifier
+    clf_learning_rate : float
+        Learning rate for the classifier
+    clf_depth : int = None
+        Depth of the classifier
+    clf_use_gpu : bool = None
+        Whether to use GPU for the classifier
+        (if None, fe_use_gpu is used)
     """
     classifier: str = None
 

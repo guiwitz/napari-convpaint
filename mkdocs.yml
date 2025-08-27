@@ -1,0 +1,19 @@
+site_name: Convpaint
+
+plugins:
+  - search
+  - include-markdown
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]          # IMPORTANT: add the src/ folder as import root
+          options:
+            show_source: false
+
+nav:
+  - "Home": index.md
+  - "Parameters": Param.md
+  - "Convpaint Model": ConvpaintModel.md
+
+watch:
+  - src                       # make mkdocs reload when code changes
