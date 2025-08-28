@@ -7,9 +7,9 @@ import yaml
 @dataclass
 class Param:
     """
-    The Param object organizes the **parameters that control the behavior of the feature extraction and classification processes**.
+    The `Param` object organizes the **parameters that control the behavior of the feature extraction and classification processes**.
     
-    It therefore defines the **processing and results** of the ConvpaintModel.
+    It therefore defines the **processing and results** with Convpaint.
     
     These parameters can be adjusted to optimize the **performance** of the model for specific use cases.
 
@@ -26,7 +26,8 @@ class Param:
             3 = normalize each image
     image_downsample : int
         Factor for downscaling the image right after input
-        (predicted classes are upsampled accordingly for output)
+        (predicted classes are upsampled accordingly for output).
+        Hint: use negative numbers for upsampling instead.
     seg_smoothening : int
         Factor for smoothening the segmentation output with a Majority filter
     tile_annotations : bool
