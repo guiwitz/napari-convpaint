@@ -16,10 +16,15 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
     strategy:
       matrix:
         platform: [ubuntu-latest, windows-latest, macos-latest]
