@@ -164,6 +164,9 @@ def test_load_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
+    my_widget.rgb_img = True
+    my_widget.cp_model.set_params(multi_channel_img=True)
+
     my_widget._on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     my_widget._on_predict()
 
