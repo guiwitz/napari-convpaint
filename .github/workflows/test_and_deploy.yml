@@ -30,6 +30,11 @@ jobs:
       matrix:
         platform: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
+        include:
+          - name: conv-paint suite
+            files: "_tests/test_conv_paint.py _tests/test_conv_paint_utils.py"
+          - name: dims suite
+            files: "_tests/test_dims.py"
 
     steps:
       - uses: actions/checkout@v3
