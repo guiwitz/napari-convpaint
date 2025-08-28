@@ -992,6 +992,11 @@ class ConvpaintModel:
         Backend training method for the Convpaint model.
         """
 
+        # Sanity check if we even got any annotations
+        if annotations is None or all(a is None for a in annotations) or all(np.sum(a) == 0 for a in annotations):
+            warnings.warn('No annotations provided for training.')
+            return self.classifier, None, None
+
         if not memory_mode:
             # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
             feature_parts, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, in_channels=in_channels, skip_norm=skip_norm)
@@ -1553,6 +1558,7 @@ class ConvpaintModel:
             if self._param.multi_channel_img:
                 warnings.warn('Image has only 2 dimensions, but multi_channel_img is True. ' +
                               'Assuming that the image is a single channel image.')
+
             # Add a channels and a z dimension
             img = np.expand_dims(img, axis=0)
             img = np.expand_dims(img, axis=0)
