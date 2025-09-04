@@ -18,7 +18,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -26,10 +26,15 @@ jobs:
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         platform: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
-
+        group:
+          - name: conv-paint suite
+            files: "src/napari_convpaint/_tests/test_conv_paint.py src/napari_convpaint/_tests/test_conv_paint_utils.py"
+          - name: dims suite
+            files: "src/napari_convpaint/_tests/test_dims.py"
     steps:
       - uses: actions/checkout@v3
 
@@ -59,7 +64,7 @@ jobs:
       - name: Test with tox
         uses: aganders3/headless-gui@v1
         with:
-          run: python -m tox
+          run: python -m tox -- ${{ matrix.group.files }}
         env:
           PLATFORM: ${{ matrix.platform }}
 

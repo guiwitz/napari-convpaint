@@ -83,6 +83,9 @@ venv/
 # written by setuptools_scm
 **/_version.py
 
+# model weights
+src/napari_convpaint/jafar/checkpoints/*.pth
+
 # additional
 /test_out*/
 **/_tests/model_dir
@@ -91,3 +94,5 @@ venv/
 **/catboost_info/learn_error.tsv
 **/catboost_info/time_left.tsv
 **/catboost_info/learn/events.out.tfevents
+src/config/base.yaml
+src/config/*

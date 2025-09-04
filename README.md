@@ -4,25 +4,26 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/napari-convpaint.svg?color=green)](https://python.org)
 [![tests](https://github.com/guiwitz/napari-convpaint/workflows/tests/badge.svg)](https://github.com/guiwitz/napari-convpaint/actions)
 [![codecov](https://codecov.io/gh/guiwitz/napari-convpaint/branch/main/graph/badge.svg)](https://codecov.io/gh/guiwitz/napari-convpaint)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-convpaint)](https://napari-hub.org/plugins/napari-convpaint)
-
 
 
 ![overview conv-paint](/images/overview_github.png)
-This napari plugin can be used to segment objects or structures in images based on a few brush strokes providing examples of the classes. Based on the same idea as other tools like ilastik, its main strength is that it can use features from pretrained neural networks like VGG16 or DINOV2, enabling the segmentation of more complex images.
+This tool, that comes both as a napari plugin and an intuitive Python API, can be used to segment objects or structures in images based on a few examples for the classes provided by the user in form of scribbles onto the image.
 
-**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint](https://doi.org/10.1101/2024.09.12.610926).**
+Following an idea similar to other tools like ilastik, its main strength lies in its capability to use features from basically any model that creates meaningful features describing an image: from neural networks like VGG16 to foundational ViTs such as DINOV2, but also popular models such as Ilastik or Cellpose. This enables the segmentation of virtually any type of image, from simple to complex - without the need of switching and learning new tools.
 
+**Find more information and tutorials in the [docs](https://guiwitz.github.io/napari-convpaint/) or read the [preprint of the paper](https://doi.org/10.1101/2024.09.12.610926).**
 
 ![overview conv-paint](/images/network_github.png)
 
 ## Installation
 
-You can install `napari-convpaint` via [pip]
+You can install `napari-convpaint` via [pip]:
 
     pip install napari-convpaint
 
-To install latest development version :
+*Note: If you are running into an error that vispy requires a certain C++ version, you can install vispy via `conda install vispy` and then install `napari-convpaint` via `pip` to avoid this.*
+
+To install the latest development version:
 
     pip install git+https://github.com/guiwitz/napari-convpaint.git
 
@@ -34,11 +35,13 @@ These are the scribble annotations provided for training:
 And this is the resulting Convpaint segmentation:
 <video src="https://github.com/user-attachments/assets/6a2be1fe-25cc-4af1-9f50-aab9bc4123d9"></video>
 
-Check out the documentation or the paper for more usecases!
+Check out the [documentation](https://guiwitz.github.io/napari-convpaint/book/Landing.html) or the [paper](https://doi.org/10.1101/2024.09.12.610926) for more usecases!
 
 ## API
 
-You can now use the API in a fashion very similar to the napari plugin. The ConvpaintModel class combines a feature extractor and a classifier model, and holds all the parameters defining the model. Initialize a ConvpaintModel object, train its classifier and use it to segment an image:
+You can use the Convpaint API in a fashion very similar to the napari plugin. The `ConvpaintModel` class combines a feature extractor and a classifier model, and holds all the parameters defining the model.
+
+Initialize a `ConvpaintModel` object, train its classifier and use it to segment an image:
 
 ```Python
 cp_model = ConvpaintModel("dino") # alternatively use vgg, cellpose or gaussian
@@ -46,7 +49,7 @@ cp_model.train(image, annotations)
 segmentation = cp_model.segment(image)
 ```
 
-There are many other options, such as predicting all class probabilities (see below) and we will update the documentation and notebook examples soon. In the meantime feel free to test it yourself.
+There are many other options, such as predicting all classes as separate *probabilities* (see below). Please refer to the [documentation](https://guiwitz.github.io/napari-convpaint/book/Landing.html) for more details.
 
 ```Python
 probas = cp_model.predict_probas(image)
@@ -54,8 +57,7 @@ probas = cp_model.predict_probas(image)
 
 ## License
 
-Distributed under the terms of the [BSD-3] license,
-"napari-convpaint" is free and open source software
+Distributed under the terms of the [BSD-3] license, "napari-convpaint" is free and open source software, except for the code in the `jafar/` directory, which is adapted from an [Apache License 2.0–licensed project](https://github.com/PaulCouairon/JAFAR), see `jafar/LICENSE`.
 
 ## Contributing
 
@@ -93,7 +95,7 @@ The idea behind this napari plugin was first developed by [Lucien Hinderling](ht
 
 ## Cite Convpaint
 
-If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used in Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/) or [DINOv2](https://github.com/facebookresearch/dinov2).
+If you find Convpaint useful in your research, please consider citing our work. Please also cite any Feature Extractor you have used within Convpaint, such as [ilastik](https://github.com/ilastik/ilastik-napari), [cellpose](https://cellpose.readthedocs.io/en/latest/), [DINOv2](https://github.com/facebookresearch/dinov2) or [JAFAR](https://github.com/PaulCouairon/JAFAR).
 
 Convpaint:
 ```
@@ -143,4 +145,15 @@ Suggested citations for feature extractors:
       url={https://arxiv.org/abs/2304.07193}
 }
 
+```
+```
+@misc{couairon2025jafar,
+      title={JAFAR: Jack up Any Feature at Any Resolution}, 
+      author={Paul Couairon and Loick Chambon and Louis Serrano and Jean-Emmanuel Haugeard and Matthieu Cord and Nicolas Thome},
+      year={2025},
+      eprint={2506.11136},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2506.11136}, 
+}
 ```

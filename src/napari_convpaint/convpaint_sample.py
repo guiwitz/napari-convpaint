@@ -1,4 +1,3 @@
-import tifffile
 import napari.types
 from skimage.draw import disk
 import numpy as np
