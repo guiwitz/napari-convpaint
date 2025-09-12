@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import torch
 import torch.nn.functional as F
-from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download, normalize_image_imagenet
+from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 from typing import List, Tuple
 import copy
@@ -28,9 +28,11 @@ class DinoJafarFeatures(FeatureExtractor):
 
     def __init__(self, model_name="dino_jafar_small", use_gpu=False):
         super().__init__(model_name=model_name, use_gpu=use_gpu)
+        
         self.patch_size = 14          # token size of ViT
         self.padding    = 0           # model-internal extra pad (none)
         self.num_input_channels = [3] # RGB
+        self.norm_imagenet = True
 
         # Parent .create_model() saves tuple (hr_head, backbone) in self.model
         self.model, self.backbone = self.model
@@ -117,7 +119,6 @@ class DinoJafarFeatures(FeatureExtractor):
         assert img.ndim == 3 and img.shape[0] == 3, "Expected image [3,H,W]"
         H, W = img.shape[1:]
         self._assert_multiples(H, W)
-        img = normalize_image_imagenet(img)
         img = torch.tensor(img[None], dtype=torch.float32, device=self.device)  # [1,3,H,W]
 
         tile_px, overlap_tokens = self._choose_tile_params(H, W, desired_tile_px=self.patch_size * 32, overlap_tokens=2)

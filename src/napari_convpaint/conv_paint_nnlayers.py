@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 from torchvision import models
-from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download, normalize_image_imagenet
+from .conv_paint_utils import get_device, get_device_from_torch_model, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 
 
@@ -38,6 +38,8 @@ class Hookmodel(FeatureExtractor):
     def __init__(self, model_name='vgg16', model=None, use_gpu=None, layers=None):
         
         super().__init__(model_name=model_name, model=model, use_gpu=use_gpu)
+
+        self.norm_imagenet = True
 
         # REGISTER DEVICE OF THE MODEL
         self.device = get_device_from_torch_model(self.model)
@@ -189,7 +191,6 @@ class Hookmodel(FeatureExtractor):
     def get_features(self, image):
         # Convert image to numpy array and ensure correct data type
         image = np.asarray(image, dtype=np.float32)
-        image = normalize_image_imagenet(image)
 
         self.outputs = []
         with torch.no_grad():

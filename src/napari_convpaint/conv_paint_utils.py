@@ -156,7 +156,7 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         # ax[0].imshow(image[0,0,...], cmap='gray')
         # ax[1].imshow(blurred_img[0,0,...], cmap='gray')
         # ax[2].imshow(scaled_img[0,0,...], cmap='gray')
-        plt.show()
+        # plt.show()
         return scaled_img
 
     # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
@@ -564,7 +564,7 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
     coord_tiles = []
 
     if plot_tiles:
-        im_to_show = img[0,0,...]
+        im_to_show = img[0,0,...].copy()
         im_to_show[annot[0]>0] = 0
     
     for region in regions:

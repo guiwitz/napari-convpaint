@@ -754,6 +754,9 @@ class ConvpaintModel:
         # --- Normalization -------------------------------------------------------
         if not skip_norm:
             data = [self._norm_single_image(d) for d in data]
+        if self.fe_model.norm_imagenet:
+            data = [conv_paint_utils.normalize_image_imagenet(d) for d in data]
+
 
         # Record originals BEFORE any padding / resampling for reshaping and rescaling later
         self.original_shapes = [d.shape for d in data]  # list of (C,Z,H,W)
