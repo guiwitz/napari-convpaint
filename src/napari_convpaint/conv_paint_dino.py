@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device, get_device_from_torch_model, scale_img, guided_model_download, normalize_image_imagenet
+from .conv_paint_utils import get_device, get_device_from_torch_model, scale_img, guided_model_download
 from .conv_paint_feature_extractor import FeatureExtractor
 
 AVAILABLE_MODELS = ['dinov2_vits14_reg']
@@ -14,6 +14,7 @@ class DinoFeatures(FeatureExtractor):
         self.patch_size = 14
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
         self.num_input_channels = [3]
+        self.norm_imagenet = True
 
         # Register the device of the created model
         self.device = get_device_from_torch_model(self.model)
@@ -102,8 +103,6 @@ class DinoFeatures(FeatureExtractor):
         assert image.shape[0] == 3
         assert image.shape[-2] % patch_size == 0
         assert image.shape[-1] % patch_size == 0
-
-        image = normalize_image_imagenet(image)
 
         # Crop image to make sure it is divisible by patch size
         # NOTE: This is not necessary (it's old code), but it does not hurt either

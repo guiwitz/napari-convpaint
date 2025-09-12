@@ -18,6 +18,7 @@ class GaussianFeatures(FeatureExtractor):
         # self.padding = 0
         # self.patch_size = 1
         # self.num_input_channels = [1]
+        # self.norm_imagenet = False
 
     def get_description(self):
         return "" # Briefly describe the feature extractor here

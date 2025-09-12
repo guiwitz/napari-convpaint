@@ -25,6 +25,7 @@ class FeatureExtractor:
         self.padding = 0
         self.patch_size = 1
         self.num_input_channels = [1]
+        self.norm_imagenet = False
 
         # Make sure only one method of providing the model is used
         if model is not None and model_name is not None:
