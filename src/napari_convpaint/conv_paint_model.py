@@ -35,12 +35,13 @@ class ConvpaintModel:
     - a `classifier`, which is responsible for the final pixel classification
     - a `Param` object, which defines the details of the model procedures, and is also defined in a separate class
 
-    Note that the `ConvpaintModel` and its `FeatureExtractor` model are closely linked to each other. The intended way to
+    Note that the `ConvpaintModel` and its **`FeatureExtractor` model** are closely linked to each other. The intended way to
     use them is to create a `ConvpaintModel` instance, which will in turn create the corresponding `FeatureExtractor` instance.
     If a `ConvpaintModel` with another feature extractor is desired (including different configurations in layers or GPU usage),
     a new `ConvpaintModel` instance should be created. Other parameters of the `ConvpaintModel`, though, can easily be changed later.
 
-    Input image dimensions and channels:
+    Input **image dimensions** and channels (convention across all training, prediction and feature extraction methods):
+
     - 2D inputs: Will be treated as single-channel (gray-scale) images; if the feature extractor takes multiple input channels,
       the input will be repeated across channels.
     - 3D inputs: Dependent on the `multi_channel_img` parameter in the `Param` object, the first dimension will either be treated as channels

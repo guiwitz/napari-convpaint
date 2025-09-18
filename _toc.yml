@@ -6,6 +6,7 @@ parts:
     chapters:
     - file: book/Installation
     - file: book/First_steps
+    - file: book/Annotations
   - caption: Examples
     chapters:
     - file: book/Timelapse
