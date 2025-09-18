@@ -17,7 +17,7 @@ class Param:
     ----------
     classifier : str
         Path to the classifier model (if saved, otherwise None)
-    multi_channel_img : bool = None
+    multi_channel_img : bool
         Interpret the first dimension as channels (as opposed to z or time)
     normalize : int
         Normalization mode:
@@ -55,9 +55,9 @@ class Param:
         Number of iterations for the classifier
     clf_learning_rate : float
         Learning rate for the classifier
-    clf_depth : int = None
+    clf_depth : int
         Depth of the classifier
-    clf_use_gpu : bool = None
+    clf_use_gpu : bool
         Whether to use GPU for the classifier
         (if None, fe_use_gpu is used)
     """
