@@ -39,6 +39,14 @@ class ConvpaintModel:
     use them is to create a `ConvpaintModel` instance, which will in turn create the corresponding `FeatureExtractor` instance.
     If a `ConvpaintModel` with another feature extractor is desired (including different configurations in layers or GPU usage),
     a new `ConvpaintModel` instance should be created. Other parameters of the `ConvpaintModel`, though, can easily be changed later.
+
+    Input image dimensions and channels:
+    - 2D inputs: Will be treated as single-channel (gray-scale) images; if the feature extractor takes multiple input channels,
+      the input will be repeated across channels.
+    - 3D inputs: Dependent on the `multi_channel_img` parameter in the `Param` object, the first dimension will either be treated as channels
+      (if `multi_channel_img=True`) or as a stack of 2D images (if `multi_channel_img=False`); in the latter case, if the feature extractor
+      takes multiple input channels, the single input channel will be repeated across channels.
+    - 4D inputs: Will be treated as a stack of multi-channel images, with the first dimension as channels.
     """
 
     FE_MODELS_TYPES_DICT = {}
