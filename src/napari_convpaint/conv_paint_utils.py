@@ -840,6 +840,7 @@ def normalize_image(image, image_mean, image_std):
 def normalize_image_imagenet(image):
     """
     Normalize a numpy array or torch tensor image to ImageNet stats.
+    If single channel image is given, it is repeated on first axis and normalized as RGB.
 
     For numpy (np.ndarray):
       1) Cast to float32.
@@ -874,14 +875,17 @@ def normalize_image_imagenet(image):
     ValueError: if input is not np.ndarray or torch.Tensor, if ndim not in (3,4),
                 or if channel dimension != 3 or 1.
     """
-    # dispatch on type
+    # Checks for input
+    if image.ndim not in (3, 4):
+        raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")
+    if image.shape[0] not in [3, 1]:
+        warnings.warn(f"First dimension is neither 3 nor 1 channels (but {image.shape[0]}). Not applying ImageNet normalization.")
+        return image  # return image as is
+
+    # Dispatch on type
     if isinstance(image, np.ndarray):
         # ---------- numpy path ----------
         x = image.astype(np.float32)
-        if image.ndim not in (3, 4):
-            raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")
-        if image.shape[0] not in [3, 1]:
-            raise ValueError(f"First dimension must be 3 or 1 channels (got {image.shape[0]})")
 
         # bring into [0,1]
         if image.dtype == np.uint8:
@@ -894,6 +898,8 @@ def normalize_image_imagenet(image):
             x = (x - mn) / denom
 
         # Repeat single channel if necessary
+        if image.ndim == 3:
+            x = x[np.newaxis, ...]  # add channel axis
         if image.shape[0] == 1:
             x = np.repeat(x, 3, axis=0)
 
@@ -907,11 +913,6 @@ def normalize_image_imagenet(image):
 
     elif isinstance(image, torch.Tensor):
         # ---------- torch path ----------
-        if image.ndim not in (3, 4):
-            raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")
-        if image.shape[0] not in [3, 1]:
-            raise ValueError(f"First dimension must be 3 or 1 channels (got {image.shape[0]})")
-
         device = image.device
         x = image.float()
 
@@ -925,6 +926,8 @@ def normalize_image_imagenet(image):
             denom = (mx - mn).clamp_min(1e-6)
             x = (x - mn) / denom
         
+        if image.ndim == 3:
+            x = x.unsqueeze(0)  # add channel axis
         if image.shape[0] == 1:
             x = x.repeat(3, *[1] * (x.ndim - 1))
 

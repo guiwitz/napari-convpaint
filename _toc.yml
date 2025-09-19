@@ -6,6 +6,7 @@ parts:
     chapters:
     - file: book/Installation
     - file: book/First_steps
+    - file: book/Annotations
   - caption: Examples
     chapters:
     - file: book/Timelapse
@@ -17,7 +18,7 @@ parts:
     - file: book/Calcium_waves
   - caption: Convpaint API
     chapters:
-    - file: book/convpaint_api
+    - file: book/Convpaint_api_tutorial
     - file: book/ConvpaintModel
   - caption: In-depth explanations
     chapters:

@@ -34,6 +34,20 @@ class ConvpaintModel:
     - a `feature extractor` model, defined in a separate class
     - a `classifier`, which is responsible for the final pixel classification
     - a `Param` object, which defines the details of the model procedures, and is also defined in a separate class
+
+    Note that the `ConvpaintModel` and its **`FeatureExtractor` model** are closely linked to each other. The intended way to
+    use them is to create a `ConvpaintModel` instance, which will in turn create the corresponding `FeatureExtractor` instance.
+    If a `ConvpaintModel` with another feature extractor is desired (including different configurations in layers or GPU usage),
+    a new `ConvpaintModel` instance should be created. Other parameters of the `ConvpaintModel`, though, can easily be changed later.
+
+    Input **image dimensions** and channels (convention across all training, prediction and feature extraction methods):
+
+    - 2D inputs: Will be treated as single-channel (gray-scale) images; if the feature extractor takes multiple input channels,
+      the input will be repeated across channels.
+    - 3D inputs: Dependent on the `multi_channel_img` parameter in the `Param` object, the first dimension will either be treated as channels
+      (if `multi_channel_img=True`) or as a stack of 2D images (if `multi_channel_img=False`); in the latter case, if the feature extractor
+      takes multiple input channels, the single input channel will be repeated across channels.
+    - 4D inputs: Will be treated as a stack of multi-channel images, with the first dimension as channels.
     """
 
     FE_MODELS_TYPES_DICT = {}
@@ -589,11 +603,11 @@ class ConvpaintModel:
         image : np.ndarray or list[np.ndarray]
             Image to train the classifier on or list of images
         annotations : np.ndarray or list[np.ndarray]
-            Annotations to train the classifier on or list of annotations
-            Image and annotation lists must correspond to each other
+            Annotations to train the classifier on or list of annotations.
+            Image and annotation lists must correspond to each other.
         memory_mode : bool, optional
-            Whether to use memory mode
-            If True, the annotations are registered and updated, and only features for new pixels are extracted
+            Whether to use memory mode.
+            If True, the annotations are registered and updated, and only features for new pixels are extracted.
         img_ids : str or list[str], optional
             Image IDs to register the annotations with (when using memory_mode)
         use_rf : bool, optional
@@ -603,8 +617,8 @@ class ConvpaintModel:
         in_channels : list[int], optional
             List of channels to use for training
         skip_norm : bool, optional
-            Whether to skip normalization of the images before training
-            If True, the images are not normalized according to the parameter `normalize` in the model parameters
+            Whether to skip normalization of the images before training.
+            If True, the images are not normalized according to the parameter `normalize` in the model parameters.
 
         Returns
         ----------
@@ -629,8 +643,8 @@ class ConvpaintModel:
         in_channels : list[int], optional
             List of channels to use for segmentation
         skip_norm : bool, optional
-            Whether to skip normalization of the images before segmentation
-            If True, the images are not normalized according to the parameter `normalize` in the model parameters
+            Whether to skip normalization of the images before segmentation.
+            If True, the images are not normalized according to the parameter `normalize` in the model parameters.
         use_dask : bool, optional
             Whether to use dask for parallel processing
 
@@ -657,8 +671,8 @@ class ConvpaintModel:
         in_channels : list[int], optional
             List of channels to use for prediction
         skip_norm : bool, optional
-            Whether to skip normalization of the images before prediction
-            If True, the images are not normalized according to the parameter `normalize` in the model parameters
+            Whether to skip normalization of the images before prediction.
+            If True, the images are not normalized according to the parameter `normalize` in the model parameters.
         use_dask : bool, optional
             Whether to use dask for parallel processing
 
@@ -692,7 +706,6 @@ class ConvpaintModel:
         7. (If annotations) extract planes / optionally tile
         8. FE extraction
         9. Optional reshaping: If restore_input_form & not annotations
-           -> reshape + remove base padding + remove patch-multiple pad (via _restore_shape)
         10. Restore original dimension semantics (drop singleton Z when appropriate)
 
         Returns either a single feature array or lists (and optionally annotations / coords when

@@ -299,7 +299,10 @@ class FeatureExtractor:
         """
         Gets the features of an image with an arbitrary number of channels.
         Assumes that the image is a 4D array with dimensions [C, Z, H, W],
-        and compatible spatial dimensions (e.g. multiple of patch size)
+        and compatible spatial dimensions (e.g. multiple of patch size).
+        If the number of channels is not compatible with the model,
+        each channel is replicated to the number of input channels the model expects,
+        and features are extracted for each channel separately.
 
         Parameters:
         ----------
@@ -342,7 +345,7 @@ class FeatureExtractor:
 
     def get_features(self, image):
         """
-        Gets the features of an image.
+        Gets the features of an image given as a stack of planes.
         Assumes that the image is a 4D array with dimensions [C, Z, H, W],
         with C being the number of channels, complying with the model's input channels,
         and compatible spatial dimensions (e.g. multiple of patch size).
@@ -376,7 +379,7 @@ class FeatureExtractor:
 
     def get_features_from_plane(self, image):
         """
-        Given a single plane of the image with [C, H, W], extract features.
+        Gets the features of a single plane of the image with [C, H, W].
         Assumes that the image is a 3D array with dimensions [C, H, W],
         with C being the number of channels, complying with the model's input channels,
         and compatible spatial dimensions (e.g. multiple of patch size).

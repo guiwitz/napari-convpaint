@@ -1600,7 +1600,7 @@ class ConvPaintWidget(QWidget):
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
         # self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
-        self.rgb_img = False # Tag to register if the image is RGB
+        self.rgb_img = getattr(self, "rgb_img", None) or False # Tag to register if the image is RGB
         self.data_shape = None # Shape of the currently selected image data
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
@@ -2218,7 +2218,7 @@ class ConvPaintWidget(QWidget):
         self.check_tile_annotations.setChecked(self.default_cp_param.tile_annotations)
         self.check_tile_image.setChecked(self.default_cp_param.tile_image)
         # Set defaults in param object (not done through bindings if values in the widget are not changed)
-        self.cp_model.set_params(multi_channel_img =  self.rgb_img or self.default_cp_param.multi_channel_img,
+        self.cp_model.set_params(multi_channel_img = self.rgb_img or self.default_cp_param.multi_channel_img,
                                  normalize = self.default_cp_param.normalize,
                                  image_downsample = self.default_cp_param.image_downsample,
                                  seg_smoothening = self.default_cp_param.seg_smoothening,
@@ -2339,7 +2339,7 @@ class ConvPaintWidget(QWidget):
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
         if num_dims == 2:
-            if  self.rgb_img:
+            if self.rgb_img:
                 return '2D_RGB'
             else:
                 return '2D'
