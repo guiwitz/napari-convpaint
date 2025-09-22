@@ -770,7 +770,6 @@ class ConvpaintModel:
         if self.fe_model.norm_imagenet:
             data = [conv_paint_utils.normalize_image_imagenet(d) for d in data]
 
-
         # Record originals BEFORE any padding / resampling for reshaping and rescaling later
         self.original_shapes = [d.shape for d in data]  # list of (C,Z,H,W)
 
@@ -786,7 +785,6 @@ class ConvpaintModel:
         if use_annots:
             annotations = [conv_paint_utils.scale_img(a, factor, input_type="labels", upscale=upscale)
                         for a in annotations]
-            
 
         # --- Memory mode: annotation registering & updating ---------------------------------------
         if memory_mode:
@@ -799,7 +797,7 @@ class ConvpaintModel:
                 return [], [], [], [], params_for_extract.image_downsample
             coords = [conv_paint_utils.get_coordinates_image(d) for d in data]
         else:
-            coords = [None for _ in data] # No coordinates if not in memory mode
+            coords = [None for _ in data]  # No coordinates if not in memory mode
 
         # --- Padding ----------------------------
         # Record originals after resampling but BEFORE padding for reshaping and rescaling later
@@ -824,9 +822,13 @@ class ConvpaintModel:
                     for d, a, c in zip(data, annotations, coords)]
             data        = [p for trio in planes for p in trio[0]]
             annotations = [p for trio in planes for p in trio[1]]
+            # Flat-repeat paddings for each plane
+            paddings    = [paddings[i]                      # the padding for that image
+                           for i, trio in enumerate(planes) # for each original image
+                           for _ in range(len(trio[0]))]    # repeat for each plane in that image
             if memory_mode:
                 coords = [p for trio in planes for p in trio[2]]
-                # If img_ids are given, flatten them as well (corresponding id for each plane)
+                # If img_ids are given, flat-repeat them as well (corresponding id for each plane)
                 if img_ids is not None:
                     img_ids = [img_ids[i]
                             for i, trio in enumerate(planes)
@@ -843,10 +845,14 @@ class ConvpaintModel:
         if params_for_extract.tile_annotations:
             if use_annots:
                 coords = [None for _ in data] if coords is None else coords
-                tiles = [conv_paint_utils.tile_annot(d, a, c, p, plot_tiles=False)
+                tiles = [conv_paint_utils.tile_annot(d, a, c, p, plot_tiles=True)
                         for d, a, c, p in zip(data, annotations, coords, paddings)]
                 data        = [t for trio in tiles for t in trio[0]]
                 annotations = [t for trio in tiles for t in trio[1]]
+                # Flat-repeat paddings for each tile (though not needed anymore, in case they are used later)
+                paddings    = [paddings[i]                      # the padding for that image
+                               for i, trio in enumerate(tiles)  # for each original image
+                               for _ in range(len(trio[0]))]    # repeat for each tile in that image
                 if memory_mode:
                     coords = [t for trio in tiles for t in trio[2]]
                     # If img_ids are given, flatten them as well (corresponding id for each tile)
@@ -1188,7 +1194,7 @@ class ConvpaintModel:
         annotations_list = list(self.table['label'].values)
 
         # Convert features to 2D array: [num_entries, num_features]
-        features = np.stack(features_list, axis=0)
+        features = np.stack(features_list, axis=0) if len(features_list) > 0 else np.empty((0, self.num_features))
         # Convert annotations to 1D array
         annotations = np.array(annotations_list)
 
