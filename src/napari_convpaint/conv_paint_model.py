@@ -845,7 +845,7 @@ class ConvpaintModel:
         if params_for_extract.tile_annotations:
             if use_annots:
                 coords = [None for _ in data] if coords is None else coords
-                tiles = [conv_paint_utils.tile_annot(d, a, c, p, plot_tiles=True)
+                tiles = [conv_paint_utils.tile_annot(d, a, c, p, plot_tiles=False)
                         for d, a, c, p in zip(data, annotations, coords, paddings)]
                 data        = [t for trio in tiles for t in trio[0]]
                 annotations = [t for trio in tiles for t in trio[1]]

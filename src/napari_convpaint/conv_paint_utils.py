@@ -597,6 +597,7 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
         mask = annot_regions[..., y_min:y_max, x_min:x_max] == region.label
         annot_tile = annot_tile * mask
 
+
         if coords is not None:
             coords_tile = coords[..., y_min:y_max, x_min:x_max]
         else:
