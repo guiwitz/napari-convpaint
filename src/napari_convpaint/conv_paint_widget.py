@@ -760,19 +760,21 @@ class ConvPaintWidget(QWidget):
     # Cass Labels
 
     def _create_default_class_labels(self):
+        """Create the default class labels and icons in the layout."""
         # Start with default class labels
         for label in self.initial_labels:
             self._on_add_class_label(text=label)
-
         # Add default annot and seg layers if they exist
         if self.annotation_layer_selection_widget.value is not None:
             self.annot_layers.add(self.annotation_layer_selection_widget.value)
         if self.seg_prefix in self.viewer.layers:
             self.seg_layers.add(self.viewer.layers[self.seg_prefix])
-        
+        # Update all class labels and icons
         self.update_all_labels_and_cmaps()
 
     def _on_reset_class_labels(self):
+        """Reset the class labels to the default ones and update all annotation and segmentation layers."""
+
         # Remove and delete all class label widgets and icons
         for label in self.class_labels:
             self.class_labels_layout.removeWidget(label)
@@ -798,6 +800,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
     
     def _on_add_class_label(self, text=None):
+        """Add a new class label and icon to the layout and update all annotation and segmentation layers."""
         
         # Create a new class label
         new_label = QtWidgets.QLineEdit()
@@ -836,6 +839,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.addWidget(self.reset_class_btn, class_num+2, 0, 1, 10)
 
     def _on_remove_class_label(self, del_annots=True, event=None):
+        """Remove the last class label and icon from the layout and update all annotation and segmentation layers."""
         last_label_idx = len(self.class_labels)
         if last_label_idx > 2:
             # Remove the annotations from all annotation layers (do NOT do it in segmentation layers, as this would leave holes)
@@ -865,6 +869,8 @@ class ConvPaintWidget(QWidget):
             show_info('You need at least two classes.')
 
     def _update_class_icons(self, class_num=None, event=None):
+        """Update the class icons with the colors of the class labels.
+        If class_num is given, only update the icon of that class."""
 
         if self.labels_cmap is None:
             return
@@ -888,6 +894,7 @@ class ConvPaintWidget(QWidget):
                 # self.class_icons[i].mousePressEvent = lambda event, idx=i: self._set_all_labels_classes(idx+1, event)
 
     def _set_all_labels_classes(self, x, event=None):
+        """Set the selected label of all annotation and segmentation layers to x."""
         # For all annotations and segmentation layers added previously, set the selected label to x
         labels_layers = self.annot_layers.union(self.seg_layers)
         for l in labels_layers:
@@ -895,6 +902,7 @@ class ConvPaintWidget(QWidget):
                 self.viewer.layers[l.name].selected_label = x
 
     def _update_class_labels(self, event=None):
+        """Update the class labels for all annotation and segmentation layers."""
         # For all annotation and segmentation layers, set the class labels (= layer property) to the ones defined in the widget
         label_names = ["No label"] + [label.text() for label in self.class_labels]
         props = {"Class": label_names}
@@ -905,13 +913,15 @@ class ConvPaintWidget(QWidget):
 
     @staticmethod
     def get_pixmap(color):
+        """Convert a color (array or list) to a QPixmap for displaying as icon."""
         if color.ndim == 2:
             color = color[0]
         # If color is float, convert to uint8
         if color.dtype != np.uint8:
             color = (color * 255).astype(np.uint8)
-
+        # Create a QColor from the color array
         qcol = QtGui.QColor(*color)
+        # Create a QPixmap and fill it with the color
         pixmap = QtGui.QPixmap(20, 20)  # Create a QPixmap of size 20x20
         pixmap.fill(qcol)  # Fill the pixmap with the chosen color
         # icon = QtGui.QIcon(pixmap)  # Convert pixmap to QIcon
@@ -966,13 +976,11 @@ class ConvPaintWidget(QWidget):
         if (self.cmap_flag or # Avoid infinite loop
             (event is not None and event.source != self.annotation_layer_selection_widget.value)): # Only triggers of annotation layer
             return
-        
         # Make sure we are not in a loop
         self.cmap_flag = True
-
+        # Update the colormap of all labels layers according to the changed annotation layer
         if self.annotation_layer_selection_widget is not None:
             self._update_cmaps(source_layer=self.annotation_layer_selection_widget.value)
-
         # Turn off the flag to allow for new events
         self.cmap_flag = False
 
@@ -981,17 +989,16 @@ class ConvPaintWidget(QWidget):
         if (self.cmap_flag or # Avoid infinite loop
             (event is not None and event.source != self.viewer.layers[self.seg_prefix])): # Only triggers of segmentation layer
             return
-        
         # Make sure we are not in a loop
         self.cmap_flag = True
-
+        # Update the colormap of all labels layers according to the segmentation layer
         if self.seg_prefix in self.viewer.layers:
             self._update_cmaps(source_layer=self.viewer.layers[self.seg_prefix])
-        
         # Turn off the flag to allow for new events
         self.cmap_flag = False
 
     def update_all_labels_and_cmaps(self):
+        """Update class labels, icons and colormaps for all annotation and segmentation layers."""
         # Update class labels
         self._update_class_labels()
         # Sync all labels layers (annotations and segmentation) between each other
@@ -1016,6 +1023,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
+
         # Check if it is the same layer
         was_same = ((self.selected_channel is not None) and
                     (self.selected_channel == self.image_layer_selection_widget.native.currentText()))
@@ -1071,6 +1079,8 @@ class ConvPaintWidget(QWidget):
         QTimer.singleShot(100, lambda: self._on_select_layer())
 
     def _auto_select_annot_layer(self):
+        """Automatically select an annotation layer according to the prefix and image name."""
+
         # Set the name of the annotations accordingly
         annot_name = f"{self.annot_prefix}_{self.selected_channel}"
         # Check if there are fitting labels layers present in the viewer
@@ -1105,6 +1115,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
+        
         labels_layer = self.annotation_layer_selection_widget.value
         
         # Handle labels classes
@@ -1171,7 +1182,7 @@ class ConvPaintWidget(QWidget):
             img_name = self._get_selected_img().name
             in_channels = self._parse_in_channels(self.input_channels)
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
-            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, in_channels=in_channels, skip_norm=True)
+            _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, in_channels=in_channels, skip_norm=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1413,6 +1424,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_save_model(self, event=None, save_file=None):
         """Select file where to save the classifier along with the model parameters."""
+
         # Get file path
         if save_file is None:
             dialog = QFileDialog()
@@ -1437,6 +1449,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_load_model(self, event=None, save_file=None):
         """Select file to load classifier along with the model parameters."""
+
         # Get file path and open the data
         if save_file is None:
             dialog = QFileDialog()
@@ -1521,6 +1534,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_reset_convpaint(self, event=None):
         """Reset model to default and update GUI."""
+
         # Turn off automatic layer creation for the model reset
         self.add_layers_flag = False
 
@@ -1628,6 +1642,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_fe_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
+
         # Create a temporary model to get the layers (to display) and default parameters
         new_fe_type = self.qcombo_fe_type.currentText()
         current_gpu = self.cp_model.get_param("fe_use_gpu")
@@ -1667,12 +1682,14 @@ class ConvPaintWidget(QWidget):
             self.set_fe_btn.setEnabled(True)
 
     def _on_fe_scalings_changed(self):
-        """Update param object only when FE is set."""
+        """Update param object only when FE is set
+        (i.e., do nothing when changing scalings before FE is set)."""
         return
 
     def _on_set_fe_model(self, event=None):
         """Create a neural network model that will be used for feature extraction and
         reset the classifier."""
+
         # Read FE parameters from the GUI
         new_param = self.cp_model.get_params()
         new_layers = self._get_selected_layer_names() # includes re-writing to keys
@@ -1765,6 +1782,7 @@ class ConvPaintWidget(QWidget):
         remove it (or rename and keep it if specified in self.keep_layers) and add a new one.
         If the widget is used as third party (self.third_party=True), no layer is added if it didn't exist before,
         unless force_add=True (e.g. when the user clicks on the add layer button)"""
+
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
@@ -1900,8 +1918,9 @@ class ConvPaintWidget(QWidget):
             self._set_old_proba_tag()
 
     def _rename_annot_for_backup(self):
-        """Create copy of the annotations layers."""
-        # Rename the layers to avoid overwriting them
+        """Name the annotation with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
         if self.annot_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_annot_tag)
             self.viewer.layers[self.annot_prefix].name = full_name
@@ -1909,8 +1928,9 @@ class ConvPaintWidget(QWidget):
             self.annot_layers.add(self.viewer.layers[full_name])
 
     def _rename_seg_for_backup(self):
-        """Create copy of segmentation layer."""
-        # Same for segmentation layer
+        """Name the segmentation layer with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
         if self.seg_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_seg_tag)
             self.viewer.layers[self.seg_prefix].name = full_name
@@ -1918,14 +1938,16 @@ class ConvPaintWidget(QWidget):
             self.seg_layers.add(self.viewer.layers[full_name])
 
     def _rename_probas_for_backup(self):
-        """Create copy of class probabilities layer."""
-        # Same for segmentation layer
+        """Name the class probabilities layer with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
         if self.proba_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_proba_tag)
             self.viewer.layers[self.proba_prefix].name = full_name
 
     def _get_unique_layer_name(self, base_name):
         """Get a unique name for a new layer by checking existing layers."""
+
         # Check if the layer name already exists in the viewer
         existing_layers = [layer.name for layer in self.viewer.layers]
         new_name = base_name
@@ -1941,7 +1963,8 @@ class ConvPaintWidget(QWidget):
         return new_name
 
     def _get_old_data_tag(self):
-        """Set the old data tag based on the current image layer and data dimensions."""
+        """Set the old data tag based on the current image layer and data dimensions.
+        This is used to rename old layers when creating new ones."""
         image_name = self.image_layer_selection_widget.value.name
         data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
                     self.radio_multi_channel.isChecked()*"multiCh" +
@@ -1949,19 +1972,22 @@ class ConvPaintWidget(QWidget):
         return f"{image_name}_{data_dim_str}"
     
     def _set_old_annot_tag(self):
-        """Set the old annotation tag based on the current image layer and data dimensions."""
+        """Set the old annotation tag based on the current image layer and data dimensions.
+        This is used to rename old annotation layers when creating new ones."""
         self.old_annot_tag = f"{self.annot_prefix}_{self._get_old_data_tag()}"
 
     def _set_old_seg_tag(self):
-        """Set the old segmentation tag based on the current image layer and data dimensions."""
+        """Set the old segmentation tag based on the current image layer and data dimensions.
+        This is used to rename old segmentation layers when creating new ones."""
         self.old_seg_tag = f"{self.seg_prefix}_{self._get_old_data_tag()}"
 
     def _set_old_proba_tag(self):
-        """Set the old probabilities tag based on the current image layer and data dimensions."""
+        """Set the old probabilities tag based on the current image layer and data dimensions.
+        This is used to rename old probabilities layers when creating new ones."""
         self.old_proba_tag = f"{self.proba_prefix}_{self._get_old_data_tag()}"
 
     def _reset_radio_data_dim_choices(self):
-        """Set radio buttons active/inactive depending on selected image type.
+        """Set radio buttons for data dimension active/inactive depending on selected image type.
         If current parameter is not valid, set a default."""
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
@@ -1991,7 +2017,7 @@ class ConvPaintWidget(QWidget):
             self.radio_multi_channel.setChecked(True)
 
     def _reset_radio_norm_choices(self, event=None):
-        """Set radio buttons active/inactive depending on selected image type.
+        """Set radio buttons for normalization active/inactive depending on selected image type.
         If current parameter is not valid, set a default."""
         # Reset the stats; not necessary, since they are recalculated anyway if changing the norm mode
         # self.image_mean, self.image_std = None, None
@@ -2090,7 +2116,8 @@ class ConvPaintWidget(QWidget):
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
     def _update_gui_from_params(self, params=None):
-        """Update GUI from parameters."""
+        """Update GUI from parameters. Use after parameters have been changed outside the GUI (e.g. loading)."""
+
         if params is None:
             params = self.cp_model.get_params()
         # Reset data dim choices
@@ -2137,7 +2164,7 @@ class ConvPaintWidget(QWidget):
         self._update_gui_fe_scalings(params.fe_scalings)
     
     def _get_selected_img(self, check=False):
-        """Get the currently selected image layer."""
+        """Get the image layer currently selected in Convpaint."""
         img = self.image_layer_selection_widget.value
         if img is None and check:
             warnings.warn('No image layer selected')
@@ -2155,7 +2182,7 @@ class ConvPaintWidget(QWidget):
             return img_shape[1:]
 
     def _check_large_image(self, img):
-        """Check if the image is too large to be processed."""
+        """Check if the image is very large and should be tiled."""
         data_dims = self._get_data_dims(img)
         img_shape = img.data.shape
         if data_dims in ['2D', '2D_RGB']:
@@ -2244,7 +2271,7 @@ class ConvPaintWidget(QWidget):
         self.model_description2.setText(descr)
 
     def _get_selected_layer_names(self):
-        """Get names of selected layers."""
+        """Get names of selected FE layers."""
         selected_rows = self.fe_layer_selection.selectedItems()
         selected_layers_texts = [x.text() for x in selected_rows]
         selected_layers = self._layer_texts_to_keys(selected_layers_texts)
@@ -2252,7 +2279,7 @@ class ConvPaintWidget(QWidget):
 
     @staticmethod
     def _layer_texts_to_keys(layer_texts):
-        """Convert layer texts to layer keys for use in the model."""
+        """Convert FE layer texts to layer keys for use in the model."""
         if layer_texts is None:
             return None
         layer_keys = [text.split(": ", 1)[1] for text in layer_texts]
@@ -2260,7 +2287,7 @@ class ConvPaintWidget(QWidget):
     
     @staticmethod
     def _layer_keys_to_texts(layer_keys):
-        """Convert layer keys to layer texts for display."""
+        """Convert FE layer keys to layer texts for display."""
         if layer_keys is None:
             return None
         layer_texts = [f'{i}: {layer}' for i, layer in enumerate(layer_keys)]
@@ -2288,7 +2315,7 @@ class ConvPaintWidget(QWidget):
         # Get data from selected channel
         image_stack = self._get_data_channel_first(img)
 
-        # Normalize image
+        # Normalize image: (image - image_mean) / image_std
         if self.cp_model.get_param("normalize") != 1:
             image_stack = normalize_image(
                 image=image_stack,
@@ -2394,7 +2421,7 @@ class ConvPaintWidget(QWidget):
 ### ADVANCED TAB
     
     def _update_training_counts(self):
-        """Update the training counts in the GUI."""
+        """Update the training counts (used with continuous_training/memory_mode) in the GUI."""
         if self.cp_model is None:
             return
         pix = len(self.cp_model.table)
@@ -2403,13 +2430,16 @@ class ConvPaintWidget(QWidget):
         self.label_training_count.setText(f'{pix} pixels, {imgs} image{"s"*(imgs>1)}, {lbls} labels')
 
     def _reset_train_features(self):
-        """Reset the training features."""
+        """Reset the training features used with continuous_training/memory_mode."""
         self.cp_model.reset_training()
         self._update_training_counts()
         # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
         self.features_annots = {}
 
     def _on_show_class_distribution(self):
+        """Show the class distribution of the data used with continuous_training/memory_mode (saved in self.cp_model.table)
+        in a pie chart using the according cmaps."""
+
         try:
             import matplotlib.pyplot as plt
         except ImportError:
@@ -2466,6 +2496,8 @@ class ConvPaintWidget(QWidget):
         plt.show()
 
     def _on_add_all_annot_layers(self):
+        """Add annotation layers for all image layers selected in the layers widget (napari)."""
+
         # Get the selected image layers in the order they are in the widget
         img_layer_list = [layer for layer in self.viewer.layers
                           if layer in self.viewer.layers.selection]
@@ -2498,6 +2530,7 @@ class ConvPaintWidget(QWidget):
         self.update_all_labels_and_cmaps()
 
     def _on_train_on_selected(self):
+        """Train the model on the image and annotation layers currently selected in the layers widget (napari)."""
 
         # Get selected layers (arbitrary order) and sort them by their names
         layer_list = list(self.viewer.layers.selection)
@@ -2532,7 +2565,7 @@ class ConvPaintWidget(QWidget):
             mem_mode = self.cont_training == "global"
             # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
             in_channels = self._parse_in_channels(self.in_channels.text())
-            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, in_channels=in_channels, skip_norm=False, progress=pbr)
+            _ = self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, in_channels=in_channels, skip_norm=False, progress=pbr)
             self._update_training_counts()
     
         with warnings.catch_warnings():
