@@ -211,3 +211,7 @@ class Param:
 
     def __contains__(self, key):
         return key in asdict(self)
+
+    def items(self):
+        """Return (key, value) pairs like a dictionary."""
+        return asdict(self).items()
