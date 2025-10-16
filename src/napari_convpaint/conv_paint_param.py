@@ -17,8 +17,11 @@ class Param:
     ----------
     classifier : str
         Path to the classifier model (if saved, otherwise None)
-    multi_channel_img : bool
-        Interpret the first dimension as channels (as opposed to z or time)
+    channel_mode : str ("multi", "rgb", "single")
+        "multi": interpret the first dimension as channels (as opposed to z or time)
+        "rgb": interpret the first dimension as rgb channels (3 channels required), important for some FEs
+        "single": interpret the first dimension as z or time (only one channel)
+        Note: if data is given as 4d array, "single" is not valid and will be changed to "multi"
     normalize : int
         Normalization mode:
             1 = no normalization,
@@ -64,7 +67,7 @@ class Param:
     classifier: str = None
 
     # Image type parameters
-    multi_channel_img: bool = None # Interpret the first dimension as channels
+    channel_mode: str = "single" # In 3D images, interpret the first dimension not as channels but as z or time ("multi", "rgb", "single")
     normalize: int = None # 1: no normalization, 2: normalize stack, 3: normalize each image
 
     # Input and output parameters
@@ -194,3 +197,17 @@ class Param:
             dict_loaded = yaml.safe_load(file)
 
         return Param(**dict_loaded)
+
+    def __getitem__(self, key):
+        """Allow dict-style access, e.g. param['normalize']"""
+        return asdict(self)[key]
+
+    def __iter__(self):
+        """Allow iteration over (key, value) pairs"""
+        return iter(asdict(self).items())
+    
+    def __len__(self):
+        return len(asdict(self))
+
+    def __contains__(self, key):
+        return key in asdict(self)
