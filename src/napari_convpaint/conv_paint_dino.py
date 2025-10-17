@@ -14,7 +14,8 @@ class DinoFeatures(FeatureExtractor):
         self.patch_size = 14
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
         self.num_input_channels = [3]
-        self.norm_imagenet = True
+        self.norm_mode = "imagenet"  # DINOv2 expects ImageNet normalization
+        self.rgb_input = True  # DINOv2 expects RGB input
 
         # Register the device of the created model
         self.device = get_device_from_torch_model(self.model)

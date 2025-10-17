@@ -44,9 +44,9 @@ class ConvpaintModel:
 
     - 2D inputs: Will be treated as single-channel (gray-scale) images; if the feature extractor takes multiple input channels,
       the input will be repeated across channels.
-    - 3D inputs: Dependent on the `multi_channel_img` parameter in the `Param` object, the first dimension will either be treated as channels
-      (if `multi_channel_img=True`) or as a stack of 2D images (if `multi_channel_img=False`); in the latter case, if the feature extractor
-      takes multiple input channels, the single input channel will be repeated across channels.
+    - 3D inputs: Dependent on the `channel_mode` parameter in the `Param` object, the first dimension will either be treated as channels
+      (if `channel_mode` is "multi" or "rgb") or as a stack of 2D images (if `channel_mode="single"`);
+      in the "single" case, if the feature extractor takes multiple input channels, the single input channel will be repeated accordingly.
     - 4D inputs: Will be treated as a stack of multi-channel images, with the first dimension as channels.
     """
 
@@ -115,7 +115,7 @@ class ConvpaintModel:
         self.reset_training()
         self.num_trainings = 0
         self.num_features = 0
-        self._params_to_reset_training = ['multi_channel_img',
+        self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
                                         #   'seg_smoothening',
@@ -134,7 +134,7 @@ class ConvpaintModel:
                                         #   'clf_depth',
                                         #   'clf_use_gpu'
                                           ]
-        self._params_to_reset_clf = ['multi_channel_img',
+        self._params_to_reset_clf = ['channel_mode',
                                      'normalize',
                                     #  'image_downsample',
                                     #  'seg_smoothening',
@@ -253,7 +253,7 @@ class ConvpaintModel:
         def_param = Param()
 
         # Image type parameters
-        def_param.multi_channel_img = False # Interpret the first dimension as channels
+        def_param.channel_mode = "single" # Interpret the first dimension Z/t (as opposed to as channels)
         def_param.normalize = 2  # 1: no normalization, 2: normalize stack, 3: normalize each image
 
         # Input and output parameters
@@ -555,6 +555,42 @@ class ConvpaintModel:
         # Check if the model was created successfully
         if fe_model is None:
             raise ValueError(f'Feature extractor model {name} could not be created.')
+        
+        # Perform checks and fixes for RGB input and imagenet_normalization
+        fe_model = ConvpaintModel._check_fix_fe_channels(fe_model)
+
+        return fe_model
+    
+    @staticmethod
+    def _check_fix_fe_channels(fe_model):
+        """
+        Checks and fixes channel_mode and imagenet_normalization of the feature extractor model,
+        making sure it works with the input channels defined by the FE model.
+
+        Result: Imagenet_norm is only used when the FE model takes RGB inputs, and RGB input is only
+        used when the FE model takes 3 input channels.
+
+        Parameters
+        ----------
+        fe_model : FeatureExtractor
+            The feature extractor model to check
+
+        Returns
+        ----------
+        fe_model : FeatureExtractor
+            The (possibly modified) feature extractor model
+        """
+        # Make sure RGB is only used when the FE model has 3 input channels
+        if fe_model.rgb_input and 3 not in fe_model.get_num_input_channels():
+            warnings.warn(f'Feature extractor model {fe_model.model_name} does not take 3 input channels, ' +
+                          'assuming FE takes non-RGB input.')
+            fe_model.rgb_input = False
+        
+        # Make sure imagenet_normalization is only used when the FE model takes RGB inputs
+        if fe_model.norm_mode == "imagenet" and not fe_model.rgb_input:
+            warnings.warn(f'Feature extractor model {fe_model.model_name} does not take RGB inputs, ' +
+                          'changing norm_mode from "imagenet" to "default".')
+            fe_model.norm_mode = "default"
 
         return fe_model
 
@@ -567,7 +603,7 @@ class ConvpaintModel:
         Returns
         ---------
         new_param : Param
-            Conpaint model defaults adjusted to the feature extractor defaults
+            Convpaint model defaults adjusted to the feature extractor defaults
         """
         cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
         new_param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
@@ -767,8 +803,8 @@ class ConvpaintModel:
         # --- Normalization -------------------------------------------------------
         if not skip_norm:
             data = [self._norm_single_image(d) for d in data]
-        if self.fe_model.norm_imagenet:
-            data = [conv_paint_utils.normalize_image_imagenet(d) for d in data]
+        # if self.fe_model.norm_mode == "imagenet":
+        #     data = [conv_paint_utils.normalize_image_imagenet(d) for d in data]
 
         # Record originals BEFORE any padding / resampling for reshaping and rescaling later
         self.original_shapes = [d.shape for d in data]  # list of (C,Z,H,W)
@@ -1577,37 +1613,45 @@ class ConvpaintModel:
         """
         num_dims = img.ndim
         if num_dims == 2:
-            if self._param.multi_channel_img:
-                warnings.warn('Image has only 2 dimensions, but multi_channel_img is True. ' +
-                              'Assuming that the image is a single channel image.')
+            if self._param.channel_mode in ['rgb', 'multi']:
+                warnings.warn(f'Image has only 2 dimensions, but the parameter channel_mode is {self._param.channel_mode}. ' +
+                              'Assuming that we are working with single channel image.')
+                self._param.channel_mode = "single"
 
-            # Add a channels and a z dimension
+            # Add a channels and a z dimension (with size = 1)
             img = np.expand_dims(img, axis=0)
             img = np.expand_dims(img, axis=0)
         elif num_dims == 3:
-            if self._param.multi_channel_img:
+            if self._param.channel_mode in ['rgb', 'multi']:
                 # Add a z dimension at the second position
                 img = np.expand_dims(img, axis=1)
-            else:
+            else: # single channel
                 # Add a channels dimension at the first position
                 img = np.expand_dims(img, axis=0)
         elif num_dims == 4:
+            if img.shape[0] > 1 and self._param.channel_mode == "single":
+                warnings.warn(f'Image has {img.shape[0]} channels, but channel_mode is set to "single". ' +
+                                'Convpaint only works with 4D data as 3D multi-channel (or RGB) images with [C, Z, H, W]. ' +
+                                'Setting channel_mode to "multi".')
+                self._param.channel_mode = "multi"
             pass  # Image is already in [C, Z, H, W] format
         else:
-            raise ValueError('Image has wrong number of dimensions')
-        
-        # Check if there are 4 actual dimensions (> 1), and if so, make sure multi_channel_img is True
-        num_real_dims = np.sum(np.array(img.shape) > 1)
-        if num_real_dims == 4 and not self._param.multi_channel_img:
-            # Data must be in [C, Z, H, W] format
-            warnings.warn('Image has 4 dimensions, but multi_channel_img is False. ' +
-                          'Convpaint only works with 4D data as 3D multi-channel images with [C, Z, H, W]. ' +
-                          'Setting multi_channel_img to True.')
-            self._param.multi_channel_img = True
-        
+            raise ValueError(f'Image has wrong number of dimensions: {num_dims}')
+
+        # Check that RGB is only used for 3-channel images
+        if self._param.channel_mode == 'rgb' and img.shape[0] != 3:
+            warnings.warn(f'Image has {img.shape[0]} channels, but channel_mode is "rgb". ' +
+                          'Assuming non-RGB input.')
+            if img.shape[0] == 1:
+                self._param.channel_mode = "single"
+            else:
+                self._param.channel_mode = "multi"
+
+        # Early return if no annotations are given
         if annotations is None:
             return img, None
-        
+
+        # ANNOTATIONS
         num_dims_annots = annotations.ndim
         if num_dims_annots == 2:
             # Add a z dimension at the first position
@@ -1619,7 +1663,7 @@ class ConvpaintModel:
             raise ValueError(f'Annotations have wrong number of dimensions ({num_dims_annots})')
 
         if img.shape[1:] != annotations.shape:
-            raise ValueError(f'Image and annotations have different dimensions: {img.shape[1:]} vs {annotations.shape}')
+            raise ValueError(f'Image and annotations have different (non-channel) dimensions: {img.shape[1:]} vs {annotations.shape}')
 
         return img, annotations
     
@@ -1633,9 +1677,9 @@ class ConvpaintModel:
             return
         
         # In channels makes only sense on multi-channel images
-        if not (self._param.multi_channel_img):
-            raise ValueError("in_channels can only be used if multi_channel_img is True in the model parameters. " +
-                                "Please either remove in_channels or make sure multi_channel_img is being set to True.")
+        if self._param.channel_mode == 'single':
+            raise ValueError("in_channels is not valid for single channel images (defined in the model parameters). " +
+                                "Please either remove in_channels or make sure the channel_mode is 'multi' or 'rgb'.")
         
         # Check that in_channels is a list of integers
         if not isinstance(in_channels, list):
@@ -1650,27 +1694,46 @@ class ConvpaintModel:
     
     def _norm_single_image(self, img):
         """
-        Normalizes a single image.
+        Checks the norm mode and normalizes a single image accordingly.
+        For default mode, the image stats are computed according to the scope given in the parameters.
         Assumes that the image is in [C, Z, H, W] format.
         """
-        if img.ndim != 4:
-            raise ValueError('Image must be given as 4 dimensions (C, Z, H, W).')
         
-        # Get the normalization mode from the parameters
+        # Get the normalization scope from the parameters
         if self._param.normalize is None:
-            norm_mode = 1 # If not specified, do not normalize
+            norm_scope = 1 # If not specified, do not normalize
         else:
-            norm_mode = self._param.normalize
+            norm_scope = self._param.normalize
         
-        # If normalization mode is 1, no normalization is applied
-        if norm_mode == 1:
+        # If normalization scope is 1, no normalization is applied
+        if norm_scope == 1:
             return img
 
-        # Otherwise we generally normalize each channel separately
-        # This means that if we normalize by stack (= 2), we ignore the C dimension (= first)
-        # If normalization is "by image" (= 3), we additionally keep the Z dimension
-        num_ignored_channels = 2 if norm_mode == 3 else 1
-        mean, sd = conv_paint_utils.compute_image_stats(img, ignore_n_first_dims=num_ignored_channels)
+        # Check that the image has 4 dimensions
+        if img.ndim != 4:
+            raise ValueError('Image must be given as 4 dimensions (C, Z, H, W).')
+
+        # FE-SPECIFIC NORMALIZATION
+        # If the FE demands imagenet or percentile normalization, do that if image is compatible
+        fe_norm = self.fe_model.norm_mode
+        if fe_norm == 'imagenet':
+            if self._param.channel_mode == 'rgb':
+                img_norm = conv_paint_utils.normalize_image_imagenet(img)
+                return img_norm
+            else:
+                print("FE model is designed for imagenet normalization, but image is not declared as 'rgb' (parameter channel_mode). " +
+                "Using default normalization instead.")
+        elif fe_norm == 'percentile':
+            num_ignored_dims = 1 if norm_scope == 2 else 2
+            img_norm = conv_paint_utils.normalize_image_percentile(img, ignore_n_first_dims=num_ignored_dims)
+            return img_norm
+
+        # DEFAULT NORMALIZATION
+        # Otherwise we normalize to mean and std, generally normalizing each channel separately
+        # This means that if we normalize by stack (= 2), we ignore the C dimension (= first) only
+        # If normalization scope is "by image" (= 3), we additionally keep the Z dimension (= second)
+        num_ignored_dims = 1 if norm_scope == 2 else 2
+        mean, sd = conv_paint_utils.compute_image_stats(img, ignore_n_first_dims=num_ignored_dims)
         
         # Normalize using these statistics
         img_norm = conv_paint_utils.normalize_image(img, mean, sd)
@@ -1857,7 +1920,7 @@ class ConvpaintModel:
         """
         is_2d = len(original_shape) == 2
         is_3d = len(original_shape) == 3
-        is_3d_multi = is_3d and (self._param.multi_channel_img)
+        is_3d_multi = is_3d and (self._param.channel_mode in ['rgb', 'multi'])
         # if is 2d or 3D with multiple channels (including RGB), we remove the z dimension
         if is_2d or is_3d_multi:
             if pred.shape[-3] != 1:

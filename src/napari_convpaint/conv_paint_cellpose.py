@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from .conv_paint_utils import get_device, normalize_image_percentile
 from .conv_paint_feature_extractor import FeatureExtractor
 import skimage
 from cellpose import models
@@ -15,6 +14,8 @@ class CellposeFeatures(FeatureExtractor):
 
         super().__init__(model_name=model_name, model=model, use_gpu=use_gpu)
         self.patch_size = 8
+        self.num_input_channels = [2]
+        self.norm_mode = "percentile"
 
         self.device = self.model.device if self.model is not None else None
 
@@ -41,12 +42,8 @@ class CellposeFeatures(FeatureExtractor):
         param.fe_order = 0
         param.tile_annotations = False
         return param
-    
-    def get_num_input_channels(self):
-        return [2]
 
     def get_features_from_plane(self, image):
-        image = normalize_image_percentile(image)
 
         image_expanded = np.expand_dims(image, axis=0)
         tensor = torch.from_numpy(image_expanded).float()

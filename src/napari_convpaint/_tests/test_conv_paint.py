@@ -72,8 +72,8 @@ def test_correct_model_rgb(make_napari_viewer, capsys):
     viewer.add_image(im, name='sample')
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data[...] = im_annot
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
     my_widget._on_train()
     assert my_widget.qcombo_fe_type.currentText() == 'vgg16', "Model type not updated correctly"
 
@@ -88,8 +88,8 @@ def test_correct_model_2d(make_napari_viewer, capsys):
     viewer.add_image(im[:,:,0], name='sample')
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data[...] = im_annot
-    my_widget.rgb_img = False
-    my_widget.cp_model.set_params(multi_channel_img=False)
+    # my_widget.rgb_img = False
+    my_widget.cp_model.set_params(channel_mode='single')
     my_widget._on_train()
     assert my_widget.qcombo_fe_type.currentText() == 'vgg16', "Model type not updated correctly"
 
@@ -104,8 +104,8 @@ def test_rgb_prediction(make_napari_viewer, capsys):
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data[...] = im_annot
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
     my_widget._on_train()
     my_widget._on_predict()
 
@@ -147,8 +147,8 @@ def test_save_model(make_napari_viewer, capsys):
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data[...] = im_annot
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
     my_widget._on_train()
     my_widget._on_predict()
 
@@ -164,8 +164,8 @@ def test_load_model(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
 
     my_widget._on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
     my_widget._on_predict()
@@ -194,8 +194,8 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Simulate selecting the Dino model from the dropdown
     my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
@@ -236,8 +236,8 @@ def test_load_model_dino(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
 
     viewer.add_image(im)
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Load the Dino model
     my_widget._on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
@@ -266,8 +266,8 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Create and save the first model with scales [1]
     my_widget.qcombo_fe_type.setCurrentText('vgg16')
@@ -326,8 +326,8 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         my_widget = ConvPaintWidget(viewer)
         viewer.add_image(im)
         my_widget._on_add_annot_layer()
-        my_widget.rgb_img = False # Assuming only 2D images are generated
-        my_widget.cp_model.set_params(multi_channel_img=False) # Assuming only 2D images are generated
+        # my_widget.rgb_img = False # Assuming only 2D images are generated
+        my_widget.cp_model.set_params(channel_mode='single') # Assuming only 2D images are generated
 
         # Load the Dino model
         my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
@@ -357,8 +357,8 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
     viewer.add_image(im, name='sample')
     my_widget._on_add_annot_layer()
     viewer.layers['annotations'].data[...] = im_annot
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Create and save the custom vgg16 model with selected layers
 

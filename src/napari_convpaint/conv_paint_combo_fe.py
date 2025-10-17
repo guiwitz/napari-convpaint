@@ -65,7 +65,6 @@ class ComboFeatures(FeatureExtractor):
         super().__init__(model_name=model_name, use_gpu=False)
 
         self.model1, self.model2 = self.model
-        self.feature_extraction = False
 
         # Move all models to the device manually to ensure they are all on the same...
         self.use_gpu = use_gpu
