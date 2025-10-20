@@ -755,10 +755,9 @@ def normalize_image(image, image_mean, image_std):
     """
     Normalize a numpy array with 2-4 dimensions.
 
-    If the array has multiple channels (determined by the channel_mode flag), 
-    each channel is normalized independently. If there are multiple time or z frames, 
-    they are normalized together. However, this behavior is already defined through the
-    provided mean and std values.
+    If the array has multiple channels (determined by the number of dims and channel_mode flag), 
+    each channel is normalized independently. If there are multiple time or z frames, the behavior
+    (whether to normalize across time/z or not) is already defined through the provided mean and std values.
 
     Parameters:
     ----------
@@ -858,42 +857,34 @@ def normalize_image_percentile(image: np.ndarray, ignore_n_first_dims: int = 0) 
 def normalize_image_imagenet(image):
     """
     Normalize a numpy array or torch tensor image to ImageNet stats.
-    If single channel image is given, it is repeated on first axis and normalized as RGB.
     Note that since fixed ranges are used, there is no difference between per-plane or over-stack normalization.
+    For an ImageNet-trained model, we do not normalize "over stack" — each image slice gets ImageNet normalization separately.
 
-    For numpy (np.ndarray):
+    For numpy (np.ndarray) or torch (torch.Tensor):
       1) Cast to float32.
       2) Bring values into [0,1] by:
-         - dividing uint8 by 255
-         - dividing uint16 by 65535
+         - dividing uint by the maximum value for that uint type (e.g., 255 for uint8)
+         - calculating (value - min) / (max - min) for signed ints
          - checking if float32/64 and values are already in [0,1]
-      3) Applies per-channel ImageNet mean/std.
-
-    For torch (torch.Tensor):
-      1) Cast to float32.
-      2) Bring values into [0,1] by:
-         - dividing uint8 by 255
-         - dividing uint16 by 65535
-         - checking if float32/64 and values are already in [0,1]
-      3) Applies per-channel ImageNet mean/std on the same device.
+      3) Applies per-channel ImageNet mean/std. Use same device for torch tensors.
 
     Parameters:
     ----------
     image: np.ndarray or torch.Tensor of shape [3, H, W] or [3, Z, H, W] or the same with 1 channel,
-            dtype uint8, uint16, or float.
+            dtype should be uint8, uint16, or float (32 or 64).
 
     Returns:
     ----------
     np.ndarray or torch.Tensor: Same type as input (np.ndarray or torch.Tensor), same shape,
-        unless if single channel image is given, it is repeated on first axis and normalized as RGB
-        dtype float32, normalized so each channel has ImageNet mean [0.485,0.456,0.406] and
-        std [0.229,0.224,0.225].
+        normalized as RGB dtype float32, normalized to ImageNet stats
+        (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]).
 
     Raises:
     ----------
     ValueError: if input is not np.ndarray or torch.Tensor, if ndim not in (3,4),
                 or if channel dimension != 3 or 1.
     """
+
     # Checks for input
     if image.ndim not in (3, 4):
         raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")

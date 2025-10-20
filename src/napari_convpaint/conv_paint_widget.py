@@ -1155,10 +1155,11 @@ class ConvPaintWidget(QWidget):
             raise Exception('No annotation layer selected. Please create one.')
         unique_labels = np.unique(annot.data)
         unique_labels = unique_labels[unique_labels != 0]
-        if (len(unique_labels) < 2
-            and mem_mode == False
-            and self.cp_model.num_trainings == 0):
-            raise Exception('You need annotations for at least foreground and background')
+        if len(unique_labels) < 2:
+            if not mem_mode:
+                raise Exception('You need annotations for at least foreground and background')
+            if self.cp_model.num_trainings == 0:
+                raise Exception('Model has not yet been trained. You need annotations for at least foreground and background')
 
         # Check if annotations layer has correct shape for the chosen data type
         if not self._approve_annotation_layer_shape(annot, img):
@@ -1739,19 +1740,19 @@ class ConvPaintWidget(QWidget):
             (new_param.channel_mode != fe_defaults.channel_mode)):
             # Catch case where multichannel is adjusted on incompatible data
             if data_dims in ['2D'] and fe_defaults.channel_mode in ['multi', 'rgb']:
-                warnings.warn(f'The feature extractor tried to enforce "{fe_defaults.channel_mode}" channel mode on {data_dims} data. ' +
+                warnings.warn(f'The feature extractor tried to set its default "{fe_defaults.channel_mode}" channel mode on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             elif data_dims in ['2D_RGB', '3D_RGB', '4D'] and fe_defaults.channel_mode == 'single':
-                warnings.warn(f'The feature extractor tried to enforce single-channel on {data_dims} data. ' +
+                warnings.warn(f'The feature extractor tried to set its default single-channel mode on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
-            else: # If data is compatible, enforce the model's default multichannel setting
+            else: # If data is compatible, set the model's default multichannel setting
                 adjusted_params.append('channel_mode')
                 new_param.channel_mode = fe_defaults.channel_mode
                 self._reset_radio_channel_mode_choices()
                 self._reset_radio_norm_choices() # Update norm options, since channel_mode changed
-            # else: # If data is compatible, enforce the model's default RGB setting
+            # else: # If data is compatible, set the model's default RGB setting
             #     adjusted_params.append('rgb_img')
-            #     if fe_defaults.rgb_img: # If the default model is RGB, enforce it
+            #     if fe_defaults.rgb_img: # If the default model is RGB, set it
             #         new_param.rgb_img = True
             #         self.radio_rgb.setChecked(True)
             #     else: # If the default model is non-RGB, reset data dims according to data
@@ -1762,7 +1763,7 @@ class ConvPaintWidget(QWidget):
         if ((fe_defaults.normalize is not None) and
             (new_param.normalize != fe_defaults.normalize)):
             if data_dims in ['2D', '2D_RGB', '3D_multi'] and fe_defaults.normalize == 2:
-                warnings.warn(f'The feature extractor tried to enforce normalization over stack on {data_dims} data. ' +
+                warnings.warn(f'The feature extractor tried to set its default normalization over stack on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             else:
                 adjusted_params.append('normalize')
@@ -2369,7 +2370,7 @@ class ConvPaintWidget(QWidget):
         
         # If stats are not set, compute them --> they depend on the normalization mode and data dimensions
         if self.image_mean is None or self.image_std is None:
-            self._compute_image_stats(img) # Calls _get_data_channel_first() inside -> use original img
+            self._compute_image_stats(img) # Calls _get_data_channel_first() inside -> pass original img
 
         # Normalize image: (image - image_mean) / image_std
         return normalize_image(image=image_stack,

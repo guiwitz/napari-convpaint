@@ -1699,15 +1699,12 @@ class ConvpaintModel:
         Assumes that the image is in [C, Z, H, W] format.
         """
         
-        # Get the normalization scope from the parameters
-        if self._param.normalize is None:
-            norm_scope = 1 # If not specified, do not normalize
-        else:
-            norm_scope = self._param.normalize
-        
-        # If normalization scope is 1, no normalization is applied
-        if norm_scope == 1:
+        # If normalization scope is 1 or not specified, no normalization is applied
+        if self._param.normalize is None or self._param.normalize == 1:
             return img
+
+        # Get the normalization scope from the parameters
+        norm_scope = self._param.normalize
 
         # Check that the image has 4 dimensions
         if img.ndim != 4:
@@ -1724,7 +1721,7 @@ class ConvpaintModel:
                 print("FE model is designed for imagenet normalization, but image is not declared as 'rgb' (parameter channel_mode). " +
                 "Using default normalization instead.")
         elif fe_norm == 'percentile':
-            num_ignored_dims = 1 if norm_scope == 2 else 2
+            num_ignored_dims = 1 if norm_scope == 2 else 2 # Ignore C dim for stack, C and Z for by image
             img_norm = conv_paint_utils.normalize_image_percentile(img, ignore_n_first_dims=num_ignored_dims)
             return img_norm
 
@@ -1732,7 +1729,7 @@ class ConvpaintModel:
         # Otherwise we normalize to mean and std, generally normalizing each channel separately
         # This means that if we normalize by stack (= 2), we ignore the C dimension (= first) only
         # If normalization scope is "by image" (= 3), we additionally keep the Z dimension (= second)
-        num_ignored_dims = 1 if norm_scope == 2 else 2
+        num_ignored_dims = 1 if norm_scope == 2 else 2 # Ignore C dim for stack, C and Z for by image
         mean, sd = conv_paint_utils.compute_image_stats(img, ignore_n_first_dims=num_ignored_dims)
         
         # Normalize using these statistics
