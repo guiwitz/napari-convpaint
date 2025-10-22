@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import warnings
 
-from .conv_paint_utils import normalize_image, compute_image_stats
+from .conv_paint_utils import normalize_image, compute_image_stats, normalize_image_percentile, normalize_image_imagenet
 from .conv_paint_model import ConvpaintModel
 
 class ConvPaintWidget(QWidget):
@@ -655,11 +655,11 @@ class ConvPaintWidget(QWidget):
 
         # Image Processing; only trigger from buttons that are activated (checked)
         self.radio_single_channel.toggled.connect(lambda checked: 
-            checked and self._on_data_dim_changed())
+            checked and self._on_channel_mode_changed())
         self.radio_multi_channel.toggled.connect(lambda checked:
-            checked and self._on_data_dim_changed())
+            checked and self._on_channel_mode_changed())
         self.radio_rgb.toggled.connect(lambda checked:
-            checked and self._on_data_dim_changed())
+            checked and self._on_channel_mode_changed())
         self.radio_no_normalize.toggled.connect(lambda checked:
             checked and self._on_norm_changed())
         self.radio_normalize_over_stack.toggled.connect(lambda checked:
@@ -760,19 +760,21 @@ class ConvPaintWidget(QWidget):
     # Cass Labels
 
     def _create_default_class_labels(self):
+        """Create the default class labels and icons in the layout."""
         # Start with default class labels
         for label in self.initial_labels:
             self._on_add_class_label(text=label)
-
         # Add default annot and seg layers if they exist
         if self.annotation_layer_selection_widget.value is not None:
             self.annot_layers.add(self.annotation_layer_selection_widget.value)
         if self.seg_prefix in self.viewer.layers:
             self.seg_layers.add(self.viewer.layers[self.seg_prefix])
-        
+        # Update all class labels and icons
         self.update_all_labels_and_cmaps()
 
     def _on_reset_class_labels(self):
+        """Reset the class labels to the default ones and update all annotation and segmentation layers."""
+
         # Remove and delete all class label widgets and icons
         for label in self.class_labels:
             self.class_labels_layout.removeWidget(label)
@@ -798,6 +800,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
     
     def _on_add_class_label(self, text=None):
+        """Add a new class label and icon to the layout and update all annotation and segmentation layers."""
         
         # Create a new class label
         new_label = QtWidgets.QLineEdit()
@@ -836,6 +839,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.addWidget(self.reset_class_btn, class_num+2, 0, 1, 10)
 
     def _on_remove_class_label(self, del_annots=True, event=None):
+        """Remove the last class label and icon from the layout and update all annotation and segmentation layers."""
         last_label_idx = len(self.class_labels)
         if last_label_idx > 2:
             # Remove the annotations from all annotation layers (do NOT do it in segmentation layers, as this would leave holes)
@@ -865,6 +869,8 @@ class ConvPaintWidget(QWidget):
             show_info('You need at least two classes.')
 
     def _update_class_icons(self, class_num=None, event=None):
+        """Update the class icons with the colors of the class labels.
+        If class_num is given, only update the icon of that class."""
 
         if self.labels_cmap is None:
             return
@@ -888,6 +894,7 @@ class ConvPaintWidget(QWidget):
                 # self.class_icons[i].mousePressEvent = lambda event, idx=i: self._set_all_labels_classes(idx+1, event)
 
     def _set_all_labels_classes(self, x, event=None):
+        """Set the selected label of all annotation and segmentation layers to x."""
         # For all annotations and segmentation layers added previously, set the selected label to x
         labels_layers = self.annot_layers.union(self.seg_layers)
         for l in labels_layers:
@@ -895,6 +902,7 @@ class ConvPaintWidget(QWidget):
                 self.viewer.layers[l.name].selected_label = x
 
     def _update_class_labels(self, event=None):
+        """Update the class labels for all annotation and segmentation layers."""
         # For all annotation and segmentation layers, set the class labels (= layer property) to the ones defined in the widget
         label_names = ["No label"] + [label.text() for label in self.class_labels]
         props = {"Class": label_names}
@@ -905,13 +913,15 @@ class ConvPaintWidget(QWidget):
 
     @staticmethod
     def get_pixmap(color):
+        """Convert a color (array or list) to a QPixmap for displaying as icon."""
         if color.ndim == 2:
             color = color[0]
         # If color is float, convert to uint8
         if color.dtype != np.uint8:
             color = (color * 255).astype(np.uint8)
-
+        # Create a QColor from the color array
         qcol = QtGui.QColor(*color)
+        # Create a QPixmap and fill it with the color
         pixmap = QtGui.QPixmap(20, 20)  # Create a QPixmap of size 20x20
         pixmap.fill(qcol)  # Fill the pixmap with the chosen color
         # icon = QtGui.QIcon(pixmap)  # Convert pixmap to QIcon
@@ -966,13 +976,11 @@ class ConvPaintWidget(QWidget):
         if (self.cmap_flag or # Avoid infinite loop
             (event is not None and event.source != self.annotation_layer_selection_widget.value)): # Only triggers of annotation layer
             return
-        
         # Make sure we are not in a loop
         self.cmap_flag = True
-
+        # Update the colormap of all labels layers according to the changed annotation layer
         if self.annotation_layer_selection_widget is not None:
             self._update_cmaps(source_layer=self.annotation_layer_selection_widget.value)
-
         # Turn off the flag to allow for new events
         self.cmap_flag = False
 
@@ -981,17 +989,16 @@ class ConvPaintWidget(QWidget):
         if (self.cmap_flag or # Avoid infinite loop
             (event is not None and event.source != self.viewer.layers[self.seg_prefix])): # Only triggers of segmentation layer
             return
-        
         # Make sure we are not in a loop
         self.cmap_flag = True
-
+        # Update the colormap of all labels layers according to the segmentation layer
         if self.seg_prefix in self.viewer.layers:
             self._update_cmaps(source_layer=self.viewer.layers[self.seg_prefix])
-        
         # Turn off the flag to allow for new events
         self.cmap_flag = False
 
     def update_all_labels_and_cmaps(self):
+        """Update class labels, icons and colormaps for all annotation and segmentation layers."""
         # Update class labels
         self._update_class_labels()
         # Sync all labels layers (annotations and segmentation) between each other
@@ -1016,6 +1023,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
+
         # Check if it is the same layer
         was_same = ((self.selected_channel is not None) and
                     (self.selected_channel == self.image_layer_selection_widget.native.currentText()))
@@ -1031,7 +1039,7 @@ class ConvPaintWidget(QWidget):
                 # self.update_layer_flag = False
                 self.add_layers_flag = False # Turn off layer creation, instead we do it manually below
                 # Set radio buttons depending on selected image type
-                self._reset_radio_data_dim_choices()
+                self._reset_radio_channel_mode_choices()
                 self._reset_radio_norm_choices()
                 self._reset_predict_buttons()
                 self._compute_image_stats(img)
@@ -1071,6 +1079,8 @@ class ConvPaintWidget(QWidget):
         QTimer.singleShot(100, lambda: self._on_select_layer())
 
     def _auto_select_annot_layer(self):
+        """Automatically select an annotation layer according to the prefix and image name."""
+
         # Set the name of the annotations accordingly
         annot_name = f"{self.annot_prefix}_{self.selected_channel}"
         # Check if there are fitting labels layers present in the viewer
@@ -1105,6 +1115,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_annot(self, newtext=None):
         """Check if annotation layer dimensions are compatible with image, and raise warning if not."""
+        
         labels_layer = self.annotation_layer_selection_widget.value
         
         # Handle labels classes
@@ -1144,10 +1155,11 @@ class ConvPaintWidget(QWidget):
             raise Exception('No annotation layer selected. Please create one.')
         unique_labels = np.unique(annot.data)
         unique_labels = unique_labels[unique_labels != 0]
-        if (len(unique_labels) < 2
-            and mem_mode == False
-            and self.cp_model.num_trainings == 0):
-            raise Exception('You need annotations for at least foreground and background')
+        if len(unique_labels) < 2:
+            if not mem_mode:
+                raise Exception('You need annotations for at least foreground and background')
+            if self.cp_model.num_trainings == 0:
+                raise Exception('Model has not yet been trained. You need annotations for at least foreground and background')
 
         # Check if annotations layer has correct shape for the chosen data type
         if not self._approve_annotation_layer_shape(annot, img):
@@ -1171,7 +1183,7 @@ class ConvPaintWidget(QWidget):
             img_name = self._get_selected_img().name
             in_channels = self._parse_in_channels(self.input_channels)
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
-            self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, in_channels=in_channels, skip_norm=True)
+            _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name, in_channels=in_channels, skip_norm=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1261,9 +1273,19 @@ class ConvPaintWidget(QWidget):
         """Predict the segmentation of the currently viewed frame based 
         on a classifier trained with annotations"""
         
-        # Perform checks as preparation for prediction
+        # Get image and the info needed about normalization
         img = self._get_selected_img(check=True)
-        if self.image_mean is None or self.image_std is None:
+        fe_norm = self.cp_model.fe_model.norm_mode
+        use_default = (fe_norm == "default")
+        if fe_norm == "imagenet" and self.cp_model.get_param("channel_mode") != 'rgb':
+            print("FE model is designed for imagenet normalization, but image is not declared as 'rgb' (parameter channel_mode). " +
+            "Using default normalization instead.")
+            use_default = True
+        norm_scope = self.cp_model.get_param("normalize")
+        data_dims = self._get_data_dims(img)
+
+        # If we use default normalization, compute image stats if not already done
+        if use_default and (self.image_mean is None or self.image_std is None):
             self._compute_image_stats(img)
 
         # Start prediction
@@ -1275,15 +1297,18 @@ class ConvPaintWidget(QWidget):
             
             pbr.set_description(f"Prediction")
 
-            data_dims = self._get_data_dims(img)
-
             # Get image data and stats depending on the data dim and norm mode
-            img = self._get_data_channel_first(img) # Do not normalize yet, so we can specifically normalize only the current step
-            norm_mode = self.cp_model.get_param("normalize")
+            if fe_norm != "percentile":
+                # For default and imagenet norm, we want unnormalized data to apply normalization only on the current plane
+                img = self._get_data_channel_first(img)
+            else: # "percentile"
+                # For percentile norm, we want already normalized data to avoid artifacts when normalizing only the current plane
+                img = self._get_data_channel_first_norm(img)
 
             if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
                 image_plane = img
-                if norm_mode != 1:
+                # Get stats for default norm
+                if norm_scope != 1 and use_default: # if we need to normalize and use default norm
                     image_mean = self.image_mean
                     image_std = self.image_std
 
@@ -1291,26 +1316,38 @@ class ConvPaintWidget(QWidget):
                 # NOTE: If we already have a layer with probas, the viewer has 4 dims; therefore take 3rd last not first
                 step = self.viewer.dims.current_step[-3]
                 image_plane = img[step]
-                if norm_mode == 2: # over stack (only 1 value in stack dim; 1, 1, 1)
+                # Get stats for default norm
+                if norm_scope == 2 and use_default: # over stack (only 1 value in stack dim; 1, 1, 1)
                     image_mean = self.image_mean
                     image_std = self.image_std
-                if norm_mode == 3: # by image (use values for current step; N, 1, 1)
+                if norm_scope == 3 and use_default: # by image (use values for current step; N, 1, 1)
                     image_mean = self.image_mean[step]
                     image_std = self.image_std[step]
 
             if data_dims in ['4D', '3D_RGB']: # Stack dim is third last
                 step = self.viewer.dims.current_step[-3]
                 image_plane = img[:, step]
-                if norm_mode == 2: # over stack (only 1 value in stack dim; C, 1, 1, 1)
+                # Get stats for default norm
+                if norm_scope == 2 and use_default: # over stack (only 1 value in stack dim; C, 1, 1, 1)
                     image_mean = self.image_mean[:,0]
                     image_std = self.image_std[:,0]
-                if norm_mode == 3: # by image (use values for current step; C, N, 1, 1)
+                if norm_scope == 3 and use_default: # by image (use values for current step; C, N, 1, 1)
                     image_mean = self.image_mean[:,step]
                     image_std = self.image_std[:,step]
             
-            # Normalize image (using the stats based on the radio buttons)
-            if norm_mode != 1:
-                image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
+            # Normalize image (for default: use the stats based on the radio buttons; for imagenet: stats are fixed)
+            if norm_scope != 1:
+                if use_default:
+                    image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
+                elif fe_norm == "imagenet":
+                    # Only if rgb image --> array with 3 or 4 dims, with C=3 first
+                    if self.cp_model.get_param("channel_mode") == 'rgb': # Double-check (actually redundant due to check above)
+                        image_plane = normalize_image_imagenet(image=image_plane)
+                    else:
+                        print("WIDGET _ON_PREDICT(): THIS SHOULD NOT BE HAPPENING, AS WE CHECKED ABOVE FOR RGB")
+                        image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
+                # For percentile norm, image is already normalized above (before selecting the plane)
+            
             # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
             in_channels = self._parse_in_channels(self.input_channels)
             probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True, use_dask=self.use_dask)
@@ -1413,6 +1450,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_save_model(self, event=None, save_file=None):
         """Select file where to save the classifier along with the model parameters."""
+
         # Get file path
         if save_file is None:
             dialog = QFileDialog()
@@ -1437,6 +1475,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_load_model(self, event=None, save_file=None):
         """Select file to load classifier along with the model parameters."""
+
         # Get file path and open the data
         if save_file is None:
             dialog = QFileDialog()
@@ -1457,8 +1496,9 @@ class ConvPaintWidget(QWidget):
         # Check if the new multichannel setting is compatible with data
         data = self._get_selected_img()
         data_dims = self._get_data_dims(data)
-        if data_dims in ['2D'] and new_param.multi_channel_img:
-            warnings.warn(f'The loaded model works with multichannel, but the data is {data_dims}. ' +
+        channel_mode = new_param.channel_mode
+        if data_dims in ['2D'] and channel_mode in ['rgb', 'multi']:
+            warnings.warn(f'The loaded model works with {channel_mode} data, but the data is {data_dims}. ' +
                             'This might cause problems.')
         # Check if the loaded normalization setting is compatible with data
         if data_dims in ['2D', '2D_RGB', '3D_multi'] and new_param.normalize == 2:
@@ -1487,10 +1527,13 @@ class ConvPaintWidget(QWidget):
 
     # Image Processing
 
-    def _on_data_dim_changed(self):
+    def _on_channel_mode_changed(self):
         """Set the image data dimensions based on radio buttons,
         reset classifier, and adjust normalization options."""
-        self.cp_model.set_param("multi_channel_img", self.radio_multi_channel.isChecked() or self.rgb_img, ignore_warnings=True)
+        channel_mode = "multi" if self.radio_multi_channel.isChecked() else \
+                       "rgb" if self.radio_rgb.isChecked() else \
+                       "single"
+        self.cp_model.set_param("channel_mode", channel_mode, ignore_warnings=True)
         self._reset_clf()
         self._reset_radio_norm_choices()
         if (self.add_layers_flag # Add layers only if not triggered from layer selection
@@ -1521,6 +1564,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_reset_convpaint(self, event=None):
         """Reset model to default and update GUI."""
+
         # Turn off automatic layer creation for the model reset
         self.add_layers_flag = False
 
@@ -1577,7 +1621,7 @@ class ConvPaintWidget(QWidget):
         self._reset_default_general_params()
         self._update_gui_from_params()
         # Set radio buttons depending on selected image type
-        self._reset_radio_data_dim_choices()
+        self._reset_radio_channel_mode_choices()
         self._reset_radio_norm_choices()
         self._reset_predict_buttons()
         selected_img = self._get_selected_img()
@@ -1600,7 +1644,7 @@ class ConvPaintWidget(QWidget):
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
         # self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
-        self.rgb_img = getattr(self, "rgb_img", None) or False # Tag to register if the image is RGB
+        # self.rgb_img = getattr(self, "rgb_img", None) or False # Tag to register if the image is RGB
         self.data_shape = None # Shape of the currently selected image data
         self.current_model_path = 'not trained' # Path to the current model (if saved)
         self.auto_add_layers = True # Automatically add layers when a new image is selected
@@ -1628,6 +1672,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_fe_selected(self, index):
         """Update GUI to show selectable layers of model chosen from drop-down."""
+
         # Create a temporary model to get the layers (to display) and default parameters
         new_fe_type = self.qcombo_fe_type.currentText()
         current_gpu = self.cp_model.get_param("fe_use_gpu")
@@ -1667,12 +1712,14 @@ class ConvPaintWidget(QWidget):
             self.set_fe_btn.setEnabled(True)
 
     def _on_fe_scalings_changed(self):
-        """Update param object only when FE is set."""
+        """Update param object only when FE is set
+        (i.e., do nothing when changing scalings before FE is set)."""
         return
 
     def _on_set_fe_model(self, event=None):
         """Create a neural network model that will be used for feature extraction and
         reset the classifier."""
+
         # Read FE parameters from the GUI
         new_param = self.cp_model.get_params()
         new_layers = self._get_selected_layer_names() # includes re-writing to keys
@@ -1689,34 +1736,34 @@ class ConvPaintWidget(QWidget):
         data = self._get_selected_img()
         data_dims = self._get_data_dims(data)
         # Multichannel
-        if ((fe_defaults.multi_channel_img is not None) and
-            (new_param.multi_channel_img != fe_defaults.multi_channel_img)):
+        if ((fe_defaults.channel_mode is not None) and
+            (new_param.channel_mode != fe_defaults.channel_mode)):
             # Catch case where multichannel is adjusted on incompatible data
-            if data_dims in ['2D'] and fe_defaults.multi_channel_img:
-                warnings.warn(f'The feature extractor tried to enforce multichannel on {data_dims} data. ' +
+            if data_dims in ['2D'] and fe_defaults.channel_mode in ['multi', 'rgb']:
+                warnings.warn(f'The feature extractor tried to set its default "{fe_defaults.channel_mode}" channel mode on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
-            elif data_dims in ['2D_RGB', '3D_RGB', '4D'] and not fe_defaults.multi_channel_img:
-                warnings.warn(f'The feature extractor tried to enforce single-channel on {data_dims} data. ' +
+            elif data_dims in ['2D_RGB', '3D_RGB', '4D'] and fe_defaults.channel_mode == 'single':
+                warnings.warn(f'The feature extractor tried to set its default single-channel mode on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
-            else: # If data is compatible, enforce the model's default multichannel setting
-                adjusted_params.append('multi_channel_img')
-                new_param.multi_channel_img = fe_defaults.multi_channel_img
-                self._reset_radio_data_dim_choices()
-                self._reset_radio_norm_choices() # Update norm options, since multi_channel_img changed
-            # else: # If data is compatible, enforce the model's default RGB setting
+            else: # If data is compatible, set the model's default multichannel setting
+                adjusted_params.append('channel_mode')
+                new_param.channel_mode = fe_defaults.channel_mode
+                self._reset_radio_channel_mode_choices()
+                self._reset_radio_norm_choices() # Update norm options, since channel_mode changed
+            # else: # If data is compatible, set the model's default RGB setting
             #     adjusted_params.append('rgb_img')
-            #     if fe_defaults.rgb_img: # If the default model is RGB, enforce it
+            #     if fe_defaults.rgb_img: # If the default model is RGB, set it
             #         new_param.rgb_img = True
             #         self.radio_rgb.setChecked(True)
             #     else: # If the default model is non-RGB, reset data dims according to data
             #         new_param.rgb_img = False
-            #         self._reset_radio_data_dim_choices()
+            #         self._reset_radio_channel_mode_choices()
             #     self._reset_radio_norm_choices() # Update norm options, since rgb_img changed
         # Normalization
         if ((fe_defaults.normalize is not None) and
             (new_param.normalize != fe_defaults.normalize)):
             if data_dims in ['2D', '2D_RGB', '3D_multi'] and fe_defaults.normalize == 2:
-                warnings.warn(f'The feature extractor tried to enforce normalization over stack on {data_dims} data. ' +
+                warnings.warn(f'The feature extractor tried to set its default normalization over stack on {data_dims} data. ' +
                               'This is not supported and will be ignored.')
             else:
                 adjusted_params.append('normalize')
@@ -1765,6 +1812,7 @@ class ConvPaintWidget(QWidget):
         remove it (or rename and keep it if specified in self.keep_layers) and add a new one.
         If the widget is used as third party (self.third_party=True), no layer is added if it didn't exist before,
         unless force_add=True (e.g. when the user clicks on the add layer button)"""
+
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
@@ -1900,8 +1948,9 @@ class ConvPaintWidget(QWidget):
             self._set_old_proba_tag()
 
     def _rename_annot_for_backup(self):
-        """Create copy of the annotations layers."""
-        # Rename the layers to avoid overwriting them
+        """Name the annotation with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
         if self.annot_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_annot_tag)
             self.viewer.layers[self.annot_prefix].name = full_name
@@ -1909,8 +1958,9 @@ class ConvPaintWidget(QWidget):
             self.annot_layers.add(self.viewer.layers[full_name])
 
     def _rename_seg_for_backup(self):
-        """Create copy of segmentation layer."""
-        # Same for segmentation layer
+        """Name the segmentation layer with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
         if self.seg_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_seg_tag)
             self.viewer.layers[self.seg_prefix].name = full_name
@@ -1918,14 +1968,16 @@ class ConvPaintWidget(QWidget):
             self.seg_layers.add(self.viewer.layers[full_name])
 
     def _rename_probas_for_backup(self):
-        """Create copy of class probabilities layer."""
-        # Same for segmentation layer
+        """Name the class probabilities layer with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
         if self.proba_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_proba_tag)
             self.viewer.layers[self.proba_prefix].name = full_name
 
     def _get_unique_layer_name(self, base_name):
         """Get a unique name for a new layer by checking existing layers."""
+
         # Check if the layer name already exists in the viewer
         existing_layers = [layer.name for layer in self.viewer.layers]
         new_name = base_name
@@ -1941,57 +1993,60 @@ class ConvPaintWidget(QWidget):
         return new_name
 
     def _get_old_data_tag(self):
-        """Set the old data tag based on the current image layer and data dimensions."""
+        """Set the old data tag based on the current image layer and data dimensions.
+        This is used to rename old layers when creating new ones."""
         image_name = self.image_layer_selection_widget.value.name
-        data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
+        channel_mode_str = (self.radio_rgb.isChecked()*"RGB" +
                     self.radio_multi_channel.isChecked()*"multiCh" +
                     self.radio_single_channel.isChecked()*"singleCh")
-        return f"{image_name}_{data_dim_str}"
+        return f"{image_name}_{channel_mode_str}"
     
     def _set_old_annot_tag(self):
-        """Set the old annotation tag based on the current image layer and data dimensions."""
+        """Set the old annotation tag based on the current image layer and data dimensions.
+        This is used to rename old annotation layers when creating new ones."""
         self.old_annot_tag = f"{self.annot_prefix}_{self._get_old_data_tag()}"
 
     def _set_old_seg_tag(self):
-        """Set the old segmentation tag based on the current image layer and data dimensions."""
+        """Set the old segmentation tag based on the current image layer and data dimensions.
+        This is used to rename old segmentation layers when creating new ones."""
         self.old_seg_tag = f"{self.seg_prefix}_{self._get_old_data_tag()}"
 
     def _set_old_proba_tag(self):
-        """Set the old probabilities tag based on the current image layer and data dimensions."""
+        """Set the old probabilities tag based on the current image layer and data dimensions.
+        This is used to rename old probabilities layers when creating new ones."""
         self.old_proba_tag = f"{self.proba_prefix}_{self._get_old_data_tag()}"
 
-    def _reset_radio_data_dim_choices(self):
-        """Set radio buttons active/inactive depending on selected image type.
-        If current parameter is not valid, set a default."""
+    def _reset_radio_channel_mode_choices(self):
+        """Set radio buttons for channel mode active/inactive depending on selected image type.
+        Note that this will also trigger _on_channel_mode_changed(), and adjust the channel_mode param, if any change occurs."""
         if self.image_layer_selection_widget.value is None:
             for x in self.channel_buttons: x.setEnabled(False)
             return
-        self.rgb_img = self.image_layer_selection_widget.value.rgb
-        if self.rgb_img: # If the image is RGB (2D or 3D makes no difference), this is the only option
+        rgb_img = self.image_layer_selection_widget.value.rgb if hasattr(self.image_layer_selection_widget.value, 'rgb') else False
+        if rgb_img: # If the image is RGB (2D or 3D makes no difference), this is the only option
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(True)
-            self.radio_rgb.setChecked(True)
+            self.radio_rgb.setChecked(True) # enforce rgb
         elif self.image_layer_selection_widget.value.ndim == 2: # If non-rgb 2D, only single channel
             self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(False)
             self.radio_rgb.setEnabled(False)
-            self.radio_single_channel.setChecked(True)
-        elif self.image_layer_selection_widget.value.ndim == 3: # If 3D, single or multi channel
+            self.radio_single_channel.setChecked(True) # enforce single
+        elif self.image_layer_selection_widget.value.ndim == 3: # If non-rgb 3D, single or multi channel
             self.radio_single_channel.setEnabled(True)
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
-            # multi_channel_val = self.cp_model.get_param("multi_channel_img") is not None and self.cp_model.get_param("multi_channel_img")
-            self.radio_single_channel.setChecked(not self.cp_model.get_param("multi_channel_img")) # Choice depending on param
-            self.radio_multi_channel.setChecked(self.cp_model.get_param("multi_channel_img"))
-        elif self.image_layer_selection_widget.value.ndim == 4: # If 4D, it must be multi channel
+            self.radio_single_channel.setChecked(self.cp_model.get_param("channel_mode") == "single")
+            self.radio_multi_channel.setChecked(self.cp_model.get_param("channel_mode") != "single") # If it was multi or rgb, set multi
+        elif self.image_layer_selection_widget.value.ndim == 4: # If non-rgb 4D, it must be multi channel
             self.radio_single_channel.setEnabled(False)
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
-            self.radio_multi_channel.setChecked(True)
+            self.radio_multi_channel.setChecked(True) # enforce multi
 
     def _reset_radio_norm_choices(self, event=None):
-        """Set radio buttons active/inactive depending on selected image type.
+        """Set radio buttons for normalization active/inactive depending on selected image type.
         If current parameter is not valid, set a default."""
         # Reset the stats; not necessary, since they are recalculated anyway if changing the norm mode
         # self.image_mean, self.image_std = None, None
@@ -2002,21 +2057,21 @@ class ConvPaintWidget(QWidget):
         
         data = self._get_selected_img()
         data_dims = self._get_data_dims(data)
-        norm_mode = self.cp_model.get_param("normalize")
+        norm_scope = self.cp_model.get_param("normalize")
         
-        if data_dims in ['2D', '2D_RGB', '3D_multi']:
+        if data_dims in ['2D', '2D_RGB', '3D_multi']: # No z dim available -> no stack norm
             self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_over_stack.setEnabled(False)
             self.radio_normalize_by_image.setEnabled(True)
-            if norm_mode == 2: # If initially over stack, reset to by image
+            if norm_scope == 2: # If initially over stack, reset to by image
                 self.radio_normalize_by_image.setChecked(True)
-            else:
-                self.button_group_normalize.button(norm_mode).setChecked(True)
-        else: # 3D_single, 4D, 3D_RGB
+            else: # Otherwise, keep the current setting
+                self.button_group_normalize.button(norm_scope).setChecked(True)
+        else: # 3D_single, 4D, 3D_RGB -> with z dim available -> all options
             self.radio_no_normalize.setEnabled(True)
             self.radio_normalize_over_stack.setEnabled(True)
             self.radio_normalize_by_image.setEnabled(True)
-            self.button_group_normalize.button(norm_mode).setChecked(True)
+            self.button_group_normalize.button(norm_scope).setChecked(True)
 
     def _reset_predict_buttons(self):
         """Enable or disable predict buttons based on the current state."""
@@ -2090,24 +2145,23 @@ class ConvPaintWidget(QWidget):
             self.fe_scaling_factors.setCurrentIndex(self.fe_scaling_factors.count()-1)
 
     def _update_gui_from_params(self, params=None):
-        """Update GUI from parameters."""
+        """Update GUI from parameters. Use after parameters have been changed outside the GUI (e.g. loading)."""
+
+        # Reset data dim choices (e.g. enable and set "rgb" if the image is RGB)
+        self._reset_radio_channel_mode_choices() # important: also adjusts the channel_mode param if data dims demand it
+        # Set params from the model if not provided
         if params is None:
             params = self.cp_model.get_params()
-        # Reset data dim choices
-        self._reset_radio_data_dim_choices()
         # Set radio buttons depending on param (possibly enforcing a choice)
-        if params.multi_channel_img and not self.rgb_img:
+        if params.channel_mode == "multi":
             self.radio_single_channel.setChecked(False)
             self.radio_multi_channel.setChecked(True)
             self.radio_rgb.setChecked(False)
-        elif params.multi_channel_img and self.rgb_img:
+        elif params.channel_mode == "rgb":
             self.radio_single_channel.setChecked(False)
             self.radio_multi_channel.setChecked(False)
             self.radio_rgb.setChecked(True)
-        else:
-            if self.rgb_img:
-                warnings.warn('The selected image is RGB, but the model is set to single channel. ' +
-                          'Please choose a different image.')
+        else: # single
             self.radio_single_channel.setChecked(True)
             self.radio_multi_channel.setChecked(False)
             self.radio_rgb.setChecked(False)
@@ -2137,7 +2191,7 @@ class ConvPaintWidget(QWidget):
         self._update_gui_fe_scalings(params.fe_scalings)
     
     def _get_selected_img(self, check=False):
-        """Get the currently selected image layer."""
+        """Get the image layer currently selected in Convpaint."""
         img = self.image_layer_selection_widget.value
         if img is None and check:
             warnings.warn('No image layer selected')
@@ -2155,7 +2209,7 @@ class ConvPaintWidget(QWidget):
             return img_shape[1:]
 
     def _check_large_image(self, img):
-        """Check if the image is too large to be processed."""
+        """Check if the image is very large and should be tiled."""
         data_dims = self._get_data_dims(img)
         img_shape = img.data.shape
         if data_dims in ['2D', '2D_RGB']:
@@ -2207,18 +2261,19 @@ class ConvPaintWidget(QWidget):
     def _reset_default_general_params(self):
         """Set general parameters back to default."""
         # Set defaults in GUI
-        self.radio_single_channel.setChecked(not self.default_cp_param.multi_channel_img
-                                             and not self.rgb_img)
-        self.radio_multi_channel.setChecked(self.default_cp_param.multi_channel_img
-                                            and not self.rgb_img)
-        self.radio_rgb.setChecked(self.rgb_img) # Also put rgb if the defaults would be multi-channel
+        rgb_img = self.image_layer_selection_widget.value.rgb if hasattr(self.image_layer_selection_widget.value, 'rgb') else False
+        self.radio_single_channel.setChecked(self.default_cp_param.channel_mode == 'single'
+                                             and not rgb_img)
+        self.radio_multi_channel.setChecked(self.default_cp_param.channel_mode == 'multi'
+                                            and not rgb_img)
+        self.radio_rgb.setChecked(rgb_img) # Also put rgb even if the defaults would be different
         self.button_group_normalize.button(self.default_cp_param.normalize).setChecked(True)
         self.spin_downsample.setValue(self.default_cp_param.image_downsample)
         self.spin_smoothen.setValue(self.default_cp_param.seg_smoothening)
         self.check_tile_annotations.setChecked(self.default_cp_param.tile_annotations)
         self.check_tile_image.setChecked(self.default_cp_param.tile_image)
         # Set defaults in param object (not done through bindings if values in the widget are not changed)
-        self.cp_model.set_params(multi_channel_img = self.rgb_img or self.default_cp_param.multi_channel_img,
+        self.cp_model.set_params(channel_mode = "rgb" if rgb_img else self.default_cp_param.channel_mode,
                                  normalize = self.default_cp_param.normalize,
                                  image_downsample = self.default_cp_param.image_downsample,
                                  seg_smoothening = self.default_cp_param.seg_smoothening,
@@ -2244,7 +2299,7 @@ class ConvPaintWidget(QWidget):
         self.model_description2.setText(descr)
 
     def _get_selected_layer_names(self):
-        """Get names of selected layers."""
+        """Get names of selected FE layers."""
         selected_rows = self.fe_layer_selection.selectedItems()
         selected_layers_texts = [x.text() for x in selected_rows]
         selected_layers = self._layer_texts_to_keys(selected_layers_texts)
@@ -2252,7 +2307,7 @@ class ConvPaintWidget(QWidget):
 
     @staticmethod
     def _layer_texts_to_keys(layer_texts):
-        """Convert layer texts to layer keys for use in the model."""
+        """Convert FE layer texts to layer keys for use in the model."""
         if layer_texts is None:
             return None
         layer_keys = [text.split(": ", 1)[1] for text in layer_texts]
@@ -2260,7 +2315,7 @@ class ConvPaintWidget(QWidget):
     
     @staticmethod
     def _layer_keys_to_texts(layer_keys):
-        """Convert layer keys to layer texts for display."""
+        """Convert FE layer keys to layer texts for display."""
         if layer_keys is None:
             return None
         layer_texts = [f'{i}: {layer}' for i, layer in enumerate(layer_keys)]
@@ -2281,24 +2336,50 @@ class ConvPaintWidget(QWidget):
         """Get data from selected channel. Output has channel (if present) in 
         first position and is normalized."""
 
-        # If stats are not set, compute them
+        # Get data from selected layer, with channels first if present
+        image_stack = self._get_data_channel_first(img) # 2D, 3D or 4D array, with C first if present
+
+        norm_scope = self.cp_model.get_param("normalize")
+        if norm_scope == 1: # No normalization
+            return image_stack
+
+        # FE-SPECIFIC NORMALIZATION
+        # If the FE demands imagenet or percentile normalization, do that if image is compatible
+        fe_norm = self.cp_model.fe_model.norm_mode
+
+        if fe_norm == 'imagenet':
+            if self.cp_model.get_param("channel_mode") == 'rgb':  # Only if rgb image --> array with 3 or 4 dims, with C=3 first
+                return normalize_image_imagenet(image_stack)
+            else:
+                print("FE model is designed for imagenet normalization, but image is not declared as 'rgb' (parameter channel_mode). " +
+                "Using default normalization instead.")
+                
+        elif fe_norm == 'percentile':
+            if norm_scope == 2: # normalize over stack
+                data_dims = self._get_data_dims(img)
+                if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]: # Channels dimension present
+                    num_ignored_dims = 1 # ignore channels dimension, but norm over stack if present
+                else: # 2D or 3D_single -> no channels dimension present
+                    num_ignored_dims = 0 # norm over entire stack
+            elif norm_scope == 3: # normalize by image --> keep channels and plane dimensions
+                # also takes into account CXY case (3D multi-channel image) where first dim is dropped, and 2D where none is
+                num_ignored_dims = image_stack.ndim-2 # number of channels and/or Z dimension (i.e. "non-spatial" dimensions)
+            return normalize_image_percentile(image_stack, ignore_n_first_dims=num_ignored_dims)
+
+        # DEFAULT NORMALIZATION
+        
+        # If stats are not set, compute them --> they depend on the normalization mode and data dimensions
         if self.image_mean is None or self.image_std is None:
-            self._compute_image_stats(img)
+            self._compute_image_stats(img) # Calls _get_data_channel_first() inside -> pass original img
 
-        # Get data from selected channel
-        image_stack = self._get_data_channel_first(img)
-
-        # Normalize image
-        if self.cp_model.get_param("normalize") != 1:
-            image_stack = normalize_image(
-                image=image_stack,
-                image_mean=self.image_mean,
-                image_std=self.image_std)
-    
-        return image_stack
+        # Normalize image: (image - image_mean) / image_std
+        return normalize_image(image=image_stack,
+                               image_mean=self.image_mean,
+                               image_std=self.image_std)
 
     def _compute_image_stats(self, img):
-        """Get image stats depending on the normalization settings and data dimensions."""
+        """Get image stats depending on the normalization settings and data dimensions.
+        Takes image as given in the viewer (not channel first)."""
 
         # If no image is selected, set stats to None
         if img is None:
@@ -2308,11 +2389,11 @@ class ConvPaintWidget(QWidget):
         # Assure to have channels dimension first, get the data_dims and normalization mode
         data = self._get_data_channel_first(img)
         data_dims = self._get_data_dims(img)
-        norm_mode = self.cp_model.get_param("normalize")
+        norm_scope = self.cp_model.get_param("normalize")
 
         # Compute image stats depending on the normalization mode
 
-        if norm_mode == 2: # normalize over stack --> only keep channels dimension
+        if norm_scope == 2: # normalize over stack --> only keep channels dimension
             if data_dims in ["4D", "3D_multi", "2D_RGB", "3D_RGB"]: # Channels dimension present
                 # 3D multi/2D_RGB or 4D/3D_RGB --> (C,1,1) or (C,1,1,1)
                 self.image_mean, self.image_std = compute_image_stats(
@@ -2322,9 +2403,9 @@ class ConvPaintWidget(QWidget):
                 # 2D or 3D_single --> (1,1) or (1,1,1)
                 self.image_mean, self.image_std = compute_image_stats(
                     image=data,
-                    ignore_n_first_dims=None) # for 3D_single, norm over stack
+                    ignore_n_first_dims=None) # norm over entire stack
 
-        elif norm_mode == 3: # normalize by image --> keep channels and plane dimensions
+        elif norm_scope == 3: # normalize by image --> keep channels and plane dimensions
             # also takes into account CXY case (3D multi-channel image) where first dim is dropped, and 2D where none is
             c_z_channels = data.ndim-2 # number of channels and/or Z dimension (i.e. "non-spatial" dimensions)
             self.image_mean, self.image_std = compute_image_stats(
@@ -2332,25 +2413,51 @@ class ConvPaintWidget(QWidget):
             # --> 2D (1,1) or 3D (single, multi -> Z/C,1,1) or 2D_RGB (C,1,1) or 4D/3D_RGB (C,Z,1,1)
 
     def _get_data_dims(self, img):
-        """Get data dimensions. Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
+        """Get data dimensions. Also perform checks on the data dimensions.
+        Returns '2D', '2D_RGB', '3D_RGB', '3D_multi', '3D_single' or '4D'."""
+
         if img is None:
             return None
         num_dims = img.ndim
+        # Sanity check for number of dimensions
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
+        
+        # 2D can be either single channel or RGB (in which case the underlying data is in fact 3D with 3 channels as last dim)
         if num_dims == 2:
-            if self.rgb_img:
-                return '2D_RGB'
-            else:
+            if self.cp_model.get_param("channel_mode") == "rgb":
+                if img.data.shape[-1] == 3:
+                    return '2D_RGB'
+                else:
+                    warnings.warn('Image is 2D, but does not have 3 channels as last dimension. Setting channel_mode to "single".')
+                    self.cp_model.set_param("channel_mode", "single")
+                    return '2D'                    
+            elif self.cp_model.get_param("channel_mode") == "single":
                 return '2D'
+            else: # multi channel not possible in 2D
+                warnings.warn('Image is 2D, but channel_mode is "multi". Setting channel_mode to "single".')
+                self.cp_model.set_param("channel_mode", "single")
+                return '2D'
+
+        # 3D can be single channel, multi channel or RGB (in which case the underlying data is in fact 4D with 3 channels as last dim)
         if num_dims == 3:
-            if self.rgb_img:
-                return '3D_RGB'
-            if self.cp_model.get_param("multi_channel_img"):
+            if self.cp_model.get_param("channel_mode") == "rgb":
+                if img.data.shape[-1] == 3:
+                    return '3D_RGB'
+                else:
+                    warnings.warn('Image is 3D, but does not have 3 channels as last dimension. Setting channel_mode to "multi".')
+                    self.cp_model.set_param("channel_mode", "multi")
+                    return '3D_multi'
+            if self.cp_model.get_param("channel_mode") == "multi":
                 return '3D_multi'
-            else:
+            else: # single
                 return '3D_single'
+
+        # 4D can only be multi channel
         if num_dims == 4:
+            if self.cp_model.get_param("channel_mode") == "single":
+                warnings.warn('Image has 4 dimensions, but channel_mode is "single". Setting channel_mode to "multi".')
+                self.cp_model.set_param("channel_mode", "multi")
             return '4D'
         
     def _approve_annotation_layer_shape(self, annot, img):
@@ -2394,7 +2501,7 @@ class ConvPaintWidget(QWidget):
 ### ADVANCED TAB
     
     def _update_training_counts(self):
-        """Update the training counts in the GUI."""
+        """Update the training counts (used with continuous_training/memory_mode) in the GUI."""
         if self.cp_model is None:
             return
         pix = len(self.cp_model.table)
@@ -2403,13 +2510,16 @@ class ConvPaintWidget(QWidget):
         self.label_training_count.setText(f'{pix} pixels, {imgs} image{"s"*(imgs>1)}, {lbls} labels')
 
     def _reset_train_features(self):
-        """Reset the training features."""
+        """Reset the training features used with continuous_training/memory_mode."""
         self.cp_model.reset_training()
         self._update_training_counts()
         # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
         self.features_annots = {}
 
     def _on_show_class_distribution(self):
+        """Show the class distribution of the data used with continuous_training/memory_mode (saved in self.cp_model.table)
+        in a pie chart using the according cmaps."""
+
         try:
             import matplotlib.pyplot as plt
         except ImportError:
@@ -2466,6 +2576,8 @@ class ConvPaintWidget(QWidget):
         plt.show()
 
     def _on_add_all_annot_layers(self):
+        """Add annotation layers for all image layers selected in the layers widget (napari)."""
+
         # Get the selected image layers in the order they are in the widget
         img_layer_list = [layer for layer in self.viewer.layers
                           if layer in self.viewer.layers.selection]
@@ -2477,10 +2589,10 @@ class ConvPaintWidget(QWidget):
 
         for img in img_layer_list:
             layer_shape = self._get_annot_shape(img)
-            data_dim_str = (self.radio_rgb.isChecked()*"RGB" +
+            channel_mode_str = (self.radio_rgb.isChecked()*"RGB" +
                     self.radio_multi_channel.isChecked()*"multiCh" +
                     self.radio_single_channel.isChecked()*"singleCh")
-            layer_name = f'{self.annot_prefix}_{img.name}_{data_dim_str}'
+            layer_name = f'{self.annot_prefix}_{img.name}_{channel_mode_str}'
             layer_name = self._get_unique_layer_name(layer_name)
             data = np.zeros((layer_shape), dtype=np.uint8)
             # Create a new annotation layer with the unique name
@@ -2498,6 +2610,7 @@ class ConvPaintWidget(QWidget):
         self.update_all_labels_and_cmaps()
 
     def _on_train_on_selected(self):
+        """Train the model on the image and annotation layers currently selected in the layers widget (napari)."""
 
         # Get selected layers (arbitrary order) and sort them by their names
         layer_list = list(self.viewer.layers.selection)
@@ -2532,7 +2645,7 @@ class ConvPaintWidget(QWidget):
             mem_mode = self.cont_training == "global"
             # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
             in_channels = self._parse_in_channels(self.in_channels.text())
-            self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, in_channels=in_channels, skip_norm=False, progress=pbr)
+            _ = self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list, in_channels=in_channels, skip_norm=False, progress=pbr)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -2549,11 +2662,11 @@ class ConvPaintWidget(QWidget):
     def _on_switch_axes(self):
         """Switch the first two axes of the input image."""
         in_img = self._get_selected_img(check=True)
-        data_dim = self._get_data_dims(in_img)
+        data_dims = self._get_data_dims(in_img)
         if in_img is None:
             warnings.warn('No image layer selected')
             return
-        elif data_dim != "4D":
+        elif data_dims != "4D":
             warnings.warn('Switching axes is only supported for 4D images')
             return
         # Get the data from the selected image layer

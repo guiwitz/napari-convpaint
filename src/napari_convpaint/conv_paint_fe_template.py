@@ -18,7 +18,8 @@ class GaussianFeatures(FeatureExtractor):
         # self.padding = 0
         # self.patch_size = 1
         # self.num_input_channels = [1]
-        # self.norm_imagenet = False
+        # self.norm_mode = "default" # or "imagenet" or "percentile"
+        # self.rgb_input = False # True if the model takes RGB input
 
     def get_description(self):
         return "" # Briefly describe the feature extractor here
@@ -81,7 +82,7 @@ class GaussianFeatures(FeatureExtractor):
 #    Finally, the image is automatically scaled according to the scaling factors in the
 #    parameters, reduced to patch size. The output is then scaled back to the original size.
 
-# c) get_features_from_channels(self, image):
+# c) get_features_from_channels(self, image, rgb_data):
 #
 #    Define how to extract features from an image stack (4D) with an arbitrary number of channels.
 #    Input = [C, Z, H ,W]

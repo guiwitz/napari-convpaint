@@ -32,7 +32,8 @@ class DinoJafarFeatures(FeatureExtractor):
         self.patch_size = 14          # token size of ViT
         self.padding    = 0           # model-internal extra pad (none)
         self.num_input_channels = [3] # RGB
-        self.norm_imagenet = True
+        self.norm_mode = "imagenet"  # DINOv2 expects ImageNet normalization
+        self.rgb_input = True       # expects RGB input
 
         # Parent .create_model() saves tuple (hr_head, backbone) in self.model
         self.model, self.backbone = self.model

@@ -597,6 +597,7 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
         mask = annot_regions[..., y_min:y_max, x_min:x_max] == region.label
         annot_tile = annot_tile * mask
 
+
         if coords is not None:
             coords_tile = coords[..., y_min:y_max, x_min:x_max]
         else:
@@ -750,71 +751,23 @@ def get_catboost_device(use_gpu=None):
             warnings.warn('CUDA is not available. Using CPU for CatBoost.')
     return 'CPU'
 
-def normalize_image_percentile(image: np.ndarray) -> np.ndarray:
-    """
-    Linearly rescale image intensities so that, per-channel,
-    the 1st percentile → 0.0 and the 99th percentile → 1.0.
-
-    Any values below the 1st percentile become 0.0; above the 99th
-    become 1.0.
-
-    Parameters:
-    ----------
-    image: np.ndarray with 2-4 dims.
-        - 2D: treated as single-channel.
-        - 3D or 4D: first axis is channels.
-
-    Returns:
-    ----------
-    np.ndarray, dtype float32, same shape as input.
-
-    Raises:
-    ----------
-    ValueError: if input.ndim not in [2,4].
-    """
-    if image.ndim < 2 or image.ndim > 4:
-        raise ValueError(f"Image must have 2-4 dimensions (got {image.ndim})")
-
-    # Prepare output
-    out = np.empty_like(image, dtype=np.float32)
-
-    if image.ndim == 2:
-        # single-channel case
-        p1, p99 = np.percentile(image, [1, 99])
-        span = max(p99 - p1, 1e-6)
-        out = (image.astype(np.float32) - p1) / span
-        return np.clip(out, 0.0, 1.0)
-
-    # multi-channel case
-    # image.shape[0] = number of channels
-    C = image.shape[0]
-    # for each channel, compute percentiles over all other dims
-    for c in range(C):
-        arr = image[c].astype(np.float32)
-        p1, p99 = np.percentile(arr, [1, 99])
-        span = max(p99 - p1, 1e-6)
-        channel_norm = (arr - p1) / span
-        out[c] = np.clip(channel_norm, 0.0, 1.0)
-
-    return out
-
 def normalize_image(image, image_mean, image_std):
     """
     Normalize a numpy array with 2-4 dimensions.
 
-    If the array has multiple channels (determined by the multi_channel_img flag), 
-    each channel is normalized independently. If there are multiple time or z frames, 
-    they are normalized together.
+    If the array has multiple channels (determined by the number of dims and channel_mode flag), 
+    each channel is normalized independently. If there are multiple time or z frames, the behavior
+    (whether to normalize across time/z or not) is already defined through the provided mean and std values.
 
     Parameters:
     ----------
     image : np.ndarray
         Input array to be normalized. Must have 2-4 dimensions.
     image_mean : float or nd.array
-        Mean of the input array along non-channel dimensions.
+        Mean of the input array along non-channel, and potential time or z, dimensions.
     image_std : float or nd.array
-        Standard deviation of the input array along non-channel dimensions.
-        
+        Standard deviation of the input array along non-channel, and potential time or z, dimensions.
+
     Returns:
     ----------
     arr_norm : np.ndarray
@@ -836,50 +789,107 @@ def normalize_image(image, image_mean, image_std):
 
     return img_norm
 
+def normalize_image_percentile(image: np.ndarray, ignore_n_first_dims: int = 0) -> np.ndarray:
+    """
+    Linearly rescale image intensities so that, per-slice defined by `ignore_n_first_dims`,
+    the 1st percentile → 0.0 and the 99th percentile → 1.0.
+
+    Any values below the 1st percentile become 0.0; above the 99th
+    become 1.0, clipping extreme outliers.
+
+    Parameters:
+    ----------
+    image: np.ndarray with 2-4 dims.
+        - 2D: treated as single-channel image if ignore_n_first_dims == 0.
+        - 3D or 4D: first axes can be ignored with `ignore_n_first_dims`.
+    ignore_n_first_dims: int, default 0
+        Number of leading dimensions to ignore when computing percentiles.
+        Each slice along these dims is normalized separately.
+
+    Returns:
+    ----------
+    np.ndarray, dtype float32, same shape as input.
+
+    Raises:
+    ----------
+    ValueError: if input.ndim not in range [2,4],
+                or if image.ndim - ignore_n_first_dims < 2.
+    """
+    if image.ndim < 2 or image.ndim > 4:
+        raise ValueError(f"Image must have 2-4 dimensions (got {image.ndim})")
+
+    if image.ndim - ignore_n_first_dims < 2:
+        raise ValueError(f"After ignoring {ignore_n_first_dims} dims, "
+                         f"remaining ndim = {image.ndim - ignore_n_first_dims}, "
+                         f"which is < 2 and cannot be normalized.")
+
+    out = np.empty_like(image, dtype=np.float32)
+
+    # special case: no ignored dims
+    if ignore_n_first_dims == 0 and image.ndim == 2:
+        p1, p99 = np.percentile(image, [1, 99])
+        span = max(p99 - p1, 1e-6)
+        out = (image.astype(np.float32) - p1) / span
+        return np.clip(out, 0.0, 1.0)
+
+    # iterate over leading ignored dims
+    it = np.ndindex(*image.shape[:ignore_n_first_dims]) if ignore_n_first_dims > 0 else [()]
+
+    for idx in it:
+        # select the slice
+        slc = image[idx] if idx != () else image
+        slc = slc.astype(np.float32)
+
+        # compute percentiles over last (ndim-ignore_n_first_dims) dims
+        p1, p99 = np.percentile(slc, [1, 99])
+        span = max(p99 - p1, 1e-6)
+        norm = (slc - p1) / span
+        norm = np.clip(norm, 0.0, 1.0)
+
+        # put back
+        if idx == ():
+            out[:] = norm
+        else:
+            out[idx] = norm
+
+    return out
 
 def normalize_image_imagenet(image):
     """
     Normalize a numpy array or torch tensor image to ImageNet stats.
-    If single channel image is given, it is repeated on first axis and normalized as RGB.
+    Note that since fixed ranges are used, there is no difference between per-plane or over-stack normalization.
+    For an ImageNet-trained model, we do not normalize "over stack" — each image slice gets ImageNet normalization separately.
 
-    For numpy (np.ndarray):
+    For numpy (np.ndarray) or torch (torch.Tensor):
       1) Cast to float32.
       2) Bring values into [0,1] by:
-         - dividing uint8 by 255
-         - dividing uint16 by 65535
-         - otherwise min-max scaling floats
-      3) Applies per-channel ImageNet mean/std.
-
-    For torch (torch.Tensor):
-      1) Cast to float32.
-      2) Bring values into [0,1] by:
-         - dividing uint8 by 255
-         - dividing uint16 by 65535
-         - otherwise min-max scaling floats (with clamp_min)
-      3) Applies per-channel ImageNet mean/std on the same device.
+         - dividing uint by the maximum value for that uint type (e.g., 255 for uint8)
+         - calculating (value - min) / (max - min) for signed ints
+         - checking if float32/64 and values are already in [0,1]
+      3) Applies per-channel ImageNet mean/std. Use same device for torch tensors.
 
     Parameters:
     ----------
     image: np.ndarray or torch.Tensor of shape [3, H, W] or [3, Z, H, W] or the same with 1 channel,
-            dtype uint8, uint16, or float.
+            dtype should be uint8, uint16, or float (32 or 64).
 
     Returns:
     ----------
     np.ndarray or torch.Tensor: Same type as input (np.ndarray or torch.Tensor), same shape,
-        unless if single channel image is given, it is repeated on first axis and normalized as RGB
-        dtype float32, normalized so each channel has ImageNet mean [0.485,0.456,0.406] and
-        std [0.229,0.224,0.225].
+        normalized as RGB dtype float32, normalized to ImageNet stats
+        (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]).
 
     Raises:
     ----------
     ValueError: if input is not np.ndarray or torch.Tensor, if ndim not in (3,4),
                 or if channel dimension != 3 or 1.
     """
+
     # Checks for input
     if image.ndim not in (3, 4):
         raise ValueError(f"Image must have 3 or 4 dimensions (got ndim={image.ndim})")
-    if image.shape[0] not in [3, 1]:
-        warnings.warn(f"First dimension is neither 3 nor 1 channels (but {image.shape[0]}). Not applying ImageNet normalization.")
+    if image.shape[0] != 3:
+        warnings.warn(f"First dimension is not 3 (but {image.shape[0]}). Not applying ImageNet normalization.")
         return image  # return image as is
 
     # Dispatch on type
@@ -888,20 +898,28 @@ def normalize_image_imagenet(image):
         x = image.astype(np.float32)
 
         # bring into [0,1]
-        if image.dtype == np.uint8:
-            x = x / 255.0
-        elif image.dtype == np.uint16:
-            x = x / 65535.0
+        im_type = image.dtype
+        if im_type in [np.uint8, np.uint16, np.uint32, np.uint64]:
+            x = x / np.iinfo(im_type).max
+        elif im_type in [np.int8, np.int16, np.int32, np.int64]:
+            x = (x - np.iinfo(im_type).min) / (np.iinfo(im_type).max - np.iinfo(im_type).min)
+        elif image.dtype == np.float32 or image.dtype == np.float64:
+            if (x.min() >= 0.0 and x.max() <= 1.0):
+                pass  # image compatible with [0,1]
+            else:
+                warnings.warn(f"Image dtype is {image.dtype} and values are outside [0,1]. Not applying ImageNet normalization.")
+                return image  # return image as is
         else:
-            mn, mx = x.min(), x.max()
-            denom = max(mx - mn, 1e-6)
-            x = (x - mn) / denom
+            warnings.warn(f"Image dtype {image.dtype} is not supported for imagenet normalization. Not applying ImageNet normalization.")
+            # mn, mx = x.min(), x.max()
+            # denom = max(mx - mn, 1e-6)
+            # x = (x - mn) / denom
 
         # Repeat single channel if necessary
-        if image.ndim == 3:
-            x = x[np.newaxis, ...]  # add channel axis
-        if image.shape[0] == 1:
-            x = np.repeat(x, 3, axis=0)
+        # if image.shape[0] == 1:
+        #     x = x[np.newaxis, ...]  # add channel axis
+        # if image.ndim == 3:
+        #     x = np.repeat(x, 3, axis=0)
 
         # ImageNet stats
         spatial_dims = x.ndim - 1
@@ -916,20 +934,33 @@ def normalize_image_imagenet(image):
         device = image.device
         x = image.float()
 
-        if image.dtype == torch.uint8:
-            x = x / 255.0
-        elif image.dtype == torch.uint16:
-            x = x / 65535.0
+        # bring into [0,1]
+        im_type = image.dtype
+        if im_type in [torch.uint8, torch.uint16]:
+            max_val = torch.iinfo(im_type).max
+            x = x / max_val
+        elif im_type in [torch.int8, torch.int16, torch.int32, torch.int64]:
+            min_val = torch.iinfo(im_type).min
+            max_val = torch.iinfo(im_type).max
+            x = (x - min_val) / (max_val - min_val)
+        elif image.dtype == torch.float32 or image.dtype == torch.float64:
+            if (x.min() >= 0.0 and x.max() <= 1.0):
+                pass  # image compatible with [0,1]
+            else:
+                warnings.warn(f"Image dtype is {image.dtype} and values are outside [0,1]. Not applying ImageNet normalization.")
+                return image  # return image as is
         else:
-            mn = x.amin()
-            mx = x.amax()
-            denom = (mx - mn).clamp_min(1e-6)
-            x = (x - mn) / denom
+            warnings.warn(f"Image dtype {image.dtype} is not supported for imagenet normalization. Not applying ImageNet normalization.")
+            return image  # return image as is
+            # mn = x.amin()
+            # mx = x.amax()
+            # denom = (mx - mn).clamp_min(1e-6)
+            # x = (x - mn) / denom
         
-        if image.ndim == 3:
-            x = x.unsqueeze(0)  # add channel axis
-        if image.shape[0] == 1:
-            x = x.repeat(3, *[1] * (x.ndim - 1))
+        # if image.ndim == 3:
+        #     x = x.unsqueeze(0)  # add channel axis
+        # if image.shape[0] == 1:
+        #     x = x.repeat(3, *[1] * (x.ndim - 1))
 
         spatial_dims = x.ndim - 1
         shape = (3,) + (1,) * spatial_dims

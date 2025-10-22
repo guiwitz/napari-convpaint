@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import warnings
 from .conv_paint_param import Param
 from .conv_paint_utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape
 
@@ -25,7 +26,8 @@ class FeatureExtractor:
         self.padding = 0
         self.patch_size = 1
         self.num_input_channels = [1]
-        self.norm_imagenet = False
+        self.norm_mode = "default"  # or "imagenet" or "percentile"
+        self.rgb_input = False # Whether the model takes RGB input or not
 
         # Make sure only one method of providing the model is used
         if model is not None and model_name is not None:
@@ -216,6 +218,9 @@ class FeatureExtractor:
         patched : bool
             Whether the features shall be kept in patch-size resolution or not.
             If False, the features are resized to the size of the input image.
+        rgb_data : bool
+            Whether the input data is RGB or not. If True, the input data must also have 3 channels.
+            Relevant only if the model can take RGB input, to distinguish between 3-channel non-RGB and RGB input.
         
         Returns:
         ----------
@@ -239,7 +244,8 @@ class FeatureExtractor:
 
             # Extract features as list for different channel_series (and layers if applicable)
             # Each element is [nb_features, z, w, h]
-            features = self.get_features_from_channels(image_scaled)
+            rgb_data = param.channel_mode == 'rgb'
+            features = self.get_features_from_channels(image_scaled, rgb_data=rgb_data)
             # In case the features are not a list, but a single array, make it a list
             if not isinstance(features, list):
                 features = [features]
@@ -295,7 +301,7 @@ class FeatureExtractor:
 
         return features_all_scales
 
-    def get_features_from_channels(self, image):
+    def get_features_from_channels(self, image, rgb_data=False):
         """
         Gets the features of an image with an arbitrary number of channels.
         Assumes that the image is a 4D array with dimensions [C, Z, H, W],
@@ -308,6 +314,9 @@ class FeatureExtractor:
         ----------
         image : np.ndarray [C, Z, H, W]
             The input image. Dimensions are [C, Z, H, W].
+        rgb_data : bool
+            Whether the input data is RGB or not. If True, the input data must also have 3 channels.
+            Relevant only if the model can take RGB input, to distinguish between 3-channel non-RGB and RGB input.
         
         Returns:
         ----------
@@ -315,17 +324,29 @@ class FeatureExtractor:
             The extracted features of the image. Each is [nb_features, Z, H, W]
         """
 
-        # Get the number of channels the model expects (e.g., RGB = 3)
-        input_channels = self.get_num_input_channels()
+        # Get the number of channels the model expects
+        fe_input_channels = self.get_num_input_channels()
+        fe_rgb_input = self.rgb_input
 
-        # If the image has one the number of channels the model expects, use it directly
-        if image.shape[0] in input_channels:
+        # Check if the FE model expects RGB input, but does not support 3 channels
+        if fe_rgb_input and 3 not in fe_input_channels:
+            raise ValueError(f"The feature extractor model is defined as taking RGB input, but does not take 3 channels (it takes {fe_input_channels}).")
+
+        # Check if the input data is supposed to be RGB, but does not have 3 channels
+        img_channels = image.shape[0]
+        if rgb_data and img_channels != 3:
+            raise ValueError(f"The input data is defined as RGB but has {img_channels} instead of 3 channels.")
+
+        # If the image has a number of channels that the model expects, use it directly
+        # Exception: If the model takes RGB input but the image is not RGB, repeat channels even if there are 3
+        non_rgb_triple_with_rgb_fe = not rgb_data and img_channels == 3 and fe_rgb_input
+        if img_channels in fe_input_channels and not non_rgb_triple_with_rgb_fe:
             # return [self.get_features(image)]
             return self.get_features(image)
 
         # For each channel, create a replicate with the needed number of input channels
-        input_channels = min(input_channels)
-        channel_series = [np.tile(ch, (input_channels, 1, 1, 1)) for ch in image]
+        fe_input_channels = min(fe_input_channels)
+        channel_series = [np.tile(ch, (fe_input_channels, 1, 1, 1)) for ch in image]
         
         # Get outputs for each channel_series
         all_outputs = []

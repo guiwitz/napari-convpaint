@@ -39,7 +39,8 @@ class Hookmodel(FeatureExtractor):
         
         super().__init__(model_name=model_name, model=model, use_gpu=use_gpu)
 
-        self.norm_imagenet = True
+        self.norm_mode = "imagenet"  # All supported nn models expect ImageNet normalization
+        self.rgb_input = True  # All supported nn models expect RGB input
 
         # REGISTER DEVICE OF THE MODEL
         self.device = get_device_from_torch_model(self.model)

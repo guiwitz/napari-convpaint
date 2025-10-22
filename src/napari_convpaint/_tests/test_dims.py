@@ -11,8 +11,8 @@ def test_3d_single_channel(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_3d)
 
-    my_widget.rgb_img = False
-    my_widget.cp_model.set_params(multi_channel_img=False)
+    # my_widget.rgb_img = False
+    my_widget.cp_model.set_params(channel_mode='single')
     my_widget._on_add_annot_layer()
 
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
@@ -55,8 +55,8 @@ def test_3d_multi_channel(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_3d)
 
-    my_widget.rgb_img = False
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = False
+    my_widget.cp_model.set_params(channel_mode='multi')
     my_widget._on_add_annot_layer()
 
     # check that stack normalization is off
@@ -83,13 +83,14 @@ def test_3d_multi_channel(make_napari_viewer, capsys):
 def test_RGB(make_napari_viewer, capsys):
     """A 3D stack where 3rd dim is channel"""
     
-    multid_rgb = np.stack([(i+1) * np.random.randint(0, 255, (100,100)) for i in range(3)], axis=2)
+    side_len = 1000
+    multid_rgb = np.stack([np.random.randint(0, 255, (side_len, side_len), dtype=np.uint8) for i in range(3)], axis=2)
     viewer = make_napari_viewer()
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_rgb)
 
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
     my_widget._on_add_annot_layer()
 
     # check that stack normalization is off
@@ -101,17 +102,24 @@ def test_RGB(make_napari_viewer, capsys):
     img = my_widget._get_selected_img(check=True)
     my_widget._compute_image_stats(img)
 
-    # check that mean is single number ~127
+    # check that mean is single number in each channel
     assert my_widget.image_mean.shape == (3,1,1)
 
     # check that mean is taken per channel
     assert 127-10 < my_widget.image_mean.flatten()[0] < 127+10
-    assert 3*127-10 < my_widget.image_mean.flatten()[2] < 3*127+10
+    assert 127-10 < my_widget.image_mean.flatten()[1] < 127+10
+    assert 127-10 < my_widget.image_mean.flatten()[2] < 127+10
 
-    # check that normalization per channel gives 0
+    # check that mean over each full channel is according to imagenet
+    imagenet_mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    imagenet_std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     normalized = my_widget._get_data_channel_first_norm(img)
-    # check that mean over each full channel is 0
-    np.testing.assert_array_almost_equal(normalized.mean(axis=(1,2)), np.zeros((3)))
+    channel_means = normalized.mean(axis=(1,2))
+    np.testing.assert_array_almost_equal(channel_means, (0.5 - imagenet_mean) / imagenet_std, decimal=2)
+    assert normalized.shape == (3, side_len, side_len)
+    assert normalized.dtype == np.float32
+    assert ((0 - imagenet_mean < channel_means) & (channel_means < 1 - imagenet_mean)).all()  # means should be in this range
+    # np.testing.assert_allclose(normalized.mean(axis=(1,2)), - imagenet_mean / imagenet_std, rtol=0.2)
 
 def test_4d_image(make_napari_viewer, capsys):
     """For a 4D data (C, T, X, Y) check that normalization is done properly
@@ -123,8 +131,8 @@ def test_4d_image(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_c_t)
 
-    my_widget.rgb_img = False
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = False
+    my_widget.cp_model.set_params(channel_mode='multi')
     my_widget._on_add_annot_layer()
 
     assert viewer.layers['annotations'].data.ndim == 3, "Annotation layer should be 3D"
@@ -188,8 +196,8 @@ def test_RGBT_image(make_napari_viewer, capsys):
     my_widget = ConvPaintWidget(viewer)
     viewer.add_image(multid_rgb_t)
 
-    my_widget.rgb_img = True
-    my_widget.cp_model.set_params(multi_channel_img=True)
+    # my_widget.rgb_img = True
+    my_widget.cp_model.set_params(channel_mode='rgb')
     my_widget._on_add_annot_layer()
 
     # UNTIL HERE: py3.12 fails
