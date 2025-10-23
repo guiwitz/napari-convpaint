@@ -95,7 +95,7 @@ class DinoJafarFeatures(FeatureExtractor):
 
     def get_default_params(self, param=None):
         param = super().get_default_params(param)
-        param.fe_scalings = [1,8,14]
+        param.fe_scalings = [1]
         param.fe_order = 0
         param.tile_image = False
         param.tile_annotations = False
