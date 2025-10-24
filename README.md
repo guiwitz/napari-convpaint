@@ -27,6 +27,8 @@ To install the latest development version:
 
     pip install git+https://github.com/guiwitz/napari-convpaint.git
 
+The plugin is also available on the [napari plugin hub](https://napari-hub.org/plugins/napari-convpaint.html), and can be installed via the napari plugin system (`Plugins`>`Install/Uninstall plugins..`> search for `napari-convpaint`).
+
 
 ## Example use case: Tracking shark body parts in a movie
 These are the scribble annotations provided for training:
