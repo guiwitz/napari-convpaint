@@ -18,14 +18,14 @@ class Param:
     classifier : str
         Path to the classifier model (if saved, otherwise None)
     channel_mode : str ("multi", "rgb", "single")
-        "multi": interpret the first dimension as channels (as opposed to z or time)
-        "rgb": interpret the first dimension as rgb channels (3 channels required), important for some FEs
-        "single": interpret the first dimension as z or time (only one channel)
+        "multi": interpret the first dimension as channels (as opposed to z or time);
+        "rgb": interpret the first dimension as rgb channels (3 channels required), important for some FEs;
+        "single": interpret the first dimension as z or time (only one channel);
         Note: if data is given as 4d array, "single" is not valid and will be changed to "multi"
     normalize : int
         Normalization mode:
-            1 = no normalization,
-            2 = normalize stack,
+            1 = no normalization;
+            2 = normalize stack;
             3 = normalize each image
     image_downsample : int
         Factor for downscaling the image right after input
