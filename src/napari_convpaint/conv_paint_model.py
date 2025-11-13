@@ -780,9 +780,10 @@ class ConvpaintModel:
         """
 
         # --- Basic bookkeeping ---------------------------------------------------
-        # Check if we are processing any annotations and if we have only a single image input
+        # Check if we are processing any annotations
         use_annots   = annotations is not None
-        single_input = isinstance(data, (np.ndarray, torch.Tensor))
+        # Check for single input
+        single_input = hasattr(data, 'ndim') and data.ndim >= 2 and not isinstance(data, list)
         # Record original input shapes for reshaping and rescaling later
         input_shapes = [data.shape] if single_input else [d.shape for d in data]
         # Make sure img_ids are compatible and is made into a list
