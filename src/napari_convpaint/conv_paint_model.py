@@ -1,5 +1,6 @@
 
 import pickle
+from pyexpat import features
 from catboost import CatBoostClassifier
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
@@ -722,7 +723,7 @@ class ConvpaintModel:
         probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return probas
     
-    def get_feature_image(self, data, memory_mode, img_ids, in_channels=None, skip_norm=False):
+    def get_feature_image(self, data, in_channels=None, skip_norm=False):
         """
         Returns the feature images extracted by the feature extractor model.
         For details, see the `_extract_features` method.
@@ -748,15 +749,17 @@ class ConvpaintModel:
             Extracted features of the image(s) or list of features for each image if input is a list.
             Reshaped to the input imges' shapes. Features dimension is added first.    
         """
-        return self._extract_features(
-            data,
-            annotations=None,
-            restore_input_form=True,
-            memory_mode=memory_mode,
-            img_ids=img_ids,
-            in_channels=in_channels,
-            skip_norm=skip_norm
-        )
+        # Extract features
+        features = self._extract_features(
+                data,
+                annotations=None,
+                restore_input_form=True,
+                memory_mode=False, # Only valid when using annotations
+                img_ids=None, # Only needed when using memory_mode
+                in_channels=in_channels,
+                skip_norm=skip_norm
+            )
+        return features
 
     def _extract_features(self, data, annotations=None, restore_input_form=True,
                           memory_mode=False, img_ids=None,
@@ -1308,7 +1311,7 @@ class ConvpaintModel:
             probas = [self._parallel_predict_image(d, return_proba=True, use_dask=use_dask)
                       for d in data]
         else:
-            probas = self._predict_image(data, return_proba=True) # Can handle lists
+            probas = self._predict_image(data, return_proba=True) # Can handle lists directly
 
         # Restore input dimensionality (especially see if we want to remove z dimension)
         probas = [self._restore_dims(probas[i], input_shapes[i])
