@@ -721,9 +721,44 @@ class ConvpaintModel:
         """
         probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return probas
+    
+    def get_feature_image(self, data, memory_mode, img_ids, in_channels=None, skip_norm=False):
+        """
+        Returns the feature images extracted by the feature extractor model.
+        For details, see the `_extract_features` method.
+        
+        Parameters
+        ----------
+        data : np.ndarray or list[np.ndarray]
+            Image(s) to extract features from
+        memory_mode : bool, optional
+            Whether to use memory mode.
+            If True, the annotations are registered and updated, and only features for new pixels are extracted.
+        img_ids : str or list[str], optional
+            Image IDs to register the annotations with (when using memory_mode)
+        in_channels : list[int], optional
+            List of channels to use for feature extraction
+        skip_norm : bool, optional
+            Whether to skip normalization of the images before feature extraction.
+            If True, the images are not normalized according to the parameter `normalize` in the model parameters.
 
+        Returns
+        ----------
+        features : np.ndarray or list[np.ndarray]
+            Extracted features of the image(s) or list of features for each image if input is a list.
+            Reshaped to the input imges' shapes. Features dimension is added first.    
+        """
+        return self._extract_features(
+            data,
+            annotations=None,
+            restore_input_form=True,
+            memory_mode=memory_mode,
+            img_ids=img_ids,
+            in_channels=in_channels,
+            skip_norm=skip_norm
+        )
 
-    def get_feature_image(self, data, annotations=None, restore_input_form=True,
+    def _extract_features(self, data, annotations=None, restore_input_form=True,
                           memory_mode=False, img_ids=None,
                           in_channels=None, skip_norm=False):
         """
@@ -1057,8 +1092,8 @@ class ConvpaintModel:
             return self.classifier, None, None
 
         if not memory_mode:
-            # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, in_channels=in_channels, skip_norm=skip_norm)
+            # Use _extract_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
+            feature_parts, annot_parts = self._extract_features(data, annotations, restore_input_form=False, memory_mode=memory_mode, in_channels=in_channels, skip_norm=skip_norm)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [conv_paint_utils.get_features_targets(f, a)
                         for f, a in zip(feature_parts, annot_parts)] # f and t are linearized
@@ -1068,8 +1103,8 @@ class ConvpaintModel:
             targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
 
         else: # memory mode
-            # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
+            # Use _extract_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
+            feature_parts, annot_parts, coords, img_ids, scale = self._extract_features(data, annotations, restore_input_form=False, memory_mode=memory_mode, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
 
@@ -1309,7 +1344,7 @@ class ConvpaintModel:
 
         # Check if features are given, if not, extract them
         if feature_img is None:
-            feature_img = self.get_feature_image(image,
+            feature_img = self._extract_features(image,
                                             restore_input_form=False,
                                             in_channels=None, # already extracted outside
                                             skip_norm=True)  # already normalized outside
