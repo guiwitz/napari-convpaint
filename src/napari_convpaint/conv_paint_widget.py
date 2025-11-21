@@ -421,6 +421,7 @@ class ConvPaintWidget(QWidget):
         self.advanced_prediction_group = VHGroup('Prediction', orientation='G')
         self.advanced_input_group = VHGroup('Input', orientation='G')
         self.advanced_output_group = VHGroup('Output', orientation='G')
+        self.advanced_unsupervised_group = VHGroup('Unsupervised extraction (without annotations)', orientation='G')
 
         # Add groups to the tab
         self.tabs.add_named_tab('Advanced', self.advanced_note_group.gbox)
@@ -430,9 +431,10 @@ class ConvPaintWidget(QWidget):
         self.tabs.add_named_tab('Advanced', self.advanced_prediction_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_input_group.gbox)
         self.tabs.add_named_tab('Advanced', self.advanced_output_group.gbox)
+        self.tabs.add_named_tab('Advanced', self.advanced_unsupervised_group.gbox)
 
         # Text to warn the user about their responsibility
-        self.advanced_note = QLabel("Changing these options may lead to situations where the tool does not function as expected. " +
+        self.advanced_note = QLabel("Applying these options may lead to situations where the tool does not function as expected. " +
                                     "In particular, it is the user's responsibility that the dimensions of images and annotations are compatible. " +
                                     "Please refer to the documentation or contact the developers for assistance.")
         self.advanced_note.setStyleSheet(style_for_infos)
@@ -555,6 +557,31 @@ class ConvPaintWidget(QWidget):
         self.check_add_probas.setToolTip('Add a layer with class probabilities as output')
         self.check_add_probas.setChecked(self.add_probas)
         self.advanced_output_group.glayout.addWidget(self.check_add_probas, 0, 1, 1, 1)
+
+        # Separator for unsupervised outputs
+        # self.unsupervised_outputs_label = QLabel()
+        # self.advanced_unsupervised_group.glayout.addWidget(self.unsupervised_outputs_label, 1, 0, 1, 2)
+
+        # Button to add features for the current plane
+        self.btn_add_features = QPushButton('Get features image')
+        self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane')
+        self.advanced_unsupervised_group.glayout.addWidget(self.btn_add_features, 2, 0, 1, 1)
+
+        # PCA option for the features
+        self.text_features_pca = QtWidgets.QLineEdit()
+        self.text_features_pca.setPlaceholderText('e.g. 3 or 5')
+        self.text_features_pca.setToolTip('Number of PCA components to use for the features image.\nSet to 0 to disable PCA.')
+        self.text_features_pca.setText(self.features_pca_components)
+        self.advanced_unsupervised_group.glayout.addWidget(QLabel('PCA components (0 = off)'), 0, 0, 1, 1)
+        self.advanced_unsupervised_group.glayout.addWidget(self.text_features_pca, 0, 1, 1, 1)
+
+        # Kmeans option for the features
+        self.text_features_kmeans = QtWidgets.QLineEdit()
+        self.text_features_kmeans.setPlaceholderText('e.g. 3 or 5')
+        self.text_features_kmeans.setToolTip('Number of Kmeans clusters to use for the features image.\nSet to 0 to disable Kmeans.')
+        self.text_features_kmeans.setText(self.features_kmeans_clusters)
+        self.advanced_unsupervised_group.glayout.addWidget(QLabel('Kmeans clusters (0 = off)'), 1, 0, 1, 1)
+        self.advanced_unsupervised_group.glayout.addWidget(self.text_features_kmeans, 1, 1, 1, 1)
 
         # === PROJECT TAB (MULTIFILE) ===
 
@@ -749,11 +776,19 @@ class ConvPaintWidget(QWidget):
         
         self.btn_switch_axes.clicked.connect(self._on_switch_axes)
 
+        # Checkboxes for output layers
         self.check_add_seg.stateChanged.connect(lambda: setattr(
             self, 'add_seg', self.check_add_seg.isChecked()))
         self.check_add_probas.stateChanged.connect(lambda: setattr(
             self, 'add_probas', self.check_add_probas.isChecked()))
 
+        # Textboxes for PCA and Kmeans
+        self.text_features_pca.textChanged.connect(lambda: setattr(
+            self, 'features_pca_components', self.text_features_pca.text()))
+        self.text_features_kmeans.textChanged.connect(lambda: setattr(
+            self, 'features_kmeans_clusters', self.text_features_kmeans.text()))
+        # Button to add features for the current plane
+        self.btn_add_features.clicked.connect(self._on_get_feature_image)
 
 ### Define the behaviour in the class labels tab
 
@@ -1049,6 +1084,7 @@ class ConvPaintWidget(QWidget):
                 # Set flags that new outputs need to be generated (and not planes of the old ones populated)
                 self.new_seg = True
                 self.new_proba = True
+                self.new_features = True
                 # Activate button to add annotation and segmentation layers
                 self.add_layers_btn.setEnabled(True)
                 # Give info if image is very large to use "tile image"
@@ -1270,84 +1306,17 @@ class ConvPaintWidget(QWidget):
     # Predict
 
     def _on_predict(self, event=None):
-        """Predict the segmentation of the currently viewed frame based 
+        """Predict the segmentation of the currently viewed frame based
         on a classifier trained with annotations"""
-        
-        # Get image and the info needed about normalization
-        img = self._get_selected_img(check=True)
-        fe_norm = self.cp_model.fe_model.norm_mode
-        use_default = (fe_norm == "default")
-        if fe_norm == "imagenet" and self.cp_model.get_param("channel_mode") != 'rgb':
-            print("FE model is designed for imagenet normalization, but image is not declared as 'rgb' (parameter channel_mode). " +
-            "Using default normalization instead.")
-            use_default = True
-        norm_scope = self.cp_model.get_param("normalize")
-        data_dims = self._get_data_dims(img)
 
-        # If we use default normalization, compute image stats if not already done
-        if use_default and (self.image_mean is None or self.image_std is None):
-            self._compute_image_stats(img)
-
-        # Start prediction
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
 
         with progress(total=0) as pbr:
-            
             pbr.set_description(f"Prediction")
-
-            # Get image data and stats depending on the data dim and norm mode
-            if fe_norm != "percentile":
-                # For default and imagenet norm, we want unnormalized data to apply normalization only on the current plane
-                img = self._get_data_channel_first(img)
-            else: # "percentile"
-                # For percentile norm, we want already normalized data to avoid artifacts when normalizing only the current plane
-                img = self._get_data_channel_first_norm(img)
-
-            if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
-                image_plane = img
-                # Get stats for default norm
-                if norm_scope != 1 and use_default: # if we need to normalize and use default norm
-                    image_mean = self.image_mean
-                    image_std = self.image_std
-
-            if data_dims == '3D_single': # Stack dim is third last
-                # NOTE: If we already have a layer with probas, the viewer has 4 dims; therefore take 3rd last not first
-                step = self.viewer.dims.current_step[-3]
-                image_plane = img[step]
-                # Get stats for default norm
-                if norm_scope == 2 and use_default: # over stack (only 1 value in stack dim; 1, 1, 1)
-                    image_mean = self.image_mean
-                    image_std = self.image_std
-                if norm_scope == 3 and use_default: # by image (use values for current step; N, 1, 1)
-                    image_mean = self.image_mean[step]
-                    image_std = self.image_std[step]
-
-            if data_dims in ['4D', '3D_RGB']: # Stack dim is third last
-                step = self.viewer.dims.current_step[-3]
-                image_plane = img[:, step]
-                # Get stats for default norm
-                if norm_scope == 2 and use_default: # over stack (only 1 value in stack dim; C, 1, 1, 1)
-                    image_mean = self.image_mean[:,0]
-                    image_std = self.image_std[:,0]
-                if norm_scope == 3 and use_default: # by image (use values for current step; C, N, 1, 1)
-                    image_mean = self.image_mean[:,step]
-                    image_std = self.image_std[:,step]
-            
-            # Normalize image (for default: use the stats based on the radio buttons; for imagenet: stats are fixed)
-            if norm_scope != 1:
-                if use_default:
-                    image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
-                elif fe_norm == "imagenet":
-                    # Only if rgb image --> array with 3 or 4 dims, with C=3 first
-                    if self.cp_model.get_param("channel_mode") == 'rgb': # Double-check (actually redundant due to check above)
-                        image_plane = normalize_image_imagenet(image=image_plane)
-                    else:
-                        print("WIDGET _ON_PREDICT(): THIS SHOULD NOT BE HAPPENING, AS WE CHECKED ABOVE FOR RGB")
-                        image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
-                # For percentile norm, image is already normalized above (before selecting the plane)
-            
+            # Get the data
+            image_plane = self._get_current_plane_norm()
             # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
             in_channels = self._parse_in_channels(self.input_channels)
             probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True, use_dask=self.use_dask)
@@ -1355,6 +1324,10 @@ class ConvPaintWidget(QWidget):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
+
+        # Get the current step in case of stacks
+        data_dims = self._get_data_dims(self._get_selected_img())
+        step = self.viewer.dims.current_step[-3] if data_dims in ['3D_single', '4D', '3D_RGB'] else None
 
         # Add segmentation layer if enabled
         if self.add_seg:
@@ -1373,7 +1346,6 @@ class ConvPaintWidget(QWidget):
 
         # Add probabilities if enabled
         if self.add_probas:
-
             # Check if we need to create a new probabilities layer
             num_classes = probas.shape[:1]
             self._check_create_probas_layer(num_classes)
@@ -1383,11 +1355,57 @@ class ConvPaintWidget(QWidget):
             # Update probabilities layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
                 self.viewer.layers[self.proba_prefix].data = probas
-            elif data_dims == '3D_single':
-                self.viewer.layers[self.proba_prefix].data[:, step] = probas
-            else: # 4D, 3D_RGB (stack dim is second, classes first)
+            else: # 3D_single, 4D, 3D_RGB (stack dim is second, probas first)
                 self.viewer.layers[self.proba_prefix].data[:, step] = probas
             self.viewer.layers[self.proba_prefix].refresh()
+
+    def _on_get_feature_image(self, event=None):
+        """Get the feature image for the currently viewed frame based
+        on the current feature extractor and show it in a new layer."""
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
+
+        with progress(total=0) as pbr:
+            pbr.set_description(f"Feature extraction") 
+
+            # Get the data
+            image_plane = self._get_current_plane_norm()
+            in_channels = self._parse_in_channels(self.input_channels)
+
+            # Check if pca and kmeans are numbers, warn and set to 0 if not; make integers from strings
+            if not self.features_pca_components.isdigit():
+                warnings.warn('PCA components must be an integer. Turning off PCA.')
+                self.features_pca_components = '0'
+            if not self.features_kmeans_clusters.isdigit():
+                warnings.warn('KMeans clusters must be an integer. Turning off KMeans.')
+                self.features_kmeans_clusters = '0'
+            pca, kmeans = int(self.features_pca_components), int(self.features_kmeans_clusters)
+
+            # Get feature image; skip norm as it is done above
+            feature_image = self.cp_model.get_feature_image(image_plane, in_channels=in_channels, skip_norm=True,
+                                                            pca_components=pca,
+                                                            kmeans_clusters=kmeans)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
+
+        # Update features layer
+        # Check if we need to create a new features layer
+        num_features = feature_image.shape[0] if not kmeans else 0
+        self._check_create_features_layer(num_features)
+        # Set the flag to False, so we don't create a new layer every time
+        self.new_features = False
+
+        data_dims = self._get_data_dims(self._get_selected_img())
+        if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
+            self.viewer.layers[self.features_prefix].data = feature_image
+        else: # 3D_single, 4D, 3D_RGB (stack dim is third last)
+            step = self.viewer.dims.current_step[-3]
+            self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
+        self.viewer.layers[self.features_prefix].refresh()
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
@@ -1445,6 +1463,9 @@ class ConvPaintWidget(QWidget):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
+
+    def _on_get_feature_image_all(self):
+        return  # Not (yet) implemented for stacks
 
     # Load/Save
 
@@ -1544,6 +1565,7 @@ class ConvPaintWidget(QWidget):
         # Set flags that new outputs need to be generated (and not planes of the old ones populated)
         self.new_seg = True
         self.new_proba = True
+        self.new_features = True
 
     def _on_norm_changed(self):
         """Set the normalization options based on radio buttons,
@@ -1593,6 +1615,8 @@ class ConvPaintWidget(QWidget):
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
+        self.text_features_pca.setText(self.features_pca_components)
+        self.text_features_kmeans.setText(self.features_kmeans_clusters)
         # Reset the model description
         self._set_model_description()
 
@@ -1653,6 +1677,7 @@ class ConvPaintWidget(QWidget):
         self.annot_prefix = 'annotations' # Prefix for the annotation layer names
         self.seg_prefix = 'segmentation' # Prefix for the segmentation layer names
         self.proba_prefix = 'probabilities' # Prefix for the class probabilities layer names
+        self.features_prefix = 'features' # Prefix for the feature image layer name
         self.cont_training = "image" # Update features for subsequent training ("image" or "off" or "global")
         self.use_dask = False # Use Dask for parallel processing
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)
@@ -1660,6 +1685,9 @@ class ConvPaintWidget(QWidget):
         self.add_probas = False # Add a layer with class probabilities
         self.new_seg = True # Flags to indicate if new outputs are created
         self.new_proba = True
+        self.new_features = True
+        self.features_pca_components = "0" # Number of PCA components for feature image (0 = no PCA)
+        self.features_kmeans_clusters = "0" # Number of k-means clusters for feature image (0 = no k-means)
         self.initial_labels = ['Background', 'Foreground']
         self.annot_layers = set() # List of annotation layers
         self.seg_layers = set() # List of segmentation layers
@@ -1908,7 +1936,7 @@ class ConvPaintWidget(QWidget):
             # Add it to the list of layers where class labels shall be updated
             self.seg_layers.add(self.viewer.layers[self.seg_prefix])
             self.update_all_labels_and_cmaps()
-            
+
     def _check_create_probas_layer(self, num_classes):
         """Check if class probabilities layer exists and create it if not."""
 
@@ -1947,6 +1975,50 @@ class ConvPaintWidget(QWidget):
             # Save information about the probabilities layer to be able to rename it later
             self._set_old_proba_tag()
 
+    def _check_create_features_layer(self, num_features):
+        """Check if feature image layer exists and create it if not."""
+
+        img = self._get_selected_img(check=True)
+        if img is None:
+            warnings.warn('No image selected. No layers added.')
+            return
+        
+        spatial_dims = self._get_annot_shape(img)
+
+        # Create a new features layer if it doesn't exist yet or we need a new one
+        features_exists = self.features_prefix in self.viewer.layers
+
+        # If we replace a current layer, we can backup the old one, and remove it
+        if features_exists:
+            same_num_features = self.viewer.layers[self.features_prefix].data.shape[0] == num_features
+            both_kmeans = (self.viewer.layers[self.features_prefix].data.shape == spatial_dims) & (num_features == 0)
+            same_dim = same_num_features and both_kmeans
+            if self.new_features or not same_dim:
+                # Backup the old features layer if keep_layers is set (and the layer exists)
+                if self.keep_layers:
+                    self._rename_features_for_backup()
+                # Otherwise, just remove the old features layer
+                else:
+                    self.viewer.layers.remove(self.features_prefix)
+
+        # If there was no features layer, or we need a new one, create it
+        if (not features_exists) or (features_exists and not same_dim) or self.new_features:
+            # Create a new features layer
+            if not num_features == 0:
+                self.viewer.add_image(
+                    data=np.zeros((num_features,)+spatial_dims, dtype=np.float32),
+                    name=self.features_prefix
+                    )
+                # Change the colormap to one suited for features
+                self.viewer.layers[self.features_prefix].colormap = "viridis"
+            else: # Kmeans feature image (2D or 3D)
+                self.viewer.add_labels(
+                    data=np.zeros(spatial_dims, dtype=np.uint8),
+                    name=self.features_prefix
+                    )
+            # Save information about the features layer to be able to rename it later
+            self._set_old_features_tag()
+
     def _rename_annot_for_backup(self):
         """Name the annotation with a unique name according to its image,
         so it can be kept when adding a new with the standard name."""
@@ -1974,6 +2046,14 @@ class ConvPaintWidget(QWidget):
         if self.proba_prefix in self.viewer.layers:
             full_name = self._get_unique_layer_name(self.old_proba_tag)
             self.viewer.layers[self.proba_prefix].name = full_name
+
+    def _rename_features_for_backup(self):
+        """Name the features layer with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
+        if self.features_prefix in self.viewer.layers:
+            full_name = self._get_unique_layer_name(self.old_features_tag)
+            self.viewer.layers[self.features_prefix].name = full_name
 
     def _get_unique_layer_name(self, base_name):
         """Get a unique name for a new layer by checking existing layers."""
@@ -2015,6 +2095,11 @@ class ConvPaintWidget(QWidget):
         """Set the old probabilities tag based on the current image layer and data dimensions.
         This is used to rename old probabilities layers when creating new ones."""
         self.old_proba_tag = f"{self.proba_prefix}_{self._get_old_data_tag()}"
+
+    def _set_old_features_tag(self):
+        """Set the old features tag based on the current image layer and data dimensions.
+        This is used to rename old features layers when creating new ones."""
+        self.old_features_tag = f"{self.features_prefix}_{self._get_old_data_tag()}"
 
     def _reset_radio_channel_mode_choices(self):
         """Set radio buttons for channel mode active/inactive depending on selected image type.
@@ -2203,7 +2288,7 @@ class ConvPaintWidget(QWidget):
         img_shape = img.data.shape
         if data_dims in ['2D_RGB', '2D']:
             return img_shape[0:2]
-        if data_dims in ['3D_RGB', '3D_single']:
+        elif data_dims in ['3D_RGB', '3D_single']:
             return img_shape[0:3]
         else: # 3D_multi, 4D (-> channels first)
             return img_shape[1:]
@@ -2376,6 +2461,79 @@ class ConvPaintWidget(QWidget):
         return normalize_image(image=image_stack,
                                image_mean=self.image_mean,
                                image_std=self.image_std)
+    
+    def _get_current_plane_norm(self):
+        """Get the current image plane to predict on, normalized according to the settings."""
+        
+        # Get image and the info needed about normalization
+        img = self._get_selected_img(check=True)
+        if img is None:
+            raise ValueError("No image selected.")
+        fe_norm = self.cp_model.fe_model.norm_mode
+        use_default = (fe_norm == "default")
+        if fe_norm == "imagenet" and self.cp_model.get_param("channel_mode") != 'rgb':
+            print("FE model is designed for imagenet normalization, but image is not declared as 'rgb' (parameter channel_mode). " +
+            "Using default normalization instead.")
+            use_default = True
+        norm_scope = self.cp_model.get_param("normalize")
+        data_dims = self._get_data_dims(img)
+
+        # If we use default normalization, compute image stats if not already done
+        if use_default and (self.image_mean is None or self.image_std is None):
+            self._compute_image_stats(img)
+
+        # Get image data and stats depending on the data dim and norm mode
+        if fe_norm != "percentile":
+            # For default and imagenet norm, we want unnormalized data to apply normalization only on the current plane
+            img = self._get_data_channel_first(img)
+        else: # "percentile"
+            # For percentile norm, we want already normalized data to avoid artifacts when normalizing only the current plane
+            img = self._get_data_channel_first_norm(img)
+
+        if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
+            image_plane = img
+            # Get stats for default norm
+            if norm_scope != 1 and use_default: # if we need to normalize and use default norm
+                image_mean = self.image_mean
+                image_std = self.image_std
+
+        elif data_dims == '3D_single': # Stack dim is third last
+            # NOTE: If we already have a layer with probas, the viewer has 4 dims; therefore take 3rd last not first
+            step = self.viewer.dims.current_step[-3]
+            image_plane = img[step]
+            # Get stats for default norm
+            if norm_scope == 2 and use_default: # over stack (only 1 value in stack dim; 1, 1, 1)
+                image_mean = self.image_mean
+                image_std = self.image_std
+            if norm_scope == 3 and use_default: # by image (use values for current step; N, 1, 1)
+                image_mean = self.image_mean[step]
+                image_std = self.image_std[step]
+
+        else: # ['4D', '3D_RGB'] --> Stack dim is third last
+            step = self.viewer.dims.current_step[-3]
+            image_plane = img[:, step]
+            # Get stats for default norm
+            if norm_scope == 2 and use_default: # over stack (only 1 value in stack dim; C, 1, 1, 1)
+                image_mean = self.image_mean[:,0]
+                image_std = self.image_std[:,0]
+            if norm_scope == 3 and use_default: # by image (use values for current step; C, N, 1, 1)
+                image_mean = self.image_mean[:,step]
+                image_std = self.image_std[:,step]
+        
+        # Normalize image (for default: use the stats based on the radio buttons; for imagenet: stats are fixed)
+        if norm_scope != 1:
+            if use_default:
+                image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
+            elif fe_norm == "imagenet":
+                # Only if rgb image --> array with 3 or 4 dims, with C=3 first
+                if self.cp_model.get_param("channel_mode") == 'rgb': # Double-check (actually redundant due to check above)
+                    image_plane = normalize_image_imagenet(image=image_plane)
+                else:
+                    print("WIDGET _ON_PREDICT(): THIS SHOULD NOT BE HAPPENING, AS WE CHECKED ABOVE FOR RGB")
+                    image_plane = normalize_image(image=image_plane, image_mean=image_mean, image_std=image_std)
+            # For percentile norm, image is already normalized above (before selecting the plane)
+        
+        return image_plane
 
     def _compute_image_stats(self, img):
         """Get image stats depending on the normalization settings and data dimensions.

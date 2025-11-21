@@ -723,7 +723,7 @@ class ConvpaintModel:
         probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return probas
     
-    def get_feature_image(self, data, in_channels=None, skip_norm=False):
+    def get_feature_image(self, data, in_channels=None, skip_norm=False, pca_components=0, kmeans_clusters=0):
         """
         Returns the feature images extracted by the feature extractor model.
         For details, see the `_extract_features` method.
@@ -747,7 +747,7 @@ class ConvpaintModel:
         ----------
         features : np.ndarray or list[np.ndarray]
             Extracted features of the image(s) or list of features for each image if input is a list.
-            Reshaped to the input imges' shapes. Features dimension is added first.    
+            Reshaped to the input imges' shapes. Features dimension is added first (FHW or FZHW).    
         """
         # Extract features
         features = self._extract_features(
@@ -759,6 +759,19 @@ class ConvpaintModel:
                 in_channels=in_channels,
                 skip_norm=skip_norm
             )
+        
+        # Apply PCA or KMeans if requested
+        if pca_components:
+            features = conv_paint_utils.apply_pca_to_f_image(features, n_components=pca_components)
+        if kmeans_clusters:
+            features = conv_paint_utils.apply_kmeans_to_f_image(features, n_clusters=kmeans_clusters)
+            # Smoothen the Kmeans output if desired
+            if self._param.seg_smoothening > 1:
+                kernel = skimage.morphology.disk(self._param.seg_smoothening)
+                if features.ndim == 3: # 3D image --> add z dimension to kernel
+                    kernel = np.expand_dims(kernel, axis=0)
+                features = skimage.filters.rank.majority(features, footprint=kernel)
+
         return features
 
     def _extract_features(self, data, annotations=None, restore_input_form=True,
