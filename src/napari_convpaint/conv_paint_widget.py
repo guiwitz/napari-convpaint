@@ -538,8 +538,8 @@ class ConvPaintWidget(QWidget):
         self.text_input_channels = QtWidgets.QLineEdit()
         self.text_input_channels.setPlaceholderText('e.g. 0,1,2 or 0,1')
         self.text_input_channels.setToolTip('Comma-separated list of channels to use for training and segmentation.\nLeave empty to use all channels.')
-        self.advanced_input_group.glayout.addWidget(QLabel('Input channels (empty = all)'), 0, 0, 1, 1)
-        self.advanced_input_group.glayout.addWidget(self.text_input_channels, 0, 1, 1, 1)
+        self.advanced_input_group.glayout.addWidget(QLabel('Input channels (empty = all)'), 0, 0, 1, 2)
+        self.advanced_input_group.glayout.addWidget(self.text_input_channels, 0, 2, 1, 2)
 
         # Button to switch first to axes
         self.btn_switch_axes = QPushButton('Switch channels axis')
@@ -565,23 +565,23 @@ class ConvPaintWidget(QWidget):
         # Button to add features for the current plane
         self.btn_add_features = QPushButton('Get features image')
         self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane')
-        self.advanced_unsupervised_group.glayout.addWidget(self.btn_add_features, 2, 0, 1, 1)
+        self.advanced_unsupervised_group.glayout.addWidget(self.btn_add_features, 2, 0, 1, 2)
 
         # PCA option for the features
         self.text_features_pca = QtWidgets.QLineEdit()
         self.text_features_pca.setPlaceholderText('e.g. 3 or 5')
         self.text_features_pca.setToolTip('Number of PCA components to use for the features image.\nSet to 0 to disable PCA.')
         self.text_features_pca.setText(self.features_pca_components)
-        self.advanced_unsupervised_group.glayout.addWidget(QLabel('PCA components (0 = off)'), 0, 0, 1, 1)
-        self.advanced_unsupervised_group.glayout.addWidget(self.text_features_pca, 0, 1, 1, 1)
+        self.advanced_unsupervised_group.glayout.addWidget(QLabel('PCA components (0 = off)'), 0, 0, 1, 2)
+        self.advanced_unsupervised_group.glayout.addWidget(self.text_features_pca, 0, 2, 1, 2)
 
         # Kmeans option for the features
         self.text_features_kmeans = QtWidgets.QLineEdit()
         self.text_features_kmeans.setPlaceholderText('e.g. 3 or 5')
         self.text_features_kmeans.setToolTip('Number of Kmeans clusters to use for the features image.\nSet to 0 to disable Kmeans.')
         self.text_features_kmeans.setText(self.features_kmeans_clusters)
-        self.advanced_unsupervised_group.glayout.addWidget(QLabel('Kmeans clusters (0 = off)'), 1, 0, 1, 1)
-        self.advanced_unsupervised_group.glayout.addWidget(self.text_features_kmeans, 1, 1, 1, 1)
+        self.advanced_unsupervised_group.glayout.addWidget(QLabel('Kmeans clusters (0 = off)'), 1, 0, 1, 2)
+        self.advanced_unsupervised_group.glayout.addWidget(self.text_features_kmeans, 1, 2, 1, 2)
 
         # === PROJECT TAB (MULTIFILE) ===
 
@@ -1376,10 +1376,12 @@ class ConvPaintWidget(QWidget):
 
             # Check if pca and kmeans are numbers, warn and set to 0 if not; make integers from strings
             if not self.features_pca_components.isdigit():
-                warnings.warn('PCA components must be an integer. Turning off PCA.')
+                if self.features_pca_components: # If it's not empty
+                    warnings.warn('PCA components must be an integer. Turning off PCA.')
                 self.features_pca_components = '0'
             if not self.features_kmeans_clusters.isdigit():
-                warnings.warn('KMeans clusters must be an integer. Turning off KMeans.')
+                if self.features_kmeans_clusters: # If it's not empty
+                    warnings.warn('KMeans clusters must be an integer. Turning off KMeans.')
                 self.features_kmeans_clusters = '0'
             pca, kmeans = int(self.features_pca_components), int(self.features_kmeans_clusters)
 
