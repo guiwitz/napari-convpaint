@@ -39,7 +39,7 @@ def apply_pca_to_f_image(feature_img, n_components, norm=True):
 
     return pc_norm
 
-def apply_kmeans_to_f_image(feature_img, n_clusters):
+def apply_kmeans_to_f_image(feature_img, n_clusters, random_state=None):
     
     spatial_dims = feature_img.shape[1:]
 
@@ -47,7 +47,7 @@ def apply_kmeans_to_f_image(feature_img, n_clusters):
     num_features = feature_img.shape[-1]
     features_linear = feature_img.reshape(-1, num_features)
 
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
     kmeans_labels = kmeans.fit_predict(features_linear) # returns (n_samples,)
 
     kmeans_labels = kmeans_labels.reshape(spatial_dims) # Reshape back to spatial dimensions

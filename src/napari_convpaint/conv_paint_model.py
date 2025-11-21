@@ -757,26 +757,17 @@ class ConvpaintModel:
                 memory_mode=False, # Only valid when using annotations
                 img_ids=None, # Only needed when using memory_mode
                 in_channels=in_channels,
-                skip_norm=skip_norm
+                skip_norm=skip_norm,
+                pca_components=pca_components,
+                kmeans_clusters=kmeans_clusters
             )
-        
-        # Apply PCA or KMeans if requested
-        if pca_components:
-            features = conv_paint_utils.apply_pca_to_f_image(features, n_components=pca_components)
-        if kmeans_clusters:
-            features = conv_paint_utils.apply_kmeans_to_f_image(features, n_clusters=kmeans_clusters)
-            # Smoothen the Kmeans output if desired
-            if self._param.seg_smoothening > 1:
-                kernel = skimage.morphology.disk(self._param.seg_smoothening)
-                if features.ndim == 3: # 3D image --> add z dimension to kernel
-                    kernel = np.expand_dims(kernel, axis=0)
-                features = skimage.filters.rank.majority(features, footprint=kernel)
 
         return features
 
     def _extract_features(self, data, annotations=None, restore_input_form=True,
                           memory_mode=False, img_ids=None,
-                          in_channels=None, skip_norm=False):
+                          in_channels=None, skip_norm=False,
+                          pca_components=0, kmeans_clusters=0):
         """
         Returns the features of images extracted by the feature extractor model.
 
@@ -961,6 +952,10 @@ class ConvpaintModel:
         keep_patched = (not use_annots) and self.fe_model.gives_patched_features()
         features = [self.fe_model.get_feature_pyramid(d, params_for_extract, patched=keep_patched)
                     for d in data]
+        
+        if pca_components:
+            features = [conv_paint_utils.apply_pca_to_f_image(f, n_components=pca_components)
+                        for f in features]
 
         # --- Raw early return ----------------------------------------------------
         if not restore_input_form:
@@ -969,6 +964,19 @@ class ConvpaintModel:
             if use_annots:
                 return features, annotations
             return features
+
+        # Apply Kmeans clustering if requested (afterwards treat just like a segmentation)
+        class_output = False # Whether the output is a class prediction (change if we do Kmeans)
+        if kmeans_clusters: # NOTE: random_state -> fix for reproducibility; OR None for random
+            features = [conv_paint_utils.apply_kmeans_to_f_image(f, n_clusters=kmeans_clusters, random_state=0)
+                        for f in features]
+            class_output = True
+            # Smoothen the Kmeans output if desired
+            if self._param.seg_smoothening > 1:
+                kernel = skimage.morphology.disk(self._param.seg_smoothening)
+                if features[0].ndim == 3: # 3D images (all images need to have same dimensionality)
+                    kernel = np.expand_dims(kernel, axis=0) # --> add z dimension to kernel
+                features = [skimage.filters.rank.majority(f, footprint=kernel) for f in features]
 
         # --- Reshape back to original spatial form (for display) ---------
         padded_shapes   = self.padded_shapes # After both down/upsampling and padding
@@ -982,7 +990,7 @@ class ConvpaintModel:
                 padded_shapes[i],
                 pre_pad_shapes[i],
                 original_shapes[i],
-                class_preds=False,
+                class_preds=class_output,
                 patched_features=self.fe_model.gives_patched_features()
             )
             for i in range(len(features))
@@ -1875,7 +1883,7 @@ class ConvpaintModel:
         original_shape : tuple
             The original shape before any padding and rescaling: (..., Z, H_orig, W_orig)
         class_preds : bool
-            If True, we’re dealing with integer class labels (use nearest‐neighbor).
+            If True, we’re dealing with integer class labels (without additional dimension).
         patched_features : bool
             If True, the features were extracted on a patch‐size resolution (e.g. DINOv2),
             so we need to rescale the outputs to the patch resolution before upsampling.
