@@ -24,6 +24,9 @@ def apply_pca_to_f_image(feature_img, n_components, norm=True):
 
     feature_img = np.moveaxis(feature_img, 0, -1) # Move features to last dimension
     num_features = feature_img.shape[-1]
+    if n_components > num_features:
+        warnings.warn(f"Requested number of PCA components ({n_components}) exceeds number of features ({num_features}). Using {num_features} components instead.")
+        n_components = num_features
     features_linear = feature_img.reshape(-1, num_features)
 
     pca = PCA(n_components=n_components)

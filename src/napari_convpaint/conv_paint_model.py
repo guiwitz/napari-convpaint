@@ -971,12 +971,6 @@ class ConvpaintModel:
             features = [conv_paint_utils.apply_kmeans_to_f_image(f, n_clusters=kmeans_clusters, random_state=0)
                         for f in features]
             class_output = True
-            # Smoothen the Kmeans output if desired
-            if self._param.seg_smoothening > 1:
-                kernel = skimage.morphology.disk(self._param.seg_smoothening)
-                if features[0].ndim == 3: # 3D images (all images need to have same dimensionality)
-                    kernel = np.expand_dims(kernel, axis=0) # --> add z dimension to kernel
-                features = [skimage.filters.rank.majority(f, footprint=kernel) for f in features]
 
         # --- Reshape back to original spatial form (for display) ---------
         padded_shapes   = self.padded_shapes # After both down/upsampling and padding
@@ -995,6 +989,13 @@ class ConvpaintModel:
             )
             for i in range(len(features))
         ]
+
+        # Smoothen the Kmeans output if desired
+        if kmeans_clusters and self._param.seg_smoothening > 1:
+            kernel = skimage.morphology.disk(self._param.seg_smoothening)
+            if features[0].ndim == 3: # 3D images (all images need to have same dimensionality)
+                kernel = np.expand_dims(kernel, axis=0) # --> add z dimension to kernel
+            features = [skimage.filters.rank.majority(f, footprint=kernel) for f in features]
 
         # Final dimension restoration (remove singleton Z if needed)
         features = [self._restore_dims(features[i], input_shapes[i])
