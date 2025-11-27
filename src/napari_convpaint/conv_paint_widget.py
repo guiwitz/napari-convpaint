@@ -402,6 +402,9 @@ class ConvPaintWidget(QWidget):
         self.reset_class_btn = QPushButton('Reset to default')
         self.reset_class_btn.clicked.connect(self._on_reset_class_labels)
         self.class_labels_layout.addWidget(self.reset_class_btn, len(self.initial_labels)+2, 0, 1, 10)
+        self.btn_class_distribution = QPushButton('Show class distribution (in annotation)')
+        self.btn_class_distribution.setToolTip('Show a diagram of the class distribution in the annotation layer')
+        self.class_labels_layout.addWidget(self.btn_class_distribution, len(self.initial_labels)+3, 0, 1, 10)
 
         # Create the class labels
         self._create_default_class_labels()
@@ -519,9 +522,9 @@ class ConvPaintWidget(QWidget):
         self.advanced_training_group.glayout.addWidget(self.label_training_count, 3, 0, 1, 2)
 
         # Button to display a diagram of class distribution
-        self.btn_class_distribution = QPushButton('Show class distribution')
-        self.btn_class_distribution.setToolTip('Show a diagram of the class distribution in the data used for training')
-        self.advanced_training_group.glayout.addWidget(self.btn_class_distribution, 3, 2, 1, 2)
+        self.btn_class_distribution_trained = QPushButton('Show class distr. (trained)')
+        self.btn_class_distribution_trained.setToolTip('Show a diagram of the class distribution in the data saved in the model for training')
+        self.advanced_training_group.glayout.addWidget(self.btn_class_distribution_trained, 3, 2, 1, 2)
 
         # Reset training button
         self.btn_reset_training = QPushButton('Reset continuous training')
@@ -749,6 +752,8 @@ class ConvPaintWidget(QWidget):
         if self.seg_prefix in self.viewer.layers:
             seg_layer = self.viewer.layers[self.seg_prefix]
             seg_layer.events.colormap.connect(self._on_change_seg_cmap)
+        self.btn_class_distribution.clicked.connect(lambda: self._on_show_class_distribution(trained_data=False))
+        
 
         ### === ADVANCED TAB ===
 
@@ -769,7 +774,7 @@ class ConvPaintWidget(QWidget):
             self, 'cont_training', "global"))
         # self.check_cont_training.stateChanged.connect(lambda: setattr(
         #     self, 'cont_training', self.check_cont_training.isChecked()))
-        self.btn_class_distribution.clicked.connect(self._on_show_class_distribution)
+        self.btn_class_distribution_trained.clicked.connect(lambda: self._on_show_class_distribution(trained_data=True))
         self.btn_reset_training.clicked.connect(self._reset_train_features)
 
         self.check_use_dask.stateChanged.connect(lambda: setattr(
@@ -830,6 +835,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.removeWidget(self.add_class_btn)
         self.class_labels_layout.removeWidget(self.remove_class_btn)
         self.class_labels_layout.removeWidget(self.reset_class_btn)
+        self.class_labels_layout.removeWidget(self.btn_class_distribution)
 
         # Recreate the default class labels and icons
         self._create_default_class_labels()
@@ -838,6 +844,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
         self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
         self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+        self.class_labels_layout.addWidget(self.btn_class_distribution, len(self.class_labels)+3, 0, 1, 10)
     
     def _on_add_class_label(self, text=None):
         """Add a new class label and icon to the layout and update all annotation and segmentation layers."""
@@ -874,9 +881,11 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.removeWidget(self.add_class_btn)
         self.class_labels_layout.removeWidget(self.remove_class_btn)
         self.class_labels_layout.removeWidget(self.reset_class_btn)
+        self.class_labels_layout.removeWidget(self.btn_class_distribution)
         self.class_labels_layout.addWidget(self.add_class_btn, class_num+1, 0, 1, 5)
         self.class_labels_layout.addWidget(self.remove_class_btn, class_num+1, 5, 1, 5)
         self.class_labels_layout.addWidget(self.reset_class_btn, class_num+2, 0, 1, 10)
+        self.class_labels_layout.addWidget(self.btn_class_distribution, class_num+3, 0, 1, 10)
 
     def _on_remove_class_label(self, del_annots=True, event=None):
         """Remove the last class label and icon from the layout and update all annotation and segmentation layers."""
@@ -900,9 +909,11 @@ class ConvPaintWidget(QWidget):
             self.class_labels_layout.removeWidget(self.add_class_btn)
             self.class_labels_layout.removeWidget(self.remove_class_btn)
             self.class_labels_layout.removeWidget(self.reset_class_btn)
+            self.class_labels_layout.removeWidget(self.btn_class_distribution)
             self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
             self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
             self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+            self.class_labels_layout.addWidget(self.btn_class_distribution, len(self.class_labels)+3, 0, 1, 10)
             # Update the icons and class labels
             self._update_class_labels()
         else:
@@ -1467,6 +1478,7 @@ class ConvPaintWidget(QWidget):
         """Get the feature image for all frames based
         on the current feature extractor and show it in a new layer."""
 
+        # Get the data
         img = self._get_selected_img(check=True)
         data_dims = self._get_data_dims(img)
         if data_dims not in ['3D_single', '3D_RGB', '4D']:
@@ -1480,36 +1492,50 @@ class ConvPaintWidget(QWidget):
         # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
         pca, kmeans = self._check_parse_pca_kmeans()
-        # Step through the stack and predict each image
-        num_steps = image_stack_norm.shape[-3]
-        for step in progress(range(num_steps)):
+        in_channels = self._parse_in_channels(self.input_channels)
 
-            # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
-            image = image_stack_norm[..., step, :, :]
-
-            # Predict the current step; skip normalization as it is done above
-            in_channels = self._parse_in_channels(self.input_channels)
-            # Get feature image; skip norm as it is done above
-            feature_image = self.cp_model.get_feature_image(image, in_channels=in_channels, skip_norm=True,
+        # Get feature image for entire stack; skip norm as it is done above
+        feature_image = self.cp_model.get_feature_image(image_stack_norm, in_channels=in_channels, skip_norm=True,
                                                             pca_components=pca,
                                                             kmeans_clusters=kmeans)
+        
+        # Check if we need to create a new features layer
+        num_features = feature_image.shape[0] if not kmeans else 0
+        self._check_create_features_layer(num_features)
+        # Set the flag to False, so we don't create a new layer every time
+        self.new_features = False
+        # Update features layer
+        self.viewer.layers[self.features_prefix].data = feature_image
 
-            # In the first iteration, check if we need to create a new probas layer
-            # (we need the information about the number of classes)
-            if step == 0:
-                # Check if we need to create a new features layer
-                num_features = feature_image.shape[0] if not kmeans else 0
-                self._check_create_features_layer(num_features)
-                # Set the flag to False, so we don't create a new layer every time
-                self.new_features = False
+        # Step through the stack and predict each image
+        # num_steps = image_stack_norm.shape[-3]
+        # for step in progress(range(num_steps)):
 
-            # Add the slices to the segmentation and probabilities layers
-            if kmeans:
-                self.viewer.layers[self.features_prefix].data[step] = feature_image
-                self.viewer.layers[self.features_prefix].refresh()
-            else:
-                self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
-                self.viewer.layers[self.features_prefix].refresh()
+        #     # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
+        #     image = image_stack_norm[..., step, :, :]
+
+        #     # Predict the current step; skip normalization as it is done above
+        #     # Get feature image; skip norm as it is done above
+        #     feature_image = self.cp_model.get_feature_image(image, in_channels=in_channels, skip_norm=True,
+        #                                                     pca_components=pca,
+        #                                                     kmeans_clusters=kmeans)
+
+        #     # In the first iteration, check if we need to create a new probas layer
+        #     # (we need the information about the number of classes)
+        #     if step == 0:
+        #         # Check if we need to create a new features layer
+        #         num_features = feature_image.shape[0] if not kmeans else 0
+        #         self._check_create_features_layer(num_features)
+        #         # Set the flag to False, so we don't create a new layer every time
+        #         self.new_features = False
+
+        #     # Add the slices to the segmentation and probabilities layers
+        #     if kmeans:
+        #         self.viewer.layers[self.features_prefix].data[step] = feature_image
+        #         self.viewer.layers[self.features_prefix].refresh()
+        #     else:
+        #         self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
+        #         self.viewer.layers[self.features_prefix].refresh()
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1673,6 +1699,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.removeWidget(self.add_class_btn)
         self.class_labels_layout.removeWidget(self.remove_class_btn)
         self.class_labels_layout.removeWidget(self.reset_class_btn)
+        self.class_labels_layout.removeWidget(self.btn_class_distribution)
 
         # Recreate the default class labels and icons
         self._create_default_class_labels()
@@ -1681,6 +1708,7 @@ class ConvPaintWidget(QWidget):
         self.class_labels_layout.addWidget(self.add_class_btn, len(self.class_labels)+1, 0, 1, 5)
         self.class_labels_layout.addWidget(self.remove_class_btn, len(self.class_labels)+1, 5, 1, 5)
         self.class_labels_layout.addWidget(self.reset_class_btn, len(self.class_labels)+2, 0, 1, 10)
+        self.class_labels_layout.addWidget(self.btn_class_distribution, len(self.class_labels)+3, 0, 1, 10)
 
         # Turn on layer creation again
         self.add_layers_flag = True
@@ -2728,24 +2756,37 @@ class ConvPaintWidget(QWidget):
         # Save image_layer names and their corresponding annotation layers, to allow only extracting new features
         self.features_annots = {}
 
-    def _on_show_class_distribution(self):
+    def _on_show_class_distribution(self, trained_data=False):
         """Show the class distribution of the data used with continuous_training/memory_mode (saved in self.cp_model.table)
-        in a pie chart using the according cmaps."""
+        in a pie chart using the according cmaps.
+        
+        trained_data: If True, show the distribution of the data in the training table (i.e. used for training).
+                      If False, show the distribution of the data in the currently selected annotation layer.
+        """
 
         try:
             import matplotlib.pyplot as plt
         except ImportError:
             warnings.warn('matplotlib is not installed. Cannot show class distribution.')
             return
-        # Show class distribution in a pie chart
-        if self.cp_model is None or self.cp_model.table is None:
-            warnings.warn('No training data available. Cannot show class distribution.')
-            return
 
         # Get the class distribution from the training table
-        labels = self.cp_model.table['label'].values
+        if trained_data:
+            # If trained_data, get the labels from the training table (memory mode)
+            if self.cp_model is None or self.cp_model.table is None:
+                warnings.warn('No training data available. Cannot show class distribution.')
+                return
+            labels = self.cp_model.table['label'].values
+        else:
+            # Otherwise get the labels from the annotations layer selected in the layers widget (excluding unlabeled pixels)
+            labels = self.annotation_layer_selection_widget.value.data.flatten()
+            labels = labels[labels != 0]
+        if len(labels) == 0:
+            warnings.warn('No labels available. Cannot show class distribution.')
+            return
         classes = np.unique(labels)
         counts = np.array([np.sum(labels == c) for c in classes])
+        print(trained_data)
         percs = counts / np.sum(counts) * 100
 
         # Get class display names from a list, assuming class numbers start at 1
