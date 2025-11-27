@@ -566,6 +566,10 @@ class ConvPaintWidget(QWidget):
         self.btn_add_features = QPushButton('Get features image')
         self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane')
         self.advanced_unsupervised_group.glayout.addWidget(self.btn_add_features, 2, 0, 1, 2)
+        # Button to add features for the whole stack
+        self.btn_add_features_stack = QPushButton('Get features of stack')
+        self.btn_add_features_stack.setToolTip('Add a layer with the features extracted for the whole stack')
+        self.advanced_unsupervised_group.glayout.addWidget(self.btn_add_features_stack, 2, 2, 1, 2)
 
         # PCA option for the features
         self.text_features_pca = QtWidgets.QLineEdit()
@@ -789,7 +793,8 @@ class ConvPaintWidget(QWidget):
             self, 'features_kmeans_clusters', self.text_features_kmeans.text()))
         # Button to add features for the current plane
         self.btn_add_features.clicked.connect(self._on_get_feature_image)
-
+        # Button to add features for stack (all planes)
+        self.btn_add_features_stack.clicked.connect(self._on_get_feature_image_all)
 ### Define the behaviour in the class labels tab
 
     # Cass Labels
@@ -1089,7 +1094,7 @@ class ConvPaintWidget(QWidget):
                 self.add_layers_btn.setEnabled(True)
                 # Give info if image is very large to use "tile image"
                 if self._check_large_image(img) and not self.cp_model.get_param('tile_image'):
-                    show_info('Image is very large. Consider using tiling.')
+                    show_info('Image is very large. Consider using tiling and/or downsampling.')
                 # If we have continuous training within a single image, reset the training features
                 if self.cont_training == "image" or self.cont_training == "off":
                     self._reset_train_features()
@@ -1307,7 +1312,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_predict(self, event=None):
         """Predict the segmentation of the currently viewed frame based
-        on a classifier trained with annotations"""
+        on a classifier trained with annotations."""
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1374,16 +1379,8 @@ class ConvPaintWidget(QWidget):
             image_plane = self._get_current_plane_norm()
             in_channels = self._parse_in_channels(self.input_channels)
 
-            # Check if pca and kmeans are numbers, warn and set to 0 if not; make integers from strings
-            if not self.features_pca_components.isdigit():
-                if self.features_pca_components: # If it's not empty
-                    warnings.warn('PCA components must be an integer. Turning off PCA.')
-                self.features_pca_components = '0'
-            if not self.features_kmeans_clusters.isdigit():
-                if self.features_kmeans_clusters: # If it's not empty
-                    warnings.warn('KMeans clusters must be an integer. Turning off KMeans.')
-                self.features_kmeans_clusters = '0'
-            pca, kmeans = int(self.features_pca_components), int(self.features_kmeans_clusters)
+            # Check and parse PCA and Kmeans parameters
+            pca, kmeans = self._check_parse_pca_kmeans()
 
             # Get feature image; skip norm as it is done above
             feature_image = self.cp_model.get_feature_image(image_plane, in_channels=in_channels, skip_norm=True,
@@ -1411,7 +1408,7 @@ class ConvPaintWidget(QWidget):
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
-        on a classifier model trained with annotations"""
+        on a classifier model trained with annotations."""
         
         img = self._get_selected_img(check=True)
         data_dims = self._get_data_dims(img)
@@ -1467,7 +1464,57 @@ class ConvPaintWidget(QWidget):
             self.viewer.window._status_bar._toggle_activity_dock(False)
 
     def _on_get_feature_image_all(self):
-        return  # Not (yet) implemented for stacks
+        """Get the feature image for all frames based
+        on the current feature extractor and show it in a new layer."""
+
+        img = self._get_selected_img(check=True)
+        data_dims = self._get_data_dims(img)
+        if data_dims not in ['3D_single', '3D_RGB', '4D']:
+            raise Exception(f'Image stack has wrong dimensionality {data_dims}')
+
+        # Start feature extraction
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
+
+        # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
+        image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        pca, kmeans = self._check_parse_pca_kmeans()
+        # Step through the stack and predict each image
+        num_steps = image_stack_norm.shape[-3]
+        for step in progress(range(num_steps)):
+
+            # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
+            image = image_stack_norm[..., step, :, :]
+
+            # Predict the current step; skip normalization as it is done above
+            in_channels = self._parse_in_channels(self.input_channels)
+            # Get feature image; skip norm as it is done above
+            feature_image = self.cp_model.get_feature_image(image, in_channels=in_channels, skip_norm=True,
+                                                            pca_components=pca,
+                                                            kmeans_clusters=kmeans)
+
+            # In the first iteration, check if we need to create a new probas layer
+            # (we need the information about the number of classes)
+            if step == 0:
+                # Check if we need to create a new features layer
+                num_features = feature_image.shape[0] if not kmeans else 0
+                self._check_create_features_layer(num_features)
+                # Set the flag to False, so we don't create a new layer every time
+                self.new_features = False
+
+            # Add the slices to the segmentation and probabilities layers
+            if kmeans:
+                self.viewer.layers[self.features_prefix].data[step] = feature_image
+                self.viewer.layers[self.features_prefix].refresh()
+            else:
+                self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
+                self.viewer.layers[self.features_prefix].refresh()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
+
 
     # Load/Save
 
@@ -1992,9 +2039,9 @@ class ConvPaintWidget(QWidget):
 
         # If we replace a current layer, we can backup the old one, and remove it
         if features_exists:
-            same_num_features = self.viewer.layers[self.features_prefix].data.shape[0] == num_features
+            same_num_features = (self.viewer.layers[self.features_prefix].data.shape[0] == num_features) & (num_features != 0)
             both_kmeans = (self.viewer.layers[self.features_prefix].data.shape == spatial_dims) & (num_features == 0)
-            same_dim = same_num_features and both_kmeans
+            same_dim = same_num_features or both_kmeans
             if self.new_features or not same_dim:
                 # Backup the old features layer if keep_layers is set (and the layer exists)
                 if self.keep_layers:
@@ -2162,16 +2209,21 @@ class ConvPaintWidget(QWidget):
 
     def _reset_predict_buttons(self):
         """Enable or disable predict buttons based on the current state."""
-        # We need a trained model and an image layer needs to be selected
-        if self.trained and self.image_layer_selection_widget.value is not None:
+        # An image layer needs to be selected
+        if self.image_layer_selection_widget.value is not None:
             data = self._get_selected_img()
             data_dims = self._get_data_dims(data)
-            self.segment_btn.setEnabled(True)
             is_stacked = data_dims in ['4D', '3D_single', '3D_RGB']
-            self.segment_all_btn.setEnabled(is_stacked)
-        else:
+            # We need a trained model to enable segmentation
+            if self.trained:
+                self.segment_btn.setEnabled(True)
+                self.segment_all_btn.setEnabled(is_stacked)
+            # ... but not for getting features
+            self.btn_add_features_stack.setEnabled(is_stacked)
+        else: # No image selected
             self.segment_btn.setEnabled(False)
             self.segment_all_btn.setEnabled(False)
+            self.btn_add_features_stack.setEnabled(False)
 
     def _update_gui_fe_layers_from_model(self, cp_model=None):
         """Update GUI FE layer selection based on the current (e.g. loaded) model."""
@@ -2703,12 +2755,13 @@ class ConvPaintWidget(QWidget):
         pie_labels = [f'{count} ({perc:.1f}%)' for count, perc in zip(counts, percs)]
 
         # Create a donut chart
+        class_list = [c for c in range(1, classes.max()+1)]
         fig, ax = plt.subplots(figsize=(8, 4), subplot_kw=dict(aspect="equal"))
         if self.labels_cmap is not None:
-            colors = [self.labels_cmap.map(i+1) for i in range(len(classes))]
+            colors = [self.labels_cmap.map(i) for i in class_list if i in classes]
         else:
-            cmap = plt.get_cmap('tab20', len(classes))
-            colors = [cmap(i) for i in range(len(classes))]
+            cmap = plt.get_cmap('tab20', len(class_list))
+            colors = [cmap(i) for i in class_list if i in classes]
         
         # Use custom labels with count and percentage
         wedges, _ = ax.pie(
@@ -2832,6 +2885,20 @@ class ConvPaintWidget(QWidget):
         # Get the data from the selected image layer
         img_data = in_img.data
         in_img.data = np.swapaxes(img_data, 0, 1)  # Swap the first two axes
+
+    def _check_parse_pca_kmeans(self):
+        """Check and parse the PCA and KMeans settings for continuous training/memory_mode."""
+        # Check if pca and kmeans are numbers, warn and set to 0 if not; make integers from strings
+        if not self.features_pca_components.isdigit():
+            if self.features_pca_components: # If it's not empty
+                warnings.warn('PCA components must be an integer. Turning off PCA.')
+            self.features_pca_components = '0'
+        if not self.features_kmeans_clusters.isdigit():
+            if self.features_kmeans_clusters: # If it's not empty
+                warnings.warn('KMeans clusters must be an integer. Turning off KMeans.')
+            self.features_kmeans_clusters = '0'
+        pca, kmeans = int(self.features_pca_components), int(self.features_kmeans_clusters)
+        return pca, kmeans
 
     @staticmethod
     def _annot_to_sparse(annot):
