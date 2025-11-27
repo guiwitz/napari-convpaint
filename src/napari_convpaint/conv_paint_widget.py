@@ -2786,7 +2786,6 @@ class ConvPaintWidget(QWidget):
             return
         classes = np.unique(labels)
         counts = np.array([np.sum(labels == c) for c in classes])
-        print(trained_data)
         percs = counts / np.sum(counts) * 100
 
         # Get class display names from a list, assuming class numbers start at 1
