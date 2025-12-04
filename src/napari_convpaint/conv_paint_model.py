@@ -73,6 +73,15 @@ class ConvpaintModel:
                   "ilastik": Param(fe_name="ilastik_2d"),
                   "dino-jafar": Param(fe_name="dino_jafar_small"),
                   }
+    
+    allowed_param_vals = {
+        'channel_mode': ['multi', 'rgb', 'single'],
+        'normalize': [1, 2, 3],
+        'image_downsample': list(range(-20, 21)), # from -20 (upsampling by factor 20) to 20 (downsampling by factor 20)
+        'seg_smoothening': list(range(0, 21)), # from 0 (no smoothening) to 20
+        'umpatch_order': list(range(0, 6)), # from 0 (nearest) to 5
+        'fe_order': list(range(0, 6)), # from 0 (nearest) to 5
+    }
 
     def __init__(self, alias=None, model_path=None, param=None, fe_name=None, **kwargs):
         """
@@ -330,6 +339,9 @@ class ConvpaintModel:
         """
         if not key in Param.get_keys():
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
+            return
+        if key in self.allowed_param_vals and val not in self.allowed_param_vals[key]:
+            warnings.warn(f'Parameter "{key}" has value "{val}", which is not in the allowed values: {self.allowed_param_vals[key]}')
             return
         # if val == self._param.get(key):
         #     print(f"Parameter '{key}' already has the value {val}.")
