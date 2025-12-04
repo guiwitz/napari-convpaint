@@ -1494,52 +1494,55 @@ class ConvPaintWidget(QWidget):
         pca, kmeans = self._check_parse_pca_kmeans()
         in_channels = self._parse_in_channels(self.input_channels)
 
-        # Get feature image for entire stack; skip norm as it is done above
-        feature_image = self.cp_model.get_feature_image(image_stack_norm, in_channels=in_channels, skip_norm=True,
-                                                            pca_components=pca,
-                                                            kmeans_clusters=kmeans)
-        
-        # Check if we need to create a new features layer
-        num_features = feature_image.shape[0] if not kmeans else 0
-        self._check_create_features_layer(num_features)
-        # Set the flag to False, so we don't create a new layer every time
-        self.new_features = False
-        # Update features layer
-        self.viewer.layers[self.features_prefix].data = feature_image
+        if kmeans:
+            # Get feature image for entire stack; skip norm as it is done above
+            feature_image = self.cp_model.get_feature_image(image_stack_norm, in_channels=in_channels, skip_norm=True,
+                                                                pca_components=pca,
+                                                                kmeans_clusters=kmeans)
 
-        # Step through the stack and predict each image
-        # num_steps = image_stack_norm.shape[-3]
-        # for step in progress(range(num_steps)):
+            # Check if we need to create a new features layer
+            # num_features = feature_image.shape[0] if not kmeans else 0
+            # self._check_create_features_layer(num_features)
+            self._check_create_features_layer(0)
+            # Set the flag to False, so we don't create a new layer every time
+            self.new_features = False
+            # Update features layer
+            self.viewer.layers[self.features_prefix].data = feature_image
 
-        #     # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
-        #     image = image_stack_norm[..., step, :, :]
+        else: # No kmeans, can do step-by-step to save memory (and show progress)
+            # Step through the stack and predict each image
+            num_steps = image_stack_norm.shape[-3]
+            for step in progress(range(num_steps)):
 
-        #     # Predict the current step; skip normalization as it is done above
-        #     # Get feature image; skip norm as it is done above
-        #     feature_image = self.cp_model.get_feature_image(image, in_channels=in_channels, skip_norm=True,
-        #                                                     pca_components=pca,
-        #                                                     kmeans_clusters=kmeans)
+                # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
+                image = image_stack_norm[..., step, :, :]
 
-        #     # In the first iteration, check if we need to create a new probas layer
-        #     # (we need the information about the number of classes)
-        #     if step == 0:
-        #         # Check if we need to create a new features layer
-        #         num_features = feature_image.shape[0] if not kmeans else 0
-        #         self._check_create_features_layer(num_features)
-        #         # Set the flag to False, so we don't create a new layer every time
-        #         self.new_features = False
+                # Predict the current step; skip normalization as it is done above
+                # Get feature image; skip norm as it is done above
+                feature_image = self.cp_model.get_feature_image(image, in_channels=in_channels, skip_norm=True,
+                                                                pca_components=pca,
+                                                                kmeans_clusters=kmeans)
 
-        #     # Add the slices to the segmentation and probabilities layers
-        #     if kmeans:
-        #         self.viewer.layers[self.features_prefix].data[step] = feature_image
-        #         self.viewer.layers[self.features_prefix].refresh()
-        #     else:
-        #         self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
-        #         self.viewer.layers[self.features_prefix].refresh()
+                # In the first iteration, check if we need to create a new features layer
+                # (we need the information about the number of classes)
+                if step == 0:
+                    # Check if we need to create a new features layer
+                    num_features = feature_image.shape[0] if not kmeans else 0
+                    self._check_create_features_layer(num_features)
+                    # Set the flag to False, so we don't create a new layer every time
+                    self.new_features = False
 
-        with warnings.catch_warnings():
-            warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(False)
+                # Add the slices to the segmentation and probabilities layers
+                # if kmeans:
+                #     self.viewer.layers[self.features_prefix].data[step] = feature_image
+                #     self.viewer.layers[self.features_prefix].refresh()
+                # else:
+                self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
+                self.viewer.layers[self.features_prefix].refresh()
+
+            with warnings.catch_warnings():
+                warnings.simplefilter(action="ignore", category=FutureWarning)
+                self.viewer.window._status_bar._toggle_activity_dock(False)
 
 
     # Load/Save
