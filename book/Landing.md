@@ -6,7 +6,7 @@ Head to the **Getting Started** section to learn how to [install the plugin](htt
 
 Have a look at some possible use cases in the **[Examples section](https://guiwitz.github.io/napari-convpaint/book/Timelapse.html)**.
 
-Read through the **[Convpaint API section](https://guiwitz.github.io/napari-convpaint/book/Convpaint_api_tutorial.html)** to see how to use the plugin programmatically and to learn details about the [ConvpaintModel class](https://guiwitz.github.io/napari-convpaint/book/ConvpaintModel.html) that lies behind the napari plugin and API.
+In the **API section**, read the simple introduction on how to [use Convpaint together with Python](https://guiwitz.github.io/napari-convpaint/book/Convpaint_api_introduction.html), or go through the more comprehensive [Convpaint API tutorial](https://guiwitz.github.io/napari-convpaint/book/Convpaint_api_tutorial.html) to see how to use the plugin programmatically - and learn important details about the [ConvpaintModel class](https://guiwitz.github.io/napari-convpaint/book/ConvpaintModel.html) that lies behind the napari plugin and API.
 
 Head to the **In-depth explanation** section to learn [how Convpaint works](https://guiwitz.github.io/napari-convpaint/book/Description.html) behind the scenes, and to read up about all the available [parameters and settings](https://guiwitz.github.io/napari-convpaint/book/Params_settings.html) as well as the provided [feature extractor models](https://guiwitz.github.io/napari-convpaint/book/FE_descriptions.html).
 
