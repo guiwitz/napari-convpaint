@@ -66,8 +66,8 @@ class ConvPaintWidget(QWidget):
         self.setLayout(self.main_layout)
 
         # Create and add tabs
-        self.tab_names = ['Home', 'Model options', 'Class labels', 'Advanced'] #['Home', 'Project', 'Model options']
-        self.tabs = TabSet(self.tab_names, tab_layouts=[None, QGridLayout(), None, None]) # [None, None, QGridLayout()])
+        self.tab_names = ['Home', 'Model options', 'Class labels', 'Files', 'Advanced'] #['Home', 'Project', 'Model options']
+        self.tabs = TabSet(self.tab_names, tab_layouts=[None, QGridLayout(), None, None, None]) # [None, None, QGridLayout()])
         tab_bar = self.tabs.tabBar()
         tab_bar.setSizePolicy(tab_bar.sizePolicy().horizontalPolicy(), tab_bar.sizePolicy().verticalPolicy())
 
@@ -227,7 +227,7 @@ class ConvPaintWidget(QWidget):
         # Project button
         # self.train_classifier_on_project_btn = QPushButton('Train on Project')
         # self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Project tab')
-        # self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 1,1,1,1)
+        # self.train_group.glayout.addWidget(self.train_classifier_on_project_btn, 2,0,1,2)
         # if init_project is False:
         #     self.train_classifier_on_project_btn.setEnabled(False)
         self.segment_btn = QPushButton('Segment image')
@@ -444,12 +444,6 @@ class ConvPaintWidget(QWidget):
         self.advanced_note.setWordWrap(True)
         self.advanced_note_group.glayout.addWidget(self.advanced_note, 0, 0, 1, 2)
 
-        # Text to warn the user about their responsibility
-        # self.advanved_labels_note = QLabel("Important: When changing any of these options, it is the user's responsibility to ensure the dimensions of images and annotations are compatible.\n")
-        # self.advanved_labels_note.setStyleSheet(style_for_infos)
-        # self.advanved_labels_note.setWordWrap(True)
-        # self.advanced_labels_group.glayout.addWidget(self.advanved_labels_note, 0, 0, 1, 2)
-
         # Checkbox to turn off automatic addition of annot/segmentation layers
         self.check_auto_add_layers = QCheckBox('Auto add annotations')
         self.check_auto_add_layers.setToolTip('Automatically add annotation layer when selecting images')
@@ -482,12 +476,6 @@ class ConvPaintWidget(QWidget):
         # Ensure both columns are stretched equally
         self.advanced_labels_group.glayout.setColumnStretch(0, 1)
         self.advanced_labels_group.glayout.setColumnStretch(1, 1)
-
-        # Text to warn the user about their responsibility
-        # self.advanced_training_note = QLabel("Important: When changing or using any of these options, it is the user's responsibility to ensure the dimensions of images are compatible.\n")
-        # self.advanced_training_note.setStyleSheet(style_for_infos)
-        # self.advanced_training_note.setWordWrap(True)
-        # self.advanced_training_group.glayout.addWidget(self.advanced_training_note, 0, 0, 1, 4)
 
         # Button for training on selected images
         self.btn_train_on_selected = QPushButton('Train on selected data')
@@ -561,10 +549,6 @@ class ConvPaintWidget(QWidget):
         self.check_add_probas.setChecked(self.add_probas)
         self.advanced_output_group.glayout.addWidget(self.check_add_probas, 0, 1, 1, 1)
 
-        # Separator for unsupervised outputs
-        # self.unsupervised_outputs_label = QLabel()
-        # self.advanced_unsupervised_group.glayout.addWidget(self.unsupervised_outputs_label, 1, 0, 1, 2)
-
         # Button to add features for the current plane
         self.btn_add_features = QPushButton('Get features image')
         self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane')
@@ -581,7 +565,6 @@ class ConvPaintWidget(QWidget):
         self.text_features_pca.setText(self.features_pca_components)
         self.advanced_unsupervised_group.glayout.addWidget(QLabel('PCA components (0 = off)'), 0, 0, 1, 2)
         self.advanced_unsupervised_group.glayout.addWidget(self.text_features_pca, 0, 2, 1, 2)
-
         # Kmeans option for the features
         self.text_features_kmeans = QtWidgets.QLineEdit()
         self.text_features_kmeans.setPlaceholderText('e.g. 3 or 5')
@@ -595,6 +578,7 @@ class ConvPaintWidget(QWidget):
         # If project mode is initially activated, add project tab and widget
         # if init_project is True:
         #     self._on_use_project()
+        self._on_use_project()
 
         # === CONNECTIONS ===
 
@@ -800,6 +784,7 @@ class ConvPaintWidget(QWidget):
         self.btn_add_features.clicked.connect(self._on_get_feature_image)
         # Button to add features for stack (all planes)
         self.btn_add_features_stack.clicked.connect(self._on_get_feature_image_all)
+
 ### Define the behaviour in the class labels tab
 
     # Cass Labels
@@ -1115,7 +1100,7 @@ class ConvPaintWidget(QWidget):
             self.add_layers_btn.setEnabled(False)
 
         # If the option is activated, select annotation layer according to the prefix and image name
-        if self.auto_select_annot:
+        if self.auto_select_annot and not getattr(self, "_block_layer_select", False):
             self._auto_select_annot_layer()
 
         # Allow other methods again to add layers if that was the case before
@@ -1128,7 +1113,11 @@ class ConvPaintWidget(QWidget):
 
     def _delayed_on_select_layer(self, event=None):
         """Delay the selection of the image layer to allow for napari operations to happen first."""
+        print("Doing delayed on select layer")
+        self._block_layer_select = False
         QTimer.singleShot(100, lambda: self._on_select_layer())
+        # Only set the block flag again after some time, so auto selection is triggered, but only once
+        QTimer.singleShot(200, lambda: setattr(self, "_block_layer_select", True))
 
     def _auto_select_annot_layer(self):
         """Automatically select an annotation layer according to the prefix and image name."""
@@ -1255,23 +1244,32 @@ class ConvPaintWidget(QWidget):
     def _on_use_project(self, event=None):
         """Add widget for multi-image project management if not already added."""
 
-        if self.check_use_project.isChecked():
-            if self.project_widget is None:
-                from napari_annotation_project.project_widget import ProjectWidget
-                self.project_widget = ProjectWidget(napari_viewer=self.viewer)
+        # if self.check_use_project.isChecked():
+        #     if self.project_widget is None:
+        from napari_annotation_project.project_widget import ProjectWidget
+        self.project_widget = ProjectWidget(napari_viewer=self.viewer)
 
-                # self.tabs.add_named_tab('Project', self.project_widget)
-                self.tabs.add_named_tab('Project', self.project_widget.file_list)
-                self.tabs.add_named_tab('Project', self.project_widget.btn_add_file)
-                self.tabs.add_named_tab('Project', self.project_widget.btn_remove_file)
-                self.tabs.add_named_tab('Project', self.project_widget.btn_save_annotation)
-                self.tabs.add_named_tab('Project', self.project_widget.btn_load_project)
+        tab_name = 'Files'
+
+        # Add the project widget to a new tab
+        # self.tabs.add_named_tab(tab_name, self.project_widget)
+        self.tabs.add_named_tab(tab_name, self.project_widget.file_list)
+        self.tabs.add_named_tab(tab_name, self.project_widget.btn_add_file)
+        self.tabs.add_named_tab(tab_name, self.project_widget.btn_remove_file)
+        self.tabs.add_named_tab(tab_name, self.project_widget.btn_save_annotation)
+        self.tabs.add_named_tab(tab_name, self.project_widget.btn_load_project)
+
+        # Add the train on project button to the tab
+        self.train_classifier_on_project_btn = QPushButton('Train on Files')
+        self.train_classifier_on_project_btn.setToolTip('Train on all images loaded in Files tab')
+        self.tabs.add_named_tab(tab_name, self.train_classifier_on_project_btn)
+        self.train_classifier_on_project_btn.clicked.connect(self._on_train_on_project)
             
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), True)
-            self.train_classifier_on_project_btn.setEnabled(True)
-        else:
-            self.tabs.setTabEnabled(self.tabs.tab_names.index('Project'), False)
-            self.train_classifier_on_project_btn.setEnabled(False)
+        #     self.tabs.setTabEnabled(self.tabs.tab_names.index(tab_name), True)
+        #     self.train_classifier_on_project_btn.setEnabled(True)
+        # else:
+        #     self.tabs.setTabEnabled(self.tabs.tab_names.index(tab_name), False)
+        #     self.train_classifier_on_project_btn.setEnabled(False)
 
     def _on_train_on_project(self):
         """Train classifier on all annotations in project.
@@ -1289,23 +1287,27 @@ class ConvPaintWidget(QWidget):
         with progress(total=0) as pbr:
             pbr.set_description(f"Training")
             self.current_model_path = 'in training'
-            all_features, all_targets = [], []
+            # all_features, all_targets = [], []
+            all_imgs, all_annots = [], []
+            in_channels = self._parse_in_channels(self.input_channels)
             for ind in range(num_files):
                 self.project_widget.file_list.setCurrentRow(ind)
-
                 image_stack_norm = self._get_data_channel_first_norm()
                 annots = self.annotation_layer_selection_widget.value.data
-                in_channels = self._parse_in_channels(self.input_channels)
-                features, targets = self.cp_model.get_features_current_layers(image_stack_norm, annots, in_channels=in_channels)
-                if features is None:
-                    continue
-                all_features.append(features)
-                all_targets.append(targets)
+                all_imgs.append(image_stack_norm)
+                all_annots.append(annots)
+                # in_channels = self._parse_in_channels(self.input_channels)
+                # features, targets = self.cp_model.get_features_current_layers(image_stack_norm, annots, in_channels=in_channels)
+                # if features is None:
+                    # continue
+                # all_features.append(features)
+                # all_targets.append(targets)
             
-            all_features = np.concatenate(all_features, axis=0)
-            all_targets = np.concatenate(all_targets, axis=0)
+            self.cp_model.train(all_imgs, all_annots, in_channels=in_channels, skip_norm=True)
+            # all_features = np.concatenate(all_features, axis=0)
+            # all_targets = np.concatenate(all_targets, axis=0)
 
-            self.cp_model._clf_train(all_features, all_targets)
+            # self.cp_model._clf_train(all_features, all_targets)
 
             self.current_model_path = 'trained, unsaved'
             self.trained = True
@@ -1324,6 +1326,10 @@ class ConvPaintWidget(QWidget):
     def _on_predict(self, event=None):
         """Predict the segmentation of the currently viewed frame based
         on a classifier trained with annotations."""
+
+        if not (self.add_seg or self.add_probas):
+            warnings.warn('Neither segmentation nor probabilities output selected to be added. Nothing to do.')
+            return
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1775,6 +1781,7 @@ class ConvPaintWidget(QWidget):
         self.class_icons = [] # List of class icons
         self.cmap_flag = False # Flag to prevent infinite loops when changing colormaps
         self.labels_cmap = None # Colormap for the labels (annotations and segmentation)
+        self._block_layer_select = True # Flag to block layer selection events temporarily
 
     ### Model Tab
 
