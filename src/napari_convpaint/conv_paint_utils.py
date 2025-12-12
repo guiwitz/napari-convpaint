@@ -5,6 +5,8 @@ from scipy.ndimage import gaussian_filter
 # from scipy.ndimage import median_filter
 import skimage.transform
 import skimage.morphology as morph
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
 from joblib import Parallel, delayed
 import einops as ein
 #import xgboost as xgb
@@ -12,6 +14,50 @@ from torch.nn.functional import interpolate as torch_interpolate
 from matplotlib import pyplot as plt
 import os
 import requests
+
+
+### PCA and Kmeans on feature images
+
+def apply_pca_to_f_image(feature_img, n_components, norm=True):
+
+    spatial_dims = feature_img.shape[1:]
+
+    feature_img = np.moveaxis(feature_img, 0, -1) # Move features to last dimension
+    num_features = feature_img.shape[-1]
+    if n_components > num_features:
+        warnings.warn(f"Requested number of PCA components ({n_components}) exceeds number of features ({num_features}). Using {num_features} components instead.")
+        n_components = num_features
+    features_linear = feature_img.reshape(-1, num_features)
+
+    pca = PCA(n_components=n_components)
+    princ_comp = pca.fit_transform(features_linear) # returns (n_samples, n_components)
+
+    if norm:
+        pc_norm = (princ_comp - np.min(princ_comp)) / (np.max(princ_comp) - np.min(princ_comp))
+    else:
+        pc_norm = princ_comp
+
+    pc_norm = pc_norm.reshape(spatial_dims + (n_components,)) # Reshape back to spatial dimensions
+    pc_norm = np.moveaxis(pc_norm, -1, 0) # Move features back to first dimension
+
+    return pc_norm
+
+def apply_kmeans_to_f_image(feature_img, n_clusters, random_state=None):
+    
+    spatial_dims = feature_img.shape[1:]
+
+    feature_img = np.moveaxis(feature_img, 0, -1) # Move features to last dimension
+    num_features = feature_img.shape[-1]
+    features_linear = feature_img.reshape(-1, num_features)
+
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+    kmeans_labels = kmeans.fit_predict(features_linear) # returns (n_samples,)
+
+    kmeans_labels = kmeans_labels.reshape(spatial_dims) # Reshape back to spatial dimensions
+
+    kmeans_labels = kmeans_labels.astype(np.uint8) + 1 # Make sure labels start at 1
+
+    return kmeans_labels
 
 
 ### MODEL DOWNLOAD

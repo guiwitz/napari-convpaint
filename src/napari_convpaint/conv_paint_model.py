@@ -1,5 +1,6 @@
 
 import pickle
+from pyexpat import features
 from catboost import CatBoostClassifier
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
@@ -72,6 +73,15 @@ class ConvpaintModel:
                   "ilastik": Param(fe_name="ilastik_2d"),
                   "dino-jafar": Param(fe_name="dino_jafar_small"),
                   }
+    
+    allowed_param_vals = {
+        'channel_mode': ['multi', 'rgb', 'single'],
+        'normalize': [1, 2, 3],
+        'image_downsample': list(range(-20, 21)), # from -20 (upsampling by factor 20) to 20 (downsampling by factor 20)
+        'seg_smoothening': list(range(0, 21)), # from 0 (no smoothening) to 20
+        'umpatch_order': list(range(0, 6)), # from 0 (nearest) to 5
+        'fe_order': list(range(0, 6)), # from 0 (nearest) to 5
+    }
 
     def __init__(self, alias=None, model_path=None, param=None, fe_name=None, **kwargs):
         """
@@ -329,6 +339,9 @@ class ConvpaintModel:
         """
         if not key in Param.get_keys():
             warnings.warn(f'Parameter "{key}" not found in the model parameters.')
+            return
+        if key in self.allowed_param_vals and val not in self.allowed_param_vals[key]:
+            warnings.warn(f'Parameter "{key}" has value "{val}", which is not in the allowed values: {self.allowed_param_vals[key]}')
             return
         # if val == self._param.get(key):
         #     print(f"Parameter '{key}' already has the value {val}.")
@@ -721,11 +734,52 @@ class ConvpaintModel:
         """
         probas = self._predict(image, add_seg=False, in_channels=in_channels, skip_norm=skip_norm, use_dask=use_dask)
         return probas
+    
+    def get_feature_image(self, data, in_channels=None, skip_norm=False, pca_components=0, kmeans_clusters=0):
+        """
+        Returns the feature images extracted by the feature extractor model.
+        For details, see the `_extract_features` method.
+        
+        Parameters
+        ----------
+        data : np.ndarray or list[np.ndarray]
+            Image(s) to extract features from
+        memory_mode : bool, optional
+            Whether to use memory mode.
+            If True, the annotations are registered and updated, and only features for new pixels are extracted.
+        img_ids : str or list[str], optional
+            Image IDs to register the annotations with (when using memory_mode)
+        in_channels : list[int], optional
+            List of channels to use for feature extraction
+        skip_norm : bool, optional
+            Whether to skip normalization of the images before feature extraction.
+            If True, the images are not normalized according to the parameter `normalize` in the model parameters.
 
+        Returns
+        ----------
+        features : np.ndarray or list[np.ndarray]
+            Extracted features of the image(s) or list of features for each image if input is a list.
+            Reshaped to the input imges' shapes. Features dimension is added first (FHW or FZHW).    
+        """
+        # Extract features
+        features = self._extract_features(
+                data,
+                annotations=None,
+                restore_input_form=True,
+                memory_mode=False, # Only valid when using annotations
+                img_ids=None, # Only needed when using memory_mode
+                in_channels=in_channels,
+                skip_norm=skip_norm,
+                pca_components=pca_components,
+                kmeans_clusters=kmeans_clusters
+            )
 
-    def get_feature_image(self, data, annotations=None, restore_input_form=True,
+        return features
+
+    def _extract_features(self, data, annotations=None, restore_input_form=True,
                           memory_mode=False, img_ids=None,
-                          in_channels=None, skip_norm=False):
+                          in_channels=None, skip_norm=False,
+                          pca_components=0, kmeans_clusters=0):
         """
         Returns the features of images extracted by the feature extractor model.
 
@@ -910,6 +964,10 @@ class ConvpaintModel:
         keep_patched = (not use_annots) and self.fe_model.gives_patched_features()
         features = [self.fe_model.get_feature_pyramid(d, params_for_extract, patched=keep_patched)
                     for d in data]
+        
+        if pca_components:
+            features = [conv_paint_utils.apply_pca_to_f_image(f, n_components=pca_components)
+                        for f in features]
 
         # --- Raw early return ----------------------------------------------------
         if not restore_input_form:
@@ -918,6 +976,13 @@ class ConvpaintModel:
             if use_annots:
                 return features, annotations
             return features
+
+        # Apply Kmeans clustering if requested (afterwards treat just like a segmentation)
+        class_output = False # Whether the output is a class prediction (change if we do Kmeans)
+        if kmeans_clusters: # NOTE: random_state -> fix for reproducibility; OR None for random
+            features = [conv_paint_utils.apply_kmeans_to_f_image(f, n_clusters=kmeans_clusters, random_state=0)
+                        for f in features]
+            class_output = True
 
         # --- Reshape back to original spatial form (for display) ---------
         padded_shapes   = self.padded_shapes # After both down/upsampling and padding
@@ -931,11 +996,18 @@ class ConvpaintModel:
                 padded_shapes[i],
                 pre_pad_shapes[i],
                 original_shapes[i],
-                class_preds=False,
+                class_preds=class_output,
                 patched_features=self.fe_model.gives_patched_features()
             )
             for i in range(len(features))
         ]
+
+        # Smoothen the Kmeans output if desired
+        if kmeans_clusters and self._param.seg_smoothening > 1:
+            kernel = skimage.morphology.disk(self._param.seg_smoothening)
+            if features[0].ndim == 3: # 3D images (all images need to have same dimensionality)
+                kernel = np.expand_dims(kernel, axis=0) # --> add z dimension to kernel
+            features = [skimage.filters.rank.majority(f, footprint=kernel) for f in features]
 
         # Final dimension restoration (remove singleton Z if needed)
         features = [self._restore_dims(features[i], input_shapes[i])
@@ -1057,8 +1129,8 @@ class ConvpaintModel:
             return self.classifier, None, None
 
         if not memory_mode:
-            # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, in_channels=in_channels, skip_norm=skip_norm)
+            # Use _extract_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
+            feature_parts, annot_parts = self._extract_features(data, annotations, restore_input_form=False, memory_mode=memory_mode, in_channels=in_channels, skip_norm=skip_norm)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [conv_paint_utils.get_features_targets(f, a)
                         for f, a in zip(feature_parts, annot_parts)] # f and t are linearized
@@ -1068,8 +1140,8 @@ class ConvpaintModel:
             targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
 
         else: # memory mode
-            # Use get_feature_image to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts, coords, img_ids, scale = self.get_feature_image(data, annotations, restore_input_form=False, memory_mode=memory_mode, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
+            # Use _extract_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
+            feature_parts, annot_parts, coords, img_ids, scale = self._extract_features(data, annotations, restore_input_form=False, memory_mode=memory_mode, img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
 
@@ -1273,7 +1345,7 @@ class ConvpaintModel:
             probas = [self._parallel_predict_image(d, return_proba=True, use_dask=use_dask)
                       for d in data]
         else:
-            probas = self._predict_image(data, return_proba=True) # Can handle lists
+            probas = self._predict_image(data, return_proba=True) # Can handle lists directly
 
         # Restore input dimensionality (especially see if we want to remove z dimension)
         probas = [self._restore_dims(probas[i], input_shapes[i])
@@ -1309,7 +1381,7 @@ class ConvpaintModel:
 
         # Check if features are given, if not, extract them
         if feature_img is None:
-            feature_img = self.get_feature_image(image,
+            feature_img = self._extract_features(image,
                                             restore_input_form=False,
                                             in_channels=None, # already extracted outside
                                             skip_norm=True)  # already normalized outside
@@ -1824,7 +1896,7 @@ class ConvpaintModel:
         original_shape : tuple
             The original shape before any padding and rescaling: (..., Z, H_orig, W_orig)
         class_preds : bool
-            If True, we’re dealing with integer class labels (use nearest‐neighbor).
+            If True, we’re dealing with integer class labels (without additional dimension).
         patched_features : bool
             If True, the features were extracted on a patch‐size resolution (e.g. DINOv2),
             so we need to rescale the outputs to the patch resolution before upsampling.
