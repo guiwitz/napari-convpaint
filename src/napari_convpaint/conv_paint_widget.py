@@ -590,7 +590,14 @@ class ConvPaintWidget(QWidget):
         # Add connections and initialize by setting default model and params
         self._add_connections()
         if self.image_layer_selection_widget.value is not None:
-            self._on_select_layer()
+            try:
+                self._on_select_layer()
+            except Exception:
+                warnings.warn(
+                    f'Could not initialize with the selected image '
+                    f'(ndim={self.image_layer_selection_widget.value.ndim}). '
+                    f'Please select a compatible image (2D-4D).'
+                )
         self._reset_model()
 
         # === KEY BINDINGS ===
@@ -1098,6 +1105,16 @@ class ConvPaintWidget(QWidget):
 
     def _on_select_layer(self, newtext=None):
         """Assign the layer to segment and update data radio buttons accordingly"""
+
+        # Check if the selected image has compatible dimensions
+        img_check = self.image_layer_selection_widget.value
+        if img_check is not None and (img_check.ndim < 2 or img_check.ndim > 4):
+            warnings.warn(
+                f'Selected image has {img_check.ndim} dimensions, but only '
+                f'2D-4D images are supported. Please select a compatible image.'
+            )
+            self.add_layers_btn.setEnabled(False)
+            return
 
         # Check if it is the same layer
         was_same = ((self.selected_channel is not None) and
@@ -2227,6 +2244,8 @@ class ConvPaintWidget(QWidget):
             self.radio_multi_channel.setEnabled(True)
             self.radio_rgb.setEnabled(False)
             self.radio_multi_channel.setChecked(True) # enforce multi
+        else: # Unsupported number of dimensions
+            for x in self.channel_buttons: x.setEnabled(False)
 
     def _reset_radio_norm_choices(self, event=None):
         """Set radio buttons for normalization active/inactive depending on selected image type.
@@ -2644,14 +2663,17 @@ class ConvPaintWidget(QWidget):
         """Get image stats depending on the normalization settings and data dimensions.
         Takes image as given in the viewer (not channel first)."""
 
-        # If no image is selected, set stats to None
+        # If no image is selected or image has unsupported dimensions, set stats to None
         if img is None:
             self.image_mean, self.image_std = None, None
             return
 
         # Assure to have channels dimension first, get the data_dims and normalization mode
-        data = self._get_data_channel_first(img)
         data_dims = self._get_data_dims(img)
+        if data_dims is None:
+            self.image_mean, self.image_std = None, None
+            return
+        data = self._get_data_channel_first(img)
         norm_scope = self.cp_model.get_param("normalize")
 
         # Compute image stats depending on the normalization mode
@@ -2684,7 +2706,8 @@ class ConvPaintWidget(QWidget):
         num_dims = img.ndim
         # Sanity check for number of dimensions
         if (num_dims == 1 or num_dims > 4):
-            raise Exception('Image has wrong number of dimensions')
+            warnings.warn(f'Image has {num_dims} dimensions, but only 2D-4D images are supported.')
+            return None
         
         # 2D can be either single channel or RGB/RGBA (in which case the underlying data is in fact 3D with 3-4 channels as last dim)
         if num_dims == 2:

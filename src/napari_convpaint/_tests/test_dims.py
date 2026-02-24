@@ -279,3 +279,24 @@ def test_RGBT_image(make_napari_viewer, capsys):
     np.testing.assert_array_almost_equal(normalized[0].mean(axis=(1,2)), np.zeros(steps))
     '''
 
+def test_incompatible_image_on_startup(make_napari_viewer):
+    """Test that the plugin loads without crashing when an incompatible image
+    (e.g. 5D) is already present in the viewer. The plugin should handle
+    unsupported image dimensions gracefully instead of crashing during init."""
+
+    # 5D image (e.g. TCZYX) - not supported by convpaint
+    image_5d = np.random.randint(0, 255, (2, 3, 5, 40, 50)).astype(float)
+    viewer = make_napari_viewer()
+    viewer.add_image(image_5d)
+
+    # Plugin should load without crashing even though a 5D image is selected
+    my_widget = ConvPaintWidget(viewer)
+    assert my_widget is not None
+
+    # The widget should still be functional - adding a compatible image later should work
+    image_2d = np.random.randint(0, 255, (100, 100)).astype(float)
+    viewer.add_image(image_2d)
+    my_widget._on_select_layer()
+    img = my_widget._get_selected_img()
+    assert img is not None
+
