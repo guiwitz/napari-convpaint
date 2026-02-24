@@ -121,6 +121,44 @@ def test_RGB(make_napari_viewer, capsys):
     assert ((0 - imagenet_mean < channel_means) & (channel_means < 1 - imagenet_mean)).all()  # means should be in this range
     # np.testing.assert_allclose(normalized.mean(axis=(1,2)), - imagenet_mean / imagenet_std, rtol=0.2)
 
+def test_RGBA(make_napari_viewer, capsys):
+    """RGBA images (4 channels) should be treated as RGB (alpha stripped).
+    Napari loads RGBA as rgb=True, ndim=2, but data.shape[-1]=4."""
+
+    side_len = 100
+    # Create RGBA image (H, W, 4) with uint8 so napari sets rgb=True
+    rgba = np.random.randint(0, 255, (side_len, side_len, 4), dtype=np.uint8)
+    viewer = make_napari_viewer()
+    my_widget = ConvPaintWidget(viewer)
+    viewer.add_image(rgba)
+
+    # Napari should detect this as RGB
+    assert viewer.layers['rgba'].rgb == True
+    assert viewer.layers['rgba'].ndim == 2
+    assert viewer.layers['rgba'].data.shape == (side_len, side_len, 4)
+
+    # Convpaint should handle it as RGB (stripping alpha)
+    my_widget.cp_model.set_params(channel_mode='rgb')
+    data_dims = my_widget._get_data_dims(my_widget._get_selected_img())
+    assert data_dims == '2D_RGB', f"Expected '2D_RGB' but got '{data_dims}'"
+
+    # Annotations should be 2D
+    my_widget._on_add_annot_layer()
+    assert viewer.layers['annotations'].data.ndim == 2
+
+    # Channel-first data should have 3 channels (alpha stripped)
+    img = my_widget._get_selected_img()
+    data_cf = my_widget._get_data_channel_first(img)
+    assert data_cf.shape == (3, side_len, side_len), f"Expected (3, {side_len}, {side_len}) but got {data_cf.shape}"
+
+    # Stats should work with 3 channels
+    my_widget._compute_image_stats(img)
+    assert my_widget.image_mean.shape == (3, 1, 1)
+
+    # Normalization should work
+    normalized = my_widget._get_data_channel_first_norm(img)
+    assert normalized.shape == (3, side_len, side_len)
+
 def test_4d_image(make_napari_viewer, capsys):
     """For a 4D data (C, T, X, Y) check that normalization is done properly
     per channel and per stack or image"""
@@ -289,4 +327,24 @@ def test_3d_stack_training_with_dask_input(make_napari_viewer, capsys):
     model.train(stack_dask, annot, memory_mode=True, img_ids='dask_image')
 
     assert model.classifier is not None, "Classifier should be trained"
+def test_incompatible_image_on_startup(make_napari_viewer):
+    """Test that the plugin loads without crashing when an incompatible image
+    (e.g. 5D) is already present in the viewer. The plugin should handle
+    unsupported image dimensions gracefully instead of crashing during init."""
+
+    # 5D image (e.g. TCZYX) - not supported by convpaint
+    image_5d = np.random.randint(0, 255, (2, 3, 5, 40, 50)).astype(float)
+    viewer = make_napari_viewer()
+    viewer.add_image(image_5d)
+
+    # Plugin should load without crashing even though a 5D image is selected
+    my_widget = ConvPaintWidget(viewer)
+    assert my_widget is not None
+
+    # The widget should still be functional - adding a compatible image later should work
+    image_2d = np.random.randint(0, 255, (100, 100)).astype(float)
+    viewer.add_image(image_2d)
+    my_widget._on_select_layer()
+    img = my_widget._get_selected_img()
+    assert img is not None
 
