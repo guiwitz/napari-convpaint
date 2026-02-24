@@ -2510,12 +2510,14 @@ class ConvPaintWidget(QWidget):
         return layer_texts
 
     def _get_data_channel_first(self, img):
-        """Get data from selected channel. If RGB, move channel axis to first position."""
+        """Get data from selected channel. If RGB/RGBA, move channel axis to first
+        position and strip alpha channel if present (keep only first 3 channels)."""
         if img is None:
             return None
         data_dims = self._get_data_dims(img)
         if data_dims in ['2D_RGB', '3D_RGB']:
-            img = np.moveaxis(img.data, -1, 0)
+            data = img.data[..., :3]  # Strip alpha channel if RGBA
+            img = np.moveaxis(data, -1, 0)
         else:
             img = img.data
         return img
@@ -2684,15 +2686,15 @@ class ConvPaintWidget(QWidget):
         if (num_dims == 1 or num_dims > 4):
             raise Exception('Image has wrong number of dimensions')
         
-        # 2D can be either single channel or RGB (in which case the underlying data is in fact 3D with 3 channels as last dim)
+        # 2D can be either single channel or RGB/RGBA (in which case the underlying data is in fact 3D with 3-4 channels as last dim)
         if num_dims == 2:
             if self.cp_model.get_param("channel_mode") == "rgb":
-                if img.data.shape[-1] == 3:
+                if img.data.shape[-1] in (3, 4):
                     return '2D_RGB'
                 else:
-                    warnings.warn('Image is 2D, but does not have 3 channels as last dimension. Setting channel_mode to "single".')
+                    warnings.warn('Image is 2D, but does not have 3 or 4 channels as last dimension. Setting channel_mode to "single".')
                     self.cp_model.set_param("channel_mode", "single")
-                    return '2D'                    
+                    return '2D'
             elif self.cp_model.get_param("channel_mode") == "single":
                 return '2D'
             else: # multi channel not possible in 2D
@@ -2700,13 +2702,13 @@ class ConvPaintWidget(QWidget):
                 self.cp_model.set_param("channel_mode", "single")
                 return '2D'
 
-        # 3D can be single channel, multi channel or RGB (in which case the underlying data is in fact 4D with 3 channels as last dim)
+        # 3D can be single channel, multi channel or RGB/RGBA (in which case the underlying data is in fact 4D with 3-4 channels as last dim)
         if num_dims == 3:
             if self.cp_model.get_param("channel_mode") == "rgb":
-                if img.data.shape[-1] == 3:
+                if img.data.shape[-1] in (3, 4):
                     return '3D_RGB'
                 else:
-                    warnings.warn('Image is 3D, but does not have 3 channels as last dimension. Setting channel_mode to "multi".')
+                    warnings.warn('Image is 3D, but does not have 3 or 4 channels as last dimension. Setting channel_mode to "multi".')
                     self.cp_model.set_param("channel_mode", "multi")
                     return '3D_multi'
             if self.cp_model.get_param("channel_mode") == "multi":
