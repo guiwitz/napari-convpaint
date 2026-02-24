@@ -279,6 +279,54 @@ def test_RGBT_image(make_napari_viewer, capsys):
     np.testing.assert_array_almost_equal(normalized[0].mean(axis=(1,2)), np.zeros(steps))
     '''
 
+def test_3d_stack_training_with_memory_mode(make_napari_viewer, capsys):
+    """Test that training on a 3D stack with memory_mode=True and a single
+    string img_id works. This is the bug reported in GitHub issues where
+    dask arrays (or 3D stacks in general) caused:
+    ValueError: Image IDs must be passed as a list with the same length as the data
+    """
+    from napari_convpaint.conv_paint_model import ConvpaintModel
+
+    # Create a small 3D stack (Z, H, W) and annotations with 2 classes
+    np.random.seed(42)
+    stack = np.random.randint(0, 255, (5, 50, 50)).astype(np.float32)
+    annot = np.zeros((5, 50, 50), dtype=np.uint8)
+    annot[0, 10:20, 10:20] = 1  # class 1 on first plane
+    annot[0, 30:40, 30:40] = 2  # class 2 on first plane
+
+    model = ConvpaintModel(alias="gaussian")
+    model.set_params(channel_mode='single')
+
+    # Training with memory_mode=True and a single string img_id should work
+    model.train(stack, annot, memory_mode=True, img_ids='test_image')
+
+    assert model.classifier is not None, "Classifier should be trained"
+
+def test_3d_stack_training_with_dask_input(make_napari_viewer, capsys):
+    """Test that training with a dask array input (as happens in the widget
+    for large 3D stacks) works correctly with memory_mode and single img_id.
+    Reproduces the exact bug from the user reports where dask arrays were not
+    recognized as single inputs."""
+    import dask.array as da
+    from napari_convpaint.conv_paint_model import ConvpaintModel
+
+    np.random.seed(42)
+    stack_np = np.random.randint(0, 255, (5, 50, 50)).astype(np.float64)
+    # Create a dask array to simulate the widget's normalization output
+    stack_dask = da.from_array(stack_np, chunks=(1, 50, 50))
+
+    annot = np.zeros((5, 50, 50), dtype=np.uint8)
+    annot[0, 10:20, 10:20] = 1
+    annot[0, 30:40, 30:40] = 2
+
+    model = ConvpaintModel(alias="gaussian")
+    model.set_params(channel_mode='single')
+
+    # This used to fail with:
+    # ValueError: Image IDs must be passed as a list with the same length as the data
+    model.train(stack_dask, annot, memory_mode=True, img_ids='dask_image')
+
+    assert model.classifier is not None, "Classifier should be trained"
 def test_incompatible_image_on_startup(make_napari_viewer):
     """Test that the plugin loads without crashing when an incompatible image
     (e.g. 5D) is already present in the viewer. The plugin should handle

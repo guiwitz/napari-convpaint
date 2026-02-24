@@ -1621,24 +1621,25 @@ class ConvpaintModel:
         Handles both single images/annotations and lists of images/annotations.
         """
         # Ensure data and annotations are lists
-        if isinstance(data, (np.ndarray, torch.Tensor)):
-            img_list = [data]
+        # Use hasattr(data, 'ndim') to support array-like objects beyond numpy/torch (e.g. dask, zarr)
+        if isinstance(data, list):
+            img_list = data
         elif isinstance(data, tuple):
             img_list = list(data)
-        elif isinstance(data, list):
-            img_list = data
+        elif hasattr(data, 'ndim'):
+            img_list = [data]
         else:
-            raise ValueError('Data must be a numpy array, torch tensor, or a list/tuple of images.')
+            raise ValueError('Data must be an array-like (numpy, torch, dask, etc.) or a list/tuple of images.')
         if annotations is None:
             annot_list = [None] * len(img_list)
-        elif isinstance(data, (np.ndarray, torch.Tensor)):
-            annot_list = [annotations]
-        elif isinstance(data, tuple):
-            annot_list = list(annotations)
         elif isinstance(data, list):
             annot_list = annotations
+        elif isinstance(data, tuple):
+            annot_list = list(annotations)
+        elif hasattr(data, 'ndim'):
+            annot_list = [annotations]
         else:
-            raise ValueError('Annotations must be a numpy array, torch tensor, or a list/tuple of images.')
+            raise ValueError('Annotations must be an array-like or a list/tuple of images.')
 
         # Check if the lengths of the data and annotations lists are equal
         if len(img_list) != len(annot_list):
