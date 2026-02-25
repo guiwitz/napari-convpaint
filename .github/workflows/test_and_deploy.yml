@@ -23,12 +23,14 @@ jobs:
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
+    permissions:
+      id-token: write  # needed for codecov OIDC authentication
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest]
-        #[ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        platform: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12"]
+        #["3.10", "3.11", "3.12", "3.13"]
         group:
           - name: conv-paint suite
             files: "src/napari_convpaint/_tests/test_conv_paint.py src/napari_convpaint/_tests/test_conv_paint_utils.py"
