@@ -1,7 +1,95 @@
+[project]
+name = "napari-convpaint"
+dynamic = ["version"]
+description = "A plugin for segmentation by pixel classification using pre-trained neural networks for feature extraction"
+readme = "README.md"
+license = { text = "BSD-3-Clause" }
+authors = [
+    { name = "Guillaume Witz", email = "guillaume.witz@unibe.ch" }
+]
+keywords = ["napari", "plugin", "segmentation", "machine learning", "deep learning", "image analysis", "neural networks"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Framework :: napari",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: BSD License",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "catboost>=1.2.8",
+    "dask",
+    "einops",
+    "joblib",
+    "magicgui",
+    "napari",
+    "napari-annotation-project",
+    "napari-guitils",
+    "numpy",
+    "omegaconf",
+    "pyyaml",
+    "qtpy",
+    "scikit-learn",
+    "scikit-image",
+    "tifffile",
+    "timm",
+    "torch",
+    "torchvision>=0.13.0",
+    "zarr",
+]
+
+[project.optional-dependencies]
+testing = [
+    "tox",
+    "pytest",
+    "pytest-cov",
+    "pytest-qt",
+    "pyqt5",
+]
+cellpose = [
+    "cellpose<4",
+]
+ilastik = [
+    "ilastik-napari",
+    # Install 'fastfilters' via Conda:
+    # conda install -c ilastik-forge fastfilters
+]
+qt = [
+    "pyqt5",
+]
+
+[project.entry-points."napari.manifest"]
+"napari-convpaint" = "napari_convpaint:napari.yml"
+
+[project.urls]
+Homepage = "https://github.com/guiwitz/napari-convpaint"
+"Bug Tracker" = "https://github.com/guiwitz/napari-convpaint/issues"
+Documentation = "https://github.com/guiwitz/napari-convpaint#README.md"
+"Source Code" = "https://github.com/guiwitz/napari-convpaint"
+"User Support" = "https://github.com/guiwitz/napari-convpaint/issues"
+
 [build-system]
-requires = ["setuptools", "wheel", "setuptools_scm"]
+requires = ["setuptools>=77.0.3", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml"]
 
 [tool.setuptools_scm]
 write_to = "src/napari_convpaint/_version.py"
