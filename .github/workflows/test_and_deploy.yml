@@ -54,11 +54,6 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install vcredist140 --no-progress
 
-      - name: Install deps (Windows torch pin)
-        if: runner.os == 'Windows'
-        run: |
-          uv pip install "torch<2.9"
-
 
       # note: if you need dependencies from conda, considering using
       # setup-miniconda: https://github.com/conda-incubator/setup-miniconda
