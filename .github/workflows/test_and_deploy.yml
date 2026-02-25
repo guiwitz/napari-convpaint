@@ -7,12 +7,10 @@ on:
   push:
     branches:
       - main
-      - main
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
   pull_request:
     branches:
-      - main
       - main
   workflow_dispatch:
 
@@ -25,74 +23,74 @@ jobs:
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
+    permissions:
+      id-token: write  # needed for codecov OIDC authentication
     strategy:
       fail-fast: false
       matrix:
         platform: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
         group:
           - name: conv-paint suite
             files: "src/napari_convpaint/_tests/test_conv_paint.py src/napari_convpaint/_tests/test_conv_paint_utils.py"
           - name: dims suite
             files: "src/napari_convpaint/_tests/test_dims.py"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      - name: Setup python
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
-
-      # these libraries enable testing on Qt on linux
-      - uses: tlambert03/setup-qt-libs@v1
-
-      # strategy borrowed from vispy for installing opengl libs on windows
+          activate-environment: "true"
       - name: Install Windows OpenGL
+        uses: pyvista/setup-headless-display-action@v4.2
+        with:
+          qt: true
+          wm: herbstluftwm
+
+      - name: Install Visual C++ Redistributable (Windows Only)
         if: runner.os == 'Windows'
-        run: |
-          git clone --depth 1 https://github.com/pyvista/gl-ci-helpers.git
-          powershell gl-ci-helpers/appveyor/install_opengl.ps1
+        run: choco install vcredist140 --no-progress
+
+
       # note: if you need dependencies from conda, considering using
       # setup-miniconda: https://github.com/conda-incubator/setup-miniconda
       # and
       # tox-conda: https://github.com/tox-dev/tox-conda
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install setuptools tox tox-gh-actions
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
-        uses: aganders3/headless-gui@v1
-        with:
-          run: python -m tox -- ${{ matrix.group.files }}
+        run: uvx --with tox-gh-actions tox -- ${{ matrix.group.files }}
         env:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true  # reliable tokenless codecov uploads
+
+  build-and-inspect-package:
+    name: Build & inspect package.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hynek/build-and-inspect-python-package@v2
 
   deploy:
     # this will run when you have tagged a commit, starting with "v*"
-    # and requires that you have put your twine API key in your 
+    # and requires that you have put your twine API key in your
     # github secrets (see readme for details)
-    needs: [test]
+    needs: [test, build-and-inspect-package]
     runs-on: ubuntu-latest
     if: contains(github.ref, 'tags')
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Download built artifact to dist/
+        uses: actions/download-artifact@v7
         with:
-          python-version: "3.x"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -U setuptools setuptools_scm wheel twine build
-      - name: Build and publish
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.TWINE_API_KEY }}
-        run: |
-          git tag
-          python -m build .
-          twine upload dist/*
+          name: Packages
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
