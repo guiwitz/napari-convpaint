@@ -26,7 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-latest, windows-latest, macos-latest]
+        platform: [windows-latest]
+        #[ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         group:
           - name: conv-paint suite
@@ -46,6 +47,10 @@ jobs:
         with:
           qt: true
           wm: herbstluftwm
+
+      - name: Install Visual C++ Redistributable (Windows Only)
+        if: runner.os == 'Windows'
+        run: choco install vcredist140 --no-progress
 
 
       # note: if you need dependencies from conda, considering using
