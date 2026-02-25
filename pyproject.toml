@@ -50,11 +50,11 @@ dependencies = [
 
 [project.optional-dependencies]
 testing = [
-    "tox",
+    "tox-uv",
     "pytest",
     "pytest-cov",
     "pytest-qt",
-    "pyqt5",
+    "napari[qt]",
 ]
 cellpose = [
     "cellpose<4",
