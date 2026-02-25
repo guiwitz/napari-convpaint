@@ -60,7 +60,7 @@ jobs:
       # tox-conda: https://github.com/tox-dev/tox-conda
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
-        run: uvx --with tox-gh-actions tox
+        run: uvx --with tox-gh-actions tox -- ${{ matrix.group.files }}
         env:
           PLATFORM: ${{ matrix.platform }}
 
