@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import warnings
 from .param import Param
-from .utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape, get_device_from_torch_model
+from .utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape, get_device_from_torch_model, check_cancel
 
 class FeatureExtractor:
     def __init__(self, model_name="vgg16", model=None, **kwargs):
@@ -272,7 +272,7 @@ class FeatureExtractor:
 
 ### FEATURE EXTRACTION METHODS
 
-    def extract_features(self, data, param, device=torch.device("cpu")):
+    def extract_features(self, data, param, device=torch.device("cpu"), cancel_token=None):
         """
         Extracts the features of an image (stack) with an arbitrary number of channels.
         This is the main method to call for feature extraction, which will handle scaling and rescaling of the features as needed.
@@ -296,11 +296,11 @@ class FeatureExtractor:
         # self.move_model_to_device(device)
 
         # Extract features with scaling and rescaling as needed
-        features = self.extract_features_pyramid(data=data, param=param, patched=self.gives_patched_features(), device=device)
+        features = self.extract_features_pyramid(data=data, param=param, patched=self.gives_patched_features(), device=device, cancel_token=cancel_token)
 
         return features
 
-    def extract_features_pyramid(self, data, param, patched=True, device=torch.device("cpu")):
+    def extract_features_pyramid(self, data, param, patched=True, device=torch.device("cpu"), cancel_token=None):
         """
         Extracts the feature pyramid of an image (stack) with an arbitrary number of channels.
         Assumes that the image is a 4D array with dimensions [C, Z, H, W].
@@ -337,6 +337,7 @@ class FeatureExtractor:
 
         # Iterate over the scales and extract features for each scale
         for s in param.fe_scalings:
+            check_cancel(cancel_token)
 
             # Downscale the image
             image_scaled = scale_img(data, s)
@@ -350,7 +351,7 @@ class FeatureExtractor:
             # Extract features as list for different channel_series (and layers if applicable)
             # Each element is [nb_features, z, w, h]
             rgb_data = param.channel_mode == 'rgb'
-            features = self.extract_features_from_multichannel_stack(image_scaled, rgb_data=rgb_data, device=device)
+            features = self.extract_features_from_multichannel_stack(image_scaled, rgb_data=rgb_data, device=device, cancel_token=cancel_token)
             # In case the features are not a list, but a single array, make it a list
             if not isinstance(features, list):
                 features = [features]
@@ -409,7 +410,7 @@ class FeatureExtractor:
 
         return features_all_scales
 
-    def extract_features_from_multichannel_stack(self, image, rgb_data=False, device=torch.device("cpu")):
+    def extract_features_from_multichannel_stack(self, image, rgb_data=False, device=torch.device("cpu"), cancel_token=None):
         """
         Extracts the features of an image (stack) with an arbitrary number of channels.
         Assumes that the image is a 4D array with dimensions [C, Z, H, W],
@@ -452,18 +453,18 @@ class FeatureExtractor:
         non_rgb_triple_with_rgb_fe = not rgb_data and img_channels == 3 and fe_rgb_input
         if img_channels in fe_input_channels and not non_rgb_triple_with_rgb_fe:
             # return [self.extract_features_from_stack(image)]
-            return self.extract_features_from_stack(image, device=device)
+            return self.extract_features_from_stack(image, device=device, cancel_token=cancel_token)
 
         # For each channel, create a replicate with the needed number of input channels
         fe_input_channels = min(fe_input_channels)
         channel_series = [np.tile(ch, (fe_input_channels, 1, 1, 1)) for ch in image]
-        
-        # Get outputs for each channel_series
+
+        # Get outputs for each channel_series. The per-Z-plane check inside
+        # extract_features_from_stack fires almost immediately, so no extra
+        # check is needed at this loop boundary.
         all_outputs = []
         for channel in channel_series:
-            # Output is either a single array or a list of features,
-            # possibly from different layers (and thus with different sizes)
-            output = self.extract_features_from_stack(channel, device=device)
+            output = self.extract_features_from_stack(channel, device=device, cancel_token=cancel_token)
             # Make one list of all outputs (aligning different channel_series and layers)
             if isinstance(output, list):
                 # If the output is a list of features, add the elements to the list
@@ -474,7 +475,7 @@ class FeatureExtractor:
 
         return all_outputs
 
-    def extract_features_from_stack(self, image, device=torch.device("cpu")):
+    def extract_features_from_stack(self, image, device=torch.device("cpu"), cancel_token=None):
         """
         Extracts the features of an image given as a stack of planes.
         Assumes that the image is a 4D array with dimensions [C, Z, H, W],
@@ -497,6 +498,7 @@ class FeatureExtractor:
         all_features = []
         # Go through the stack, and get features for each plane
         for z in range(image.shape[1]):
+            check_cancel(cancel_token)
             features = self.extract_features_from_plane(image[:,z], device=device)
             all_features.append(features)
 

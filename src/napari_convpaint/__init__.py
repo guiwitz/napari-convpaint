@@ -12,3 +12,4 @@ except ImportError:
 from .convpaint_model import ConvpaintModel
 from .convpaint_widget import ConvpaintWidget
 from .feature_extractor import FeatureExtractor
+from .utils import CancelToken, CancelledError

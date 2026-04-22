@@ -1,5 +1,7 @@
+from dataclasses import dataclass, field
+from typing import Optional
 from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
-                            QLabel, QComboBox,QFileDialog, QListWidget,
+                            QLabel, QComboBox,QFileDialog, QListWidget, QApplication,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox, QButtonGroup,
                             QRadioButton,QDoubleSpinBox)
 from qtpy import QtWidgets, QtGui
@@ -8,6 +10,13 @@ from magicgui.widgets import create_widget
 import napari
 from napari.utils import progress
 from napari.utils.notifications import show_info
+# Use superqt's thread_worker rather than napari.qt.threading.thread_worker: the
+# latter registers every worker with window._task_status_manager (and never
+# unregisters), so the worker's closure — including cp_model with its
+# VGG16 MPS weights — is pinned for the lifetime of the viewer. In a test
+# loop creating many widgets this accumulates and blows past the macOS
+# runner's 7.93 GiB MPS cap.
+from superqt.utils import thread_worker
 from napari_guitils.gui_structures import VHGroup, TabSet
 from pathlib import Path
 import numpy as np
@@ -17,8 +26,29 @@ import warnings
 # import torch
 # from .utils import normalize_image, compute_image_stats, normalize_image_percentile, normalize_image_imagenet, get_fe_device
 # from .convpaint_model import ConvpaintModel
+# CancelToken / CancelledError are also imported inline inside the slot
+# methods that need them, to avoid pulling in .utils (and its torch import)
+# at widget-module load time.
+
+
+@dataclass
+class _ActiveOp:
+    name: str  # 'train' | 'predict' | 'predict_all'
+    worker: object
+    cancel_token: object  # CancelToken — not annotated as a forward ref so @dataclass doesn't try to resolve it at decoration time
+    button: QPushButton
+    button_orig_text: str
+    disabled_buttons: list = field(default_factory=list)
+    cancel_was_requested: bool = False
+
 
 class ConvpaintWidget(QWidget):
+
+    # When True, long-running operations (train/predict/predict_all) run on the
+    # calling thread instead of a worker thread. Test code sets this to keep the
+    # existing synchronous test assertions valid.
+    _sync_workers = False
+
     """
     Implementation of a napari widget for interactive segmentation performed
     via multiple means of feature extraction combined with a CatBoost Classifier
@@ -1306,15 +1336,15 @@ class ConvpaintWidget(QWidget):
     # Train
 
     def _on_train(self, event=None):
-        """Given a set of new annotations, update the CatBoost classifier."""
+        """Button slot: start training, or cancel the in-progress training."""
+        if self._handle_cancel_click('train'):
+            return
 
-        # Get the data
         img = self._get_selected_img(check=True)
         annot = self.annotation_layer_selection_widget.value
         mem_mode = (self.cont_training == "image"
                     or self.cont_training == "global")
 
-        # Check if annotations of at least 2 classes are present
         if annot is None:
             raise Exception('No annotation layer selected. Please create/select one.')
         unique_labels = np.unique(annot.data)
@@ -1325,46 +1355,129 @@ class ConvpaintWidget(QWidget):
             if self.cp_model.num_trainings == 0:
                 raise Exception('Model has not yet been trained. You need annotations for at least foreground and background')
 
-        # Check if annotations layer has correct shape for the chosen data type
         if not self._approve_annotation_layer_shape(annot, img):
             raise Exception('Annotation layer has wrong shape for the chosen data')
 
-        # Set the current model path to 'in training' and adjust the model description
         self.current_model_path = 'in training'
         self._set_model_description()
 
-        # Get the image data and normalize it; also get the annotations
+        # Snapshot inputs on the main thread so the worker never touches UI state.
         image_stack_norm = self._get_data_channel_first_norm(img)
-        annot = annot.data
-        
-        # Start training
+        annot_data = annot.data
+        img_name = img.name
+        in_channels = self._parse_in_channels(self.input_channels)
+        fe_device = self.fe_device
+        clf_device = self.clf_device
+        cp_model = self.cp_model
+
+        from .utils import CancelToken, CancelledError
+        cancel_token = CancelToken()
+
+        @thread_worker
+        def _do_train():
+            # Swallow CancelledError here so it never reaches the worker's errored
+            # signal; real exceptions still propagate.
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter(action="ignore", category=FutureWarning)
+                    cp_model.train(image_stack_norm, annot_data, memory_mode=mem_mode,
+                                   img_ids=img_name, in_channels=in_channels, skip_norm=False,
+                                   fe_use_device=fe_device, clf_use_device=clf_device,
+                                   cancel_token=cancel_token)
+            except CancelledError:
+                return None
+
+        worker = _do_train()
+        worker.returned.connect(self._on_train_returned)
+        worker.errored.connect(self._on_worker_errored)
+        worker.finished.connect(self._on_worker_finished)
+        self._begin_worker('train', self.train_classifier_btn, cancel_token, worker,
+                           desc='Training',
+                           disabled_buttons=[self.segment_btn, self.segment_all_btn])
+
+    def _on_train_returned(self, _result):
+        if self._op is not None and self._op.cancel_was_requested:
+            return
+        self._update_training_counts()
+        self.current_model_path = 'trained, unsaved'
+        self.trained = True
+        self._set_model_description()
+        self._pending_auto_seg = self.auto_seg
+
+    def _handle_cancel_click(self, op_name):
+        """If a worker is active, request cancellation (only if op matches) and
+        tell the caller to return without starting new work."""
+        if self._op is None:
+            return False
+        if self._op.name == op_name:
+            self._op.cancel_was_requested = True
+            self._op.cancel_token.cancel()
+        return True
+
+    def _begin_worker(self, name, button, cancel_token, worker,
+                      desc='', total=0, disabled_buttons=None):
+        # Drain the delayed _on_select_layer QTimer before we start — otherwise
+        # it fires mid-op during layer-data assignment and resets the classifier.
+        # The old synchronous code got this flush for free from napari.utils.progress.
+        QApplication.processEvents()
+        # Create the progress bar on the main thread (QWidgets cannot be
+        # constructed from a worker thread on macOS — it raises NSInternalInconsistencyException).
+        pbar = progress(total=total, desc=desc)
+        worker.finished.connect(pbar.close)
+        if total:
+            worker.yielded.connect(pbar.increment_with_overflow)
+        self._op = _ActiveOp(
+            name=name,
+            worker=worker,
+            cancel_token=cancel_token,
+            button=button,
+            button_orig_text=button.text(),
+            disabled_buttons=list(disabled_buttons or []),
+        )
+        button.setText('Cancel')
+        for b in self._op.disabled_buttons:
+            b.setEnabled(False)
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
+        if self._sync_workers:
+            worker.run()
+        else:
+            worker.start()
 
-        with progress(total=0) as pbr:
-            pbr.set_description(f"Training")
-            img_name = self._get_selected_img().name
-            in_channels = self._parse_in_channels(self.input_channels)
-            # Train the model with the current image and annotations; skip normalization as it is done in the widget
-            _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
-                                    in_channels=in_channels, skip_norm=False,
-                                    fe_use_device=self.fe_device, clf_use_device=self.clf_device)
-            self._update_training_counts()
-    
+    def _on_worker_finished(self):
+        op = self._op
+        self._op = None
+        if op is None:
+            return
+        op.button.setText(op.button_orig_text)
+        # _reset_predict_buttons below re-decides segment/segment-all state based
+        # on self.trained; the train button has no such gating, so restoring it
+        # here unconditionally is what keeps it clickable after a predict run.
+        for b in op.disabled_buttons:
+            b.setEnabled(True)
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
-
-        # Set the current model path to 'trained, unsaved' and adjust the model description
-        self.current_model_path = 'trained, unsaved'
-        self.trained = True
         self._reset_predict_buttons()
-        self._set_model_description()
+        if op.cancel_was_requested:
+            show_info('Operation cancelled.')
+            if op.name == 'train' and self.current_model_path == 'in training':
+                self.current_model_path = 'not trained' if not self.trained else 'trained, unsaved'
+                self._set_model_description()
+            return
+        if op.name == 'train' and getattr(self, '_pending_auto_seg', False):
+            self._pending_auto_seg = False
+            if self.trained:
+                self._on_predict()
 
-        # Automatically segment the image if the option is activated
-        if self.auto_seg:
-            self._on_predict()
+    def _on_worker_errored(self, exc):
+        # CancelledError is swallowed inside each worker body, so only real
+        # failures reach here — napari's default error handler still displays
+        # the traceback; we just tidy up the 'in training' label.
+        if self._op is not None and self._op.name == 'train' and self.current_model_path == 'in training':
+            self.current_model_path = 'not trained' if not self.trained else 'trained, unsaved'
+            self._set_model_description()
 
     def _on_train_on_project(self):
         """Train classifier on all annotations in project.
@@ -1419,70 +1532,76 @@ class ConvpaintWidget(QWidget):
     # Predict
 
     def _on_predict(self, event=None):
-        """Predict the segmentation of the currently viewed frame based
-        on a classifier trained with annotations."""
+        """Button slot: start single-frame prediction, or cancel the running one."""
+
+        if self._handle_cancel_click('predict'):
+            return
 
         if not (self.add_seg or self.add_probas):
             warnings.warn('Neither segmentation nor probabilities output selected to be added. Nothing to do.')
             return
 
-        with warnings.catch_warnings():
-            warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(True)
+        data_dims = self._get_data_dims(self._get_selected_img())
+        if data_dims not in self.supported_data_dims:
+            warnings.warn(f'Non-supported image dimensions {data_dims}. Prediction not performed.')
+            return
 
-        with progress(total=0) as pbr:
-            pbr.set_description(f"Prediction")
-            
-            # Check dimensionality
-            data_dims = self._get_data_dims(self._get_selected_img())
-            if data_dims not in self.supported_data_dims:
-                warnings.warn(f'Non-supported image dimensions {data_dims}. Prediction not performed.')
-                return
-            
-            # Get the data
-            image_plane = self._get_current_plane_norm()
-            in_channels = self._parse_in_channels(self.input_channels)
+        image_plane = self._get_current_plane_norm()
+        in_channels = self._parse_in_channels(self.input_channels)
+        use_dask = self.use_dask
+        fe_device = self.fe_device
+        cp_model = self.cp_model
 
-            # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
-            probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True,
-                                                          use_dask=self.use_dask, fe_use_device=self.fe_device)
+        from .utils import CancelToken, CancelledError
+        cancel_token = CancelToken()
 
-        with warnings.catch_warnings():
-            warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(False)
+        @thread_worker
+        def _do_predict():
+            try:
+                return cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True,
+                                         use_dask=use_dask, fe_use_device=fe_device,
+                                         cancel_token=cancel_token)
+            except CancelledError:
+                return None
 
-        # Get the current step in case of stacks
+        self._pending_predict_dims = data_dims
+
+        worker = _do_predict()
+        worker.returned.connect(self._on_predict_returned)
+        worker.errored.connect(self._on_worker_errored)
+        worker.finished.connect(self._on_worker_finished)
+        self._begin_worker('predict', self.segment_btn, cancel_token, worker,
+                           desc='Prediction',
+                           disabled_buttons=[self.train_classifier_btn, self.segment_all_btn])
+
+    def _on_predict_returned(self, result):
+        cancelled = self._op is not None and self._op.cancel_was_requested
+        if cancelled or result is None:
+            self._pending_predict_dims = None
+            return
+        probas, segmentation = result
+        data_dims = getattr(self, '_pending_predict_dims', None)
+        self._pending_predict_dims = None
+
         step = self.viewer.dims.current_step[-3] if data_dims in ['3D_single', '4D', '3D_RGB'] else None
 
-        # Add segmentation layer if enabled
         if self.add_seg:
-            # Check if we need to create a new segmentation layer
             self._check_create_segmentation_layer()
-            # Set the flag to False, so we don't create a new layer every time
             self.new_seg = False
-
-            # Update segmentation layer
             if data_dims in ['2D', '2D_RGB', '3D_multi']:
                 self.viewer.layers[self.seg_prefix].data = segmentation
-            elif data_dims in ['3D_single', '4D', '3D_RGB']: # seg has no channel dim -> z is first
+            elif data_dims in ['3D_single', '4D', '3D_RGB']:
                 self.viewer.layers[self.seg_prefix].data[step] = segmentation
-            # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
             self.viewer.layers[self.seg_prefix].refresh()
 
-        # Add probabilities if enabled
         if self.add_probas:
-            # Check if we need to create a new probabilities layer
             num_classes = probas.shape[:1]
             self._check_create_probas_layer(num_classes)
-            # Set the flag to False, so we don't create a new layer every time
             self.new_proba = False
-
-            # Update probabilities layer
-            if data_dims in ['2D', '2D_RGB', '3D_multi']: # No stack dim
+            if data_dims in ['2D', '2D_RGB', '3D_multi']:
                 self.viewer.layers[self.proba_prefix].data = probas
-            elif data_dims in ['3D_single', '4D', '3D_RGB']: # (stack dim is second, probas first)
+            elif data_dims in ['3D_single', '4D', '3D_RGB']:
                 self.viewer.layers[self.proba_prefix].data[:, step] = probas
-            # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
             self.viewer.layers[self.proba_prefix].refresh()
 
     def _on_get_feature_image(self, event=None):
@@ -1533,67 +1652,68 @@ class ConvpaintWidget(QWidget):
         # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
         self.viewer.layers[self.features_prefix].refresh()
 
-    def _on_predict_all(self):
-        """Predict the segmentation of all frames based 
-        on a classifier model trained with annotations."""
-        
-        # Get the data
+    def _on_predict_all(self, event=None):
+        """Button slot: start stack prediction, or cancel the running one."""
+        if self._handle_cancel_click('predict_all'):
+            return
+
         img = self._get_selected_img(check=True)
 
-        # Check dimensionality
         data_dims = self._get_data_dims(img)
         if data_dims not in ['3D_single', '3D_RGB', '4D']:
             warnings.warn(f'Image stack has wrong dimensionality ({data_dims}) for predicting stacks. Prediction not performed.')
             return
-        
-        # Create the segmentation layer if it is not already present
-        # (NOTE: probabilities layer is created in the prediction loop, as we need to know the number of classes)
+
+        # Create seg layer up front so the worker can yield into it. The probas
+        # layer needs num_classes and is created when the first slice arrives.
         if self.add_seg:
             self._check_create_segmentation_layer()
-            # Set the flag to False, so we don't create a new layer every time
             self.new_seg = False
 
-        # Start prediction
-        with warnings.catch_warnings():
-            warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(True)
-
-        # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
-        image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
-        
-        # Step through the stack and predict each image
+        image_stack_norm = self._get_data_channel_first_norm(img)
+        in_channels = self._parse_in_channels(self.input_channels)
+        use_dask = self.use_dask
+        fe_device = self.fe_device
+        cp_model = self.cp_model
         num_steps = image_stack_norm.shape[-3]
-        for step in progress(range(num_steps)):
 
-            # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
-            image = image_stack_norm[..., step, :, :]
+        from .utils import CancelToken, CancelledError
+        cancel_token = CancelToken()
 
-            # Predict the current step; skip normalization as it is done above
-            in_channels = self._parse_in_channels(self.input_channels)
-            # Use the backend function which returns probabilities and segmentation
-            probas, seg = self.cp_model._predict(image, add_seg=True, in_channels=in_channels, skip_norm=True,
-                                                 use_dask=self.use_dask, fe_use_device=self.fe_device)
+        @thread_worker
+        def _do_predict_all():
+            try:
+                for step in range(num_steps):
+                    cancel_token.raise_if_cancelled()
+                    image = image_stack_norm[..., step, :, :]
+                    probas, seg = cp_model._predict(image, add_seg=True, in_channels=in_channels, skip_norm=True,
+                                                    use_dask=use_dask, fe_use_device=fe_device,
+                                                    cancel_token=cancel_token)
+                    yield step, probas, seg
+            except CancelledError:
+                # Any slices already yielded stay in the labels layer.
+                return
 
-            # In the first iteration, check if we need to create a new probas layer
-            # (we need the information about the number of classes)
-            if step == 0 and self.add_probas:
-                num_classes = probas.shape[0]
-                # Check if we need to create a new probabilities layer
-                self._check_create_probas_layer(num_classes)
-                # Set the flag to False, so we don't create a new layer every time
-                self.new_proba = False
+        worker = _do_predict_all()
+        worker.yielded.connect(self._on_predict_all_yielded)
+        worker.errored.connect(self._on_worker_errored)
+        worker.finished.connect(self._on_worker_finished)
+        self._begin_worker('predict_all', self.segment_all_btn, cancel_token, worker,
+                           desc='Segmenting stack', total=num_steps,
+                           disabled_buttons=[self.train_classifier_btn, self.segment_btn])
 
-            # Add the slices to the segmentation and probabilities layers
-            if self.add_seg:
-                self.viewer.layers[self.seg_prefix].data[step] = seg
-                self.viewer.layers[self.seg_prefix].refresh()
-            if self.add_probas:
-                self.viewer.layers[self.proba_prefix].data[..., step, :, :] = probas
-                self.viewer.layers[self.proba_prefix].refresh()
-
-        with warnings.catch_warnings():
-            warnings.simplefilter(action="ignore", category=FutureWarning)
-            self.viewer.window._status_bar._toggle_activity_dock(False)
+    def _on_predict_all_yielded(self, value):
+        step, probas, seg = value
+        if step == 0 and self.add_probas:
+            num_classes = probas.shape[0]
+            self._check_create_probas_layer(num_classes)
+            self.new_proba = False
+        if self.add_seg:
+            self.viewer.layers[self.seg_prefix].data[step] = seg
+            self.viewer.layers[self.seg_prefix].refresh()
+        if self.add_probas:
+            self.viewer.layers[self.proba_prefix].data[..., step, :, :] = probas
+            self.viewer.layers[self.proba_prefix].refresh()
 
     def _on_get_feature_image_all(self):
         """Get the feature image for all frames based
@@ -1935,6 +2055,7 @@ class ConvpaintWidget(QWidget):
         self.cmap_flag = False # Flag to prevent infinite loops when changing colormaps
         self.labels_cmap = None # Colormap for the labels (annotations and segmentation)
         self._block_layer_select = True # Flag to block layer selection events temporarily
+        self._op: Optional[_ActiveOp] = None
 
 ### Model Tab
 

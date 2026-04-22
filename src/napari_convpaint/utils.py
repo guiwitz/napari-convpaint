@@ -17,6 +17,33 @@ import requests
 # napari.utils (see details below)
 
 
+### Cooperative cancellation
+
+class CancelledError(Exception):
+    pass
+
+
+class CancelToken:
+    def __init__(self):
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    @property
+    def cancelled(self):
+        return self._cancelled
+
+    def raise_if_cancelled(self):
+        if self._cancelled:
+            raise CancelledError()
+
+
+def check_cancel(cancel_token):
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
+
+
 ### PCA and Kmeans on feature images
 
 def apply_pca_to_f_image(feature_img, n_components, norm=True):

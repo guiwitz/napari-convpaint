@@ -1,3 +1,4 @@
+import copy
 import pickle
 from pathlib import Path
 import importlib
@@ -757,7 +758,7 @@ class ConvpaintModel:
     
     def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False,
               allow_writing_files=False, in_channels=None, skip_norm=False,
-              fe_use_device=None, clf_use_device=None):
+              fe_use_device=None, clf_use_device=None, cancel_token=None):
         """
         Trains the Convpaint model's classifier given images and annotations.
 
@@ -800,10 +801,11 @@ class ConvpaintModel:
         """
         clf, _, _ = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm,
-                          fe_use_device=fe_use_device, clf_use_device=clf_use_device)
+                          fe_use_device=fe_use_device, clf_use_device=clf_use_device,
+                          cancel_token=cancel_token)
         return clf
 
-    def segment(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
+    def segment(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Segments images by predicting the most probable class of each pixel using the trained classifier.
 
@@ -831,10 +833,10 @@ class ConvpaintModel:
             Dimensions are equal to the input image(s) without the channel dimension
         """
         _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm,
-                               use_dask=use_dask, fe_use_device=fe_use_device)
+                               use_dask=use_dask, fe_use_device=fe_use_device, cancel_token=cancel_token)
         return seg
 
-    def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
+    def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
 
@@ -863,13 +865,14 @@ class ConvpaintModel:
             with the class dimension added first
         """
         probas = self._predict(image, add_seg=False, in_channels=in_channels,
-                       skip_norm=skip_norm, use_dask=use_dask, fe_use_device=fe_use_device)
+                       skip_norm=skip_norm, use_dask=use_dask, fe_use_device=fe_use_device,
+                       cancel_token=cancel_token)
         return probas
     
     def get_feature_image(self, data,
                           in_channels=None, skip_norm=False,
                           pca_components=0, kmeans_clusters=0,
-                          use_device=None):
+                          use_device=None, cancel_token=None):
         """
         Returns the feature images extracted by the feature extractor model.
         For details, see the underlying `_get_features` method.
@@ -903,7 +906,8 @@ class ConvpaintModel:
                 skip_norm=skip_norm,
                 use_device=use_device,
                 pca_components=pca_components,
-                kmeans_clusters=kmeans_clusters
+                kmeans_clusters=kmeans_clusters,
+                cancel_token=cancel_token,
             )
 
         return features
@@ -913,7 +917,7 @@ class ConvpaintModel:
     def _get_features(self, data, annotations=None, restore_input_form=True,
                           memory_mode=False, img_ids=None,
                           in_channels=None, skip_norm=False, use_device=None,
-                          pca_components=0, kmeans_clusters=0):
+                          pca_components=0, kmeans_clusters=0, cancel_token=None):
         """
         Returns the features of images extracted by the feature extractor model.
 
@@ -1108,12 +1112,12 @@ class ConvpaintModel:
             supported_devices=self.fe_model.supported_devices(),
             warn=True,
         )
-        features = [self.fe_model.extract_features_pyramid(
-                d,
-                params_for_extract,
-                patched=keep_patched,
-                device=fe_runtime_device)
-                    for d in data]
+        features = [
+            self.fe_model.extract_features_pyramid(
+                d, params_for_extract, patched=keep_patched,
+                device=fe_runtime_device, cancel_token=cancel_token)
+            for d in data
+        ]
         
         if pca_components:
             features = [utils.apply_pca_to_f_image(f, n_components=pca_components)
@@ -1277,7 +1281,7 @@ class ConvpaintModel:
 
     def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False,
                allow_writing_files=False, in_channels=None, skip_norm=False,
-               fe_use_device=None, clf_use_device=None):
+               fe_use_device=None, clf_use_device=None, cancel_token=None):
         """
         Backend training method for the Convpaint model.
         """
@@ -1287,11 +1291,38 @@ class ConvpaintModel:
             warnings.warn('No annotations provided for training.')
             return self.classifier, None, None
 
+        # Snapshot the memory-mode bookkeeping so we can roll it back on
+        # CancelledError. _register_and_update_annots mutates self.annot_dict
+        # and self.table *before* feature extraction runs; without rollback a
+        # cancelled train would leave the annotations registered, and the next
+        # Train click would see "no new annotations" and fail with
+        # "No features or targets found".
+        mem_backup = None
+        if memory_mode:
+            mem_backup = (copy.deepcopy(self.annot_dict), self.table.copy(deep=True))
+
+        try:
+            return self._train_body(data, annotations, memory_mode=memory_mode,
+                                    img_ids=img_ids, use_rf=use_rf,
+                                    allow_writing_files=allow_writing_files,
+                                    in_channels=in_channels, skip_norm=skip_norm,
+                                    fe_use_device=fe_use_device,
+                                    clf_use_device=clf_use_device,
+                                    cancel_token=cancel_token)
+        except utils.CancelledError:
+            if mem_backup is not None:
+                self.annot_dict, self.table = mem_backup
+            raise
+
+    def _train_body(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False,
+                    allow_writing_files=False, in_channels=None, skip_norm=False,
+                    fe_use_device=None, clf_use_device=None, cancel_token=None):
         if not memory_mode:
             # Use _get_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
             feature_parts, annot_parts = self._get_features(
                 data, annotations, restore_input_form=False, memory_mode=memory_mode,
-                in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
+                in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device,
+                cancel_token=cancel_token)
             # Get the annotated pixels and targets, and concatenate each
             f_t_tuples = [utils.get_features_targets(f, a)
                         for f, a in zip(feature_parts, annot_parts)] # f and t are linearized
@@ -1304,7 +1335,8 @@ class ConvpaintModel:
             # Use _get_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
             feature_parts, annot_parts, coords, img_ids, scale = self._get_features(
                 data, annotations, restore_input_form=False, memory_mode=memory_mode,
-                img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
+                img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device,
+                cancel_token=cancel_token)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
 
@@ -1314,6 +1346,9 @@ class ConvpaintModel:
         if len(np.unique(targets)) < 2:
             # print("Targets:", targets, "values:", np.unique(targets))
             raise ValueError('Not enough classes found in the targets. At least two classes are required for training.')
+
+        # Last cancel checkpoint before the (uninterruptible) classifier fit
+        utils.check_cancel(cancel_token)
 
         # Train the classifier
         self._clf_train(features, targets, use_rf=use_rf,
@@ -1474,7 +1509,7 @@ class ConvpaintModel:
 
         return features, annotations
 
-    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
+    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
 
@@ -1505,12 +1540,16 @@ class ConvpaintModel:
         if not skip_norm:
             data = [self._norm_single_image(d) for d in data]
 
-        # Get class probabilities, using tiling if enabled
+        # Get class probabilities, using tiling if enabled. The per-tile check
+        # inside _parallel_predict_image takes over cancellation responsiveness.
         if self._param.tile_image:
-            probas = [self._parallel_predict_image(d, return_proba=True, use_dask=use_dask, fe_use_device=fe_use_device)
+            probas = [self._parallel_predict_image(
+                        d, return_proba=True, use_dask=use_dask, fe_use_device=fe_use_device,
+                        cancel_token=cancel_token)
                       for d in data]
         else:
-            probas = self._predict_image(data, return_proba=True, fe_use_device=fe_use_device) # Can handle lists directly
+            probas = self._predict_image(data, return_proba=True, fe_use_device=fe_use_device,
+                                         cancel_token=cancel_token) # Can handle lists directly
 
         # Restore input dimensionality (especially see if we want to remove z dimension)
         probas = [self._restore_dims(probas[i], input_shapes[i])
@@ -1529,7 +1568,7 @@ class ConvpaintModel:
             else:
                 return probas
 
-    def _predict_image(self, image, return_proba=True, feature_img=None, fe_use_device=None):
+    def _predict_image(self, image, return_proba=True, feature_img=None, fe_use_device=None, cancel_token=None):
         """
         Backend method to predict images without tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1550,7 +1589,8 @@ class ConvpaintModel:
                                             restore_input_form=False,
                                             in_channels=None, # already extracted outside
                                             skip_norm=True, # already normalized outside
-                                            use_device=fe_use_device)
+                                            use_device=fe_use_device,
+                                            cancel_token=cancel_token)
 
         num_f = feature_img[0].shape[0] if isinstance(feature_img, list) else feature_img.shape[0]
         num_f_clf = self.num_features
@@ -1583,7 +1623,7 @@ class ConvpaintModel:
             return pred_reshaped[0]
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=True, use_dask=False, fe_use_device=None):
+    def _parallel_predict_image(self, image, return_proba=True, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1630,6 +1670,7 @@ class ConvpaintModel:
 
         for row in range(nblocks_rows+1):
             for col in range(nblocks_cols+1):
+                utils.check_cancel(cancel_token)
                 min_row = np.max([0, row*maxblock-margin])
                 min_col = np.max([0, col*maxblock-margin])
                 max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
@@ -1662,7 +1703,7 @@ class ConvpaintModel:
                 # Predict the block using dask or directly (with no normalization, as it is done outside)
                 if use_dask:
                     processes.append(client.submit(
-                        self._predict_image, image=image_block, return_proba=return_proba, fe_use_device=fe_use_device))
+                        self._predict_image, image=image_block, return_proba=return_proba, fe_use_device=fe_use_device, cancel_token=cancel_token))
                     
                     min_row_ind_collection.append(min_row_ind)
                     min_col_ind_collection.append(min_col_ind)
@@ -1674,7 +1715,7 @@ class ConvpaintModel:
                     new_min_row_ind_collection.append(new_min_row_ind)
 
                 else:
-                    predicted_image = self._predict_image(image_block, return_proba=return_proba, fe_use_device=fe_use_device)
+                    predicted_image = self._predict_image(image_block, return_proba=return_proba, fe_use_device=fe_use_device, cancel_token=cancel_token)
                     crop_pred = predicted_image[...,
                         new_min_row_ind: new_max_row_ind,
                         new_min_col_ind: new_max_col_ind]

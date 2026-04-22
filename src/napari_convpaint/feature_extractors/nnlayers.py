@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 from torch import nn
-from ..utils import get_device_from_torch_model, guided_model_download
+from ..utils import get_device_from_torch_model, guided_model_download, check_cancel
+
 
 def import_models():
     try:
@@ -77,6 +78,7 @@ class Hookmodel(FeatureExtractor):
         self.init_layer_dict()
 
         self.outputs = []
+        self._cancel_token = None
         if layers is not None:
             self.register_hooks(layers)
         else:
@@ -223,23 +225,30 @@ class Hookmodel(FeatureExtractor):
     def get_num_input_channels(self):
         return [self.named_modules[0][1].in_channels]
     
-    def extract_features_from_stack(self, image, device=torch.device("cpu")):
+    def extract_features_from_stack(self, image, device=torch.device("cpu"), cancel_token=None):
         self.move_model_to_device(device)
 
         # Convert image to numpy array and ensure correct data type
         image = np.asarray(image, dtype=np.float32)
 
         self.outputs = []
-        with torch.no_grad():
-            # Treat z as batch dimension (temprorarily)
-            ch_torch = torch.tensor(np.moveaxis(image, 1, 0))
-            try:
-                _ = self(ch_torch) # Forward pass through the model
-            except AssertionError as ea:
-                pass # Stop at hook
-            except Exception as ex:
-                raise ex
-            
+        # Expose the cancel token to the forward hooks so they can abort the
+        # pass between layers. Without this, a cancel during a VGG16 run with
+        # many hooked layers only takes effect after the whole forward completes.
+        self._cancel_token = cancel_token
+        try:
+            with torch.no_grad():
+                # Treat z as batch dimension (temprorarily)
+                ch_torch = torch.tensor(np.moveaxis(image, 1, 0))
+                try:
+                    _ = self(ch_torch) # Forward pass through the model
+                except AssertionError as ea:
+                    pass # Stop at hook
+                except Exception as ex:
+                    raise ex
+        finally:
+            self._cancel_token = None
+
         # Move the z dimension back to the second position (and features to first)
         outputs = [o.permute(1, 0, 2, 3) for o in self.outputs]
 
@@ -250,12 +259,12 @@ class Hookmodel(FeatureExtractor):
         return self.model(tensor_image_dev)
 
     def hook_normal(self, module, input, output):
-        # print("extracting with normal layer")
         self.outputs.append(output)
+        check_cancel(self._cancel_token)
 
     def hook_last(self, module, input, output):
-        # print("extracting with last layer")
         self.outputs.append(output)
+        check_cancel(self._cancel_token)
         assert False
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
