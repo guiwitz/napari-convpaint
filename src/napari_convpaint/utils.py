@@ -97,8 +97,8 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
     # Try importing Napari tools
     use_napari = False
     try:
-        from napari.utils.progress import progress as napari_s
-        from napari.utils.notifications import show_info, shs
+        from napari.utils.progress import progress as napari_progress
+        from napari.utils.notifications import show_info, show_error
         import napari
         if napari.current_viewer():
             use_napari = True
