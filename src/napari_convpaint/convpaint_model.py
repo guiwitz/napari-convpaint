@@ -1083,7 +1083,7 @@ class ConvpaintModel:
             if use_annots:
                 self._warn_if_global_context("tile_annotations")
                 coords = [None for _ in data] if coords is None else coords
-                alignment = self._get_fe_alignment(params_for_extract)
+                alignment = lcm(*params_for_extract.fe_scalings) * self.fe_model.get_patch_size()
                 tiles = [utils.tile_annot(d, a, c, p, alignment=alignment, plot_tiles=False)
                         for d, a, c, p in zip(data, annotations, coords, paddings)]
                 data        = [t for trio in tiles for t in trio[0]]
@@ -1628,7 +1628,7 @@ class ConvpaintModel:
         # at a slightly different ratio than the whole-image pass and features
         # drift relative to physical pixel positions (same class of bug as
         # tile_annot without alignment).
-        alignment = self._get_fe_alignment(self._param)
+        alignment = lcm(*self._param.fe_scalings) * self.fe_model.get_patch_size()
         fe_margin = self.fe_model.get_padding() * int(np.max(self._param.fe_scalings))
         margin = utils.align_up(fe_margin, alignment)
         maxblock = max(alignment, (TARGET_TILE_BLOCK // alignment) * alignment)
@@ -2049,69 +2049,31 @@ class ConvpaintModel:
                 f"same features as whole-image processing. Consider disabling {mode} for this FE."
             )
 
-    def _get_fe_alignment(self, param):
-        """Effective downsampling factor the FE imposes on the input grid.
-
-        Any sub-window of the image extracted for independent feature extraction
-        (annotation tiles, prediction tiles) must have spatial dims that are a
-        multiple of this value, otherwise the upsample ratio in
-        `rescale_features` differs from the whole-image pass and the resulting
-        features drift relative to their physical pixel position.
-        """
-        fe_scalings = param.fe_scalings
-        scalings_lcm = lcm(*fe_scalings)
-        fe_patch  = self.fe_model.get_patch_size()
-        fe_stride = self.fe_model.get_total_stride()
-        return scalings_lcm * fe_patch * fe_stride
-
     def _get_overall_paddings(self, param, img_shape: Tuple[int, ...]):
         """
         Returns the overall padding sizes for the image in form ((top, bottom), (left, right)).
 
-        This takes into account the feature extractor's padding, its patch size and the image shape.
-        Makes sure, padding is at least the FE's padding at the largest downscaling factor,
-        and that the image is padded to a multiple of the patch size times at all scalings,
-        if the FE model uses patches.
+        Padding is at least the FE's receptive-field padding at the largest scaling,
+        and the padded image dims (and pad_top / pad_left) are multiples of the FE's
+        patch size at the LCM of fe_scalings. For Hookmodel, `patch_size` encodes
+        the internal MaxPool/Conv2d stride product (with `gives_patched_features=False`),
+        so the same alignment math handles both ViT-style and CNN feature extractors.
         """
-        # Get the maximum scaling factor, base padding size and patch_size from the param and feature extractor
         fe_scalings = param.fe_scalings
         max_scale = np.max(fe_scalings)
-        fe_pad    = self.fe_model.get_padding()
-        fe_patch  = self.fe_model.get_patch_size()
-        fe_stride = self.fe_model.get_total_stride()
+        fe_pad   = self.fe_model.get_padding()
+        fe_patch = self.fe_model.get_patch_size()
 
-        # `fe_pad` and `fe_stride` are two independent properties:
-        #   - `fe_pad = get_padding()` is the *receptive-field* requirement:
-        #     how many pixels of context must surround each output pixel so the
-        #     deepest feature equals the infinite-image answer. Scaled by
-        #     `max_scale` so the pyramid's coarsest level still has enough
-        #     context at its own resolution.
-        #   - `fe_stride = get_total_stride()` is the *grid alignment*
-        #     requirement: input dims must be a multiple of this so deeper
-        #     feature maps upsample cleanly (same ratio on whole image and on
-        #     sub-windows). Does not grow `min_pad`, only the alignment below.
-        # Conflating the two is tempting but wrong — you can have large padding
-        # without needing alignment (e.g. a single dilated conv) or vice versa.
         min_pad = fe_pad * max_scale
+        patch_multiple = lcm(*fe_scalings) * fe_patch
 
-        # Calculate the least common multiple (LCM) of the feature extractor's scalings
-        scalings_lcm = lcm(*fe_scalings)
-        # Pad to a multiple of both patch size (for patch-based FEs, e.g. ViT)
-        # and the total internal stride (for CNNs with MaxPool), at the lcm
-        # scaling factor. Enforcing the stride alignment keeps the sub-pixel
-        # upsampling grid consistent between whole-image and tiled processing.
-        patch_multiple = scalings_lcm * fe_patch * fe_stride
-
-        # Snap the top/left pad up to a multiple of `patch_multiple` so the
-        # image content lives on the same downsampling grid regardless of how
-        # much the bottom/right must grow to reach a `padded_*` that is also a
-        # multiple of `patch_multiple`. Without aligned pad_top, a tile whose
-        # image-relative offset isn't a multiple of `patch_multiple` would have
-        # its content sit off-grid in the padded tile, shifting MaxPool windows
-        # and producing different features at the same physical pixel than the
-        # whole-image pass. This produces asymmetric paddings — `_restore_shape`
-        # passes the explicit pad_top/pad_left to `crop_to_shape` rather than
-        # assuming the old symmetric convention.
+        # Snap pad_top / pad_left up to a multiple of `patch_multiple` so the image
+        # content lives on the same downsampling grid regardless of how much
+        # bottom/right must grow. Without aligned pad_top, a tile whose
+        # image-relative offset isn't a multiple of `patch_multiple` would sit
+        # off-grid in the padded tile, shifting MaxPool windows and producing
+        # different features at the same physical pixel. Asymmetric paddings —
+        # `_restore_shape` passes pad_top/pad_left explicitly to `crop_to_shape`.
         pad_top  = utils.align_up(min_pad, patch_multiple)
         pad_left = utils.align_up(min_pad, patch_multiple)
         padded_h = utils.align_up(pad_top + img_shape[-2] + min_pad, patch_multiple)
@@ -2128,7 +2090,6 @@ class ConvpaintModel:
         assert pad_top % patch_multiple == 0, f"pad_top {pad_top} is not aligned to {patch_multiple}."
         assert pad_left % patch_multiple == 0, f"pad_left {pad_left} is not aligned to {patch_multiple}."
 
-        # Return the overall padding sizes for the image
         return (pad_top, pad_bottom), (pad_left, pad_right)
 
     def _restore_shape(self, outputs: np.ndarray,

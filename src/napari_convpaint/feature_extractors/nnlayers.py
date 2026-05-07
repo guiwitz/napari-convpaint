@@ -182,28 +182,32 @@ class Hookmodel(FeatureExtractor):
             return layers
     
     def get_padding(self):
-        # Rigorous half-receptive-field bound: `floor(RF / 2)` — the minimum
-        # context around an image pixel so its deepest selected feature equals
-        # the infinite-image answer. `_get_overall_paddings` separately snaps
-        # the padding up to a multiple of `get_total_stride()`.
+        # Half receptive-field bound: minimum context around each pixel for
+        # its deepest selected feature to equal the infinite-image answer.
         return self._fe_properties()[0] // 2
 
-    def get_total_stride(self):
+    def get_patch_size(self):
         # Product of MaxPool kernel sizes and Conv2d strides up to the deepest
-        # selected layer. Input dims must be a multiple of this for tile-level
-        # feature extraction to align with whole-image extraction.
+        # selected layer. Repurposed as the input-grid alignment requirement:
+        # input dims must be a multiple of this for tile features to match
+        # whole-image features. Combined with `gives_patched_features=False`
+        # below, features still come back at input resolution.
         return self._fe_properties()[1]
+
+    def gives_patched_features(self):
+        # `patch_size` here encodes the alignment grid, not the output
+        # resolution — features are returned at input resolution.
+        return False
 
     def has_global_context(self):
         # True if an AdaptiveAvgPool2d / AdaptiveMaxPool2d sits on the path to
-        # the deepest selected layer (e.g. SE blocks in EfficientNet). Such
-        # operators give every output pixel dependence on the entire input —
-        # no finite padding makes tile features match whole-image features.
+        # the deepest selected layer (e.g. SE blocks in EfficientNet) — no
+        # finite padding makes tile features match whole-image features.
         return self._fe_properties()[2]
 
     def _fe_properties(self):
-        """Cached `(receptive_field, total_stride, has_global_context)` from a
-        single module-dict walk. Invariant once `register_hooks` has run."""
+        """Cached `(receptive_field, alignment_stride, has_global_context)`
+        from a single module-dict walk. Invariant once `register_hooks` ran."""
         if self._fe_properties_cache is None:
             self._fe_properties_cache = self._compute_fe_properties()
         return self._fe_properties_cache
@@ -211,9 +215,7 @@ class Hookmodel(FeatureExtractor):
     def _compute_fe_properties(self):
         """Walk the network in execution order, accumulating receptive field,
         total stride, and whether any global-context op was encountered, up to
-        and including the deepest selected layer. RF grows by `(k-1) * stride`
-        on Conv2d/MaxPool/AvgPool; stride multiplies by `s` on strided Conv2d
-        and pooling."""
+        and including the deepest selected layer."""
         if len(self.selected_layers) == 0:
             return 1, 1, False
         rf = 1
@@ -239,43 +241,6 @@ class Hookmodel(FeatureExtractor):
                 break
         return rf, stride, has_global
 
-    def get_max_kernel_size_and_depth(self):
-        """
-        Given a hookmodel, find the maximum kernel size needed for the deepest layer.
-        
-        Parameters: None
-        ----------
-        
-        Returns
-        -------
-        max_kernel_size: int
-            maximum kernel size needed for the deepest layer
-        """
-        # Initialize variables
-        max_kernel_size = 1
-        current_total_pool = 1
-        conv_depth = 1
-
-        if len(self.selected_layers) == 0:
-            # no layers selected yet
-            return 0
-        
-        # Find out which is the deepest layer
-        latest_layer = self.module_dict[self.selected_layers[-1]]
-        # Iterate over all layers to find the maximum kernel size
-        for curr_layer_key, curr_layer in self.module_dict.items():
-            # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
-            if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                current_total_pool *= curr_layer.kernel_size
-            # For each convolution, multiply the kernel size with the current total pool
-            elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                conv_depth += 1
-                max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
-            # Only iterate until the latest selected layer
-            if curr_layer == latest_layer:
-                break
-        return max_kernel_size, conv_depth
-    
     def get_num_input_channels(self):
         return [self.named_modules[0][1].in_channels]
     
