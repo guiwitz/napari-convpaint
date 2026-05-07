@@ -86,7 +86,8 @@ def _assert_equal_segmentations(seg_a, seg_b, label_a, label_b):
         ("vgg-l", [1]),  # 5 layers, total_stride=4 — misalignment up to 3 (bigger hit)
     ],
 )
-def test_tile_annotations_matches_no_tile(alias, fe_scalings):
+@pytest.mark.parametrize("use_rf", [True, False], ids=["rf", "catboost"])
+def test_tile_annotations_matches_no_tile(alias, fe_scalings, use_rf):
     """Annotation tiling should not change the segmentation.
 
     Train two models with identical seeds / params, differing only in
@@ -94,14 +95,17 @@ def test_tile_annotations_matches_no_tile(alias, fe_scalings):
     receptive field *and* the tile dims are aligned to the network's total
     stride, the feature vectors at annotated pixels match, the (seeded)
     classifier fits the same data, and segmentations are pixel-identical.
+
+    Both `use_rf=True` (RandomForest, random_state=0) and `use_rf=False`
+    (CatBoost, random_seed=0) are exercised — CatBoost is the UI default and
+    is the more sensitive bar (its bootstrap is order-aware on top of being
+    seeded). If features and row-order are bit-identical, both are bit-identical.
     """
     im, im_annot = _make_data(im_dims=(300, 300), square_dims=(70, 70), circle_offset=70)
 
     def seg(tile_flag):
         cp = _build_model(alias, fe_scalings, tile_annotations=tile_flag, tile_image=False)
-        # RF with random_state=0 is fully deterministic, so any segmentation
-        # difference must come from the features — i.e. from tiling / padding.
-        cp.train(im, im_annot, fe_use_device="cpu", use_rf=True)
+        cp.train(im, im_annot, fe_use_device="cpu", use_rf=use_rf)
         return cp.segment(im, fe_use_device="cpu")
 
     _assert_equal_segmentations(
@@ -143,4 +147,52 @@ def test_tile_image_matches_no_tile(alias, fe_scalings, im_dims, square_dims, ci
 
     _assert_equal_segmentations(
         seg_no_tile, seg_tiled, "tile_image=False", "tile_image=True"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Gaussian-reach padding: high-frequency texture exposes blur boundary leak   #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("use_rf", [True, False], ids=["rf", "catboost"])
+def test_tile_annotations_textured_image_default_vgg(use_rf):
+    """Default vgg16 (1 layer, fe_pad=1) with scalings [1,2,4] on textured input.
+
+    Pins tile/no-tile equivalence on high-frequency content where any
+    boundary-mode leakage in the downsample step would surface as feature
+    drift. Smooth synthetic shapes don't trigger it; white-noise + sinusoids
+    do. With block-mean downsampling (`scale_img` via `block_reduce`), each
+    output pixel reads exactly `scaling_factor` input pixels strictly inside
+    its block, so an aligned tile produces bit-identical features. Run for
+    both classifiers — CatBoost is the UI default and the more sensitive bar.
+    """
+    rng = np.random.default_rng(0)
+    h = w = 256
+    # White noise + sinusoidal stripes: every pixel has neighbours that differ
+    # strongly, so any boundary-mode blur produces visible feature drift.
+    yy, xx = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+    stripes = 0.5 * np.sin(xx / 3.0) + 0.5 * np.sin(yy / 5.0)
+    im_2d = (rng.standard_normal((h, w)) + stripes).astype(np.float32)
+    im = np.stack([im_2d, im_2d, im_2d], axis=0)  # (3, H, W) for rgb mode
+
+    annot = np.zeros((h, w), dtype=np.uint16)
+    annot[40:55, 40:55] = 1
+    annot[180:195, 180:195] = 2
+    annot[100:103, 200:203] = 1  # tiny patch near boundary of its own tile
+
+    def seg(tile_flag):
+        cp = ConvpaintModel(alias='vgg')  # default vgg16, scalings [1,2,4]
+        cp.set_params(
+            tile_annotations=tile_flag,
+            tile_image=False,
+            channel_mode='rgb',
+            normalize=1,
+            image_downsample=1,
+        )
+        cp.train(im, annot, fe_use_device='cpu', use_rf=use_rf)
+        return cp.segment(im, fe_use_device='cpu')
+
+    _assert_equal_segmentations(
+        seg(False), seg(True),
+        'tile_annotations=False', 'tile_annotations=True',
     )
