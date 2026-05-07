@@ -1,7 +1,7 @@
 import warnings
 import torch
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from skimage.measure import block_reduce
 import skimage.transform
 import skimage.morphology as morph
 from joblib import Parallel, delayed
@@ -191,24 +191,25 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
     
     # Else DOWNSCALE the image
 
-    # IMAGES by gaussian filter and striding
+    # IMAGES by block-mean downsampling. Reads exactly `scaling_factor` input
+    # pixels per output pixel — strictly local — so a sub-window aligned to
+    # `scaling_factor` produces bit-identical features to the whole-image pass
+    # at the same physical positions (no boundary-mode blur leak).
     if input_type == 'img':
-        # Apply a small Gaussian blur to avoid aliasing
-        sigma = 0.4 * scaling_factor
-        sigma = [0] * (image.ndim - 2) + [sigma, sigma]  # Add zeros for batch and channel dimensions
-        blurred_img = gaussian_filter(image, sigma=sigma)  # assuming shape (..., H, W)
-        # Downsample by striding
+        # `block_reduce` needs strided ndarray semantics; materialise dask etc.
+        image = np.asarray(image)
         H, W = image.shape[-2:]
-        start_h = (H % scaling_factor) // 2 # Move the start such that the image is centered
-        start_w = (W % scaling_factor) // 2 # Move the start such that the image is centered
-        scaled_img = blurred_img[..., start_h::scaling_factor, start_w::scaling_factor]
-        # from matplotlib import pyplot as plt
-        # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-        # ax[0].imshow(image[0,0,...], cmap='gray')
-        # ax[1].imshow(blurred_img[0,0,...], cmap='gray')
-        # ax[2].imshow(scaled_img[0,0,...], cmap='gray')
-        # plt.show()
-        return scaled_img
+        # Centre-crop to a multiple of `scaling_factor` (matches the prior
+        # centring behaviour). In convpaint's pipeline `_get_overall_paddings`
+        # already pads to a multiple of all scalings, so this is normally a no-op.
+        crop_h = H % scaling_factor
+        crop_w = W % scaling_factor
+        if crop_h or crop_w:
+            sh = crop_h // 2
+            sw = crop_w // 2
+            image = image[..., sh:H - (crop_h - sh), sw:W - (crop_w - sw)]
+        block_shape = (1,) * (image.ndim - 2) + (scaling_factor, scaling_factor)
+        return block_reduce(image, block_size=block_shape, func=np.mean)
 
     # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
     # First, we pad to the next multiple of the scaling factor, distributing on each side (with 1 pixel more on bottom/right if uneven)
