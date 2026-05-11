@@ -1615,7 +1615,7 @@ class ConvpaintModel:
             return pred_reshaped[0]
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=True, use_dask=False, fe_use_device=None):
+    def _parallel_predict_image(self, image, return_proba=True, use_dask=False, fe_use_device=None, plot_tiles=False):
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1673,6 +1673,9 @@ class ConvpaintModel:
         new_min_col_ind_collection = []
         new_min_row_ind_collection = []
 
+        if plot_tiles:
+            img_to_plot = image.copy()
+
         for row in range(nblocks_rows+1):
             for col in range(nblocks_cols+1):
                 min_row = np.max([0, row*maxblock-margin])
@@ -1703,6 +1706,18 @@ class ConvpaintModel:
                     max_row = image.shape[-2]
 
                 image_block = image[..., min_row:max_row, min_col:max_col]
+
+                # For plotting:
+                # Take the entire image, add boarders for the block
+                if plot_tiles:
+                    img_to_plot[..., min_row, min_col:max_col] = 1
+                    img_to_plot[..., max_row-1, min_col:max_col] = 1
+                    img_to_plot[..., min_row:max_row, min_col] = 1
+                    img_to_plot[..., min_row:max_row, max_col-1] = 1
+                    img_to_plot[..., min_row_ind, min_col_ind:max_col_ind] = 0.5
+                    img_to_plot[..., max_row_ind-1, min_col_ind:max_col_ind] = 0.5
+                    img_to_plot[..., min_row_ind:max_row_ind, min_col_ind] = 0.5
+                    img_to_plot[..., min_row_ind:max_row_ind, max_col_ind-1] = 0.5
 
                 # Predict the block using dask or directly (with no normalization, as it is done outside)
                 if use_dask:
@@ -1746,7 +1761,12 @@ class ConvpaintModel:
                     min_row_ind_collection[k]:max_row_ind_collection[k],
                     min_col_ind_collection[k]:max_col_ind_collection[k]] = crop_out
             client.close()
-        
+
+        if plot_tiles:
+            from matplotlib import pyplot as plt
+            plt.imshow(img_to_plot[0, 0])
+            plt.show()
+
         return predicted_image_complete
 
     def _train_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False,
