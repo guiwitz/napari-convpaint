@@ -102,7 +102,7 @@ class ComboFeatures(FeatureExtractor):
         return self.patch_size
     
     def get_has_global_context(self):
-        return self.model1.has_global_context() or self.model2.has_global_context()
+        return self.model1.get_has_global_context() or self.model2.get_has_global_context()
     
     def gives_patched_features(self):
         # Since we want to combine, we always rescale to image size, even if the models are patched
