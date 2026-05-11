@@ -369,7 +369,7 @@ def rescale_outputs(output_img, output_shape, order=0):
     return rescaled_output
 
 
-### CROPPING, PADDING, TILING & ANNOTATION EXTRACTION
+### CROPPING, PADDING, TILING & ANNOTATIONS EXTRACTION
 
 def reduce_to_patch_multiple(input, patch_size):
     """
@@ -539,15 +539,15 @@ def get_annot_planes(img, annot=None, coords=None):
     img : np.ndarray
         Input image to extract planes from. Must have spatial dimensions as the last two dimensions.
     annot : np.ndarray, optional
-        Input annotation to extract planes from. Must have spatial dimensions as the last two dimensions.
-        If None, all image planes and no annotation planes are returned.
+        Input annotations to extract planes from. Must have spatial dimensions as the last two dimensions.
+        If None, all image planes and no annotations planes are returned.
 
     Returns:
     ----------
     img_planes : list of np.ndarray
         List of image planes that contain annotations. If annot is None, all image planes are returned.
     annot_planes : list of np.ndarray or None
-        List of annotation planes from the input annotation. If annot is None, None is returned.
+        List of annotations planes from the input annotations. If annot is None, None is returned.
     coords : np.ndarray or None
         List of coordinates planes from the input coordinates. If coords is None, None is returned.
     """
@@ -580,9 +580,9 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
     img : np.ndarray
         Input image to be tiled. Must have spatial dimensions as the last two dimensions.
     annot : np.ndarray
-        Input annotation to use for tiling. Must have spatial dimensions as the last two dimensions.
+        Input annotations to use for tiling. Must have spatial dimensions as the last two dimensions.
     padding : int or tuple
-        Padding size to be added to the bounding box of the annotation.
+        Padding size to be added to the bounding box of the annotations.
         If an int is provided, it is applied to all sides.
         If a tuple is provided, it should be of the form (pad_top, pad_bottom, pad_left, pad_right).
 
@@ -591,7 +591,7 @@ def tile_annot(img, annot, coords, padding, plot_tiles=False):
     img_tiles : list of np.ndarray
         List of image tiles that contain the annotations.
     annot_tiles : list of np.ndarray
-        List of annotation tiles that contain the annotations.
+        List of annotations tiles that contain the annotations.
     """
     if isinstance(padding, int):
         pad_top, pad_bottom, pad_left, pad_right = (padding, padding, padding, padding)
@@ -1164,7 +1164,7 @@ def get_balanced_mask(ref_mask, tgt_mask):
     tgt_mask_balanced[tgt_idx[:, 0], tgt_idx[:, 1]] = True
     return tgt_mask_balanced
 
-def get_annotation_regions(annotation, d_edge=1):
+def get_annotations_regions(annotations, d_edge=1):
     """
     Given the annotation returns list of pixel masks for each of the following regions:
     1. all foreground pixels
@@ -1178,8 +1178,8 @@ def get_annotation_regions(annotation, d_edge=1):
 
     Parameters:
     ----------
-    annotation: 2d np.ndarray
-        annotation image, 1 is background, 2,3,... are foreground classes
+    annotations: 2d np.ndarray
+        annotations image, 1 is background, 2,3,... are foreground classes
     d_edge: int
         dilation factor for edge, by default 1
 
@@ -1191,23 +1191,23 @@ def get_annotation_regions(annotation, d_edge=1):
     """
 
     # 1. all foreground pixels
-    fg = annotation > 1
+    fg = annotations > 1
 
     # 2. all not foreground pixels
-    not_fg = annotation == 1
+    not_fg = annotations == 1
 
     # 3. at most as many randomly selected not-foreground pixels as foreground pixels
     not_fg_balanced = get_balanced_mask(ref_mask=fg, tgt_mask=not_fg)
 
     # 4. signal: union of foreground pixels shrank by 1 pixel for each of the foreground classes
     # signal = np.zeros_like(fg).astype(np.bool_)
-    # for c in range(2, annotation.max() + 1):
-    #    signal = signal | morph.binary_erosion(annotation == c, morph.cross(1))
+    # for c in range(2, annotations.max() + 1):
+    #    signal = signal | morph.binary_erosion(annotations == c, morph.cross(1))
     # parallel implementation with joblib of the three lines above:
     def erode(c):
-        return morph.binary_erosion(annotation == c)
+        return morph.binary_erosion(annotations == c)
 
-    signal = np.any(Parallel(n_jobs=-1)(delayed(erode)(c) for c in range(2, annotation.max() + 1)), axis=0)
+    signal = np.any(Parallel(n_jobs=-1)(delayed(erode)(c) for c in range(2, annotations.max() + 1)), axis=0)
 
     # 5. edge obtained by dilation of 4. by 1+d_edge pixels and than subtracting 4.
     edge_signal = morph.binary_dilation(signal, morph.disk(1 + d_edge))
@@ -1233,7 +1233,7 @@ def get_annotation_regions(annotation, d_edge=1):
 def extract_annotated_pixels(features, annotation, full_annotation=True):
     """
     Given a set of features and an annotation
-    if not full_annotation, select all pixels in annotations (values 1,2,...), record same class_id as annotation
+    if not full_annotation, select all pixels in annotations (values 1,2,...), record same class_id as annotations
     otherwise, select all pixels in annotations (values 2,3...; assumes 1 added to the original [0-bg, 1,2...signal
     annotation values]). targets set for signal: class_id=2, the same number of background pixels class_id=1,
     and the edge pixels class_id=3
@@ -1269,7 +1269,7 @@ def extract_annotated_pixels(features, annotation, full_annotation=True):
         targets_sel = annot_flat[annot_mask]
     else:
         # get masks for annotation regions
-        masks = get_annotation_regions(annotation)
+        masks = get_annotations_regions(annotation)
 
         # get signal, edge, and balanced background pixels
         signal = masks['signal']

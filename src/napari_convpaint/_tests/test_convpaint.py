@@ -36,7 +36,7 @@ def compute_precision_recall(ground_truth, recovered):
     # return precision, recall
 
 def test_add_layers(make_napari_viewer, capsys):
-    """Test that annotation and prediction layers are added correctly"""
+    """Test that annotations and prediction layers are added correctly"""
     viewer = make_napari_viewer()
     my_widget = ConvpaintWidget(viewer)
     my_widget.ensure_init()
@@ -46,8 +46,8 @@ def test_add_layers(make_napari_viewer, capsys):
     assert 'annotations' in viewer.layers
     # assert 'segmentation' in viewer.layers
 
-def test_annotation_layer_dims(make_napari_viewer, capsys):
-    """Check that dimensions of annotation layer match image layer"""
+def test_annotations_layer_dims(make_napari_viewer, capsys):
+    """Check that dimensions of annotations layer match image layer"""
 
     viewer = make_napari_viewer()
     # viewer = napari.Viewer()
@@ -165,9 +165,10 @@ def test_save_model(make_napari_viewer, capsys):
     my_widget._on_train()
     my_widget._on_predict()
 
-    os.makedirs('_tests/model_dir', exist_ok=True)
-    my_widget._on_save_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
-    assert os.path.exists('_tests/model_dir/test_model.pkl')  # Changed to .pkl
+    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(models_dir, exist_ok=True)
+    my_widget._on_save_model(save_file=os.path.join(models_dir, 'test_model.pkl'))
+    assert os.path.exists(os.path.join(models_dir, 'test_model.pkl'))
 
 
 def test_load_model(make_napari_viewer, capsys):
@@ -181,7 +182,9 @@ def test_load_model(make_napari_viewer, capsys):
     # my_widget.rgb_img = True
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    my_widget._on_load_model(save_file='_tests/model_dir/test_model.pkl')  # Changed to .pkl
+    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(models_dir, exist_ok=True)
+    my_widget._on_load_model(save_file=os.path.join(models_dir, 'test_model.pkl'))  # Changed to .pkl
     my_widget._on_predict()
 
     # recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -199,7 +202,7 @@ def test_load_model(make_napari_viewer, capsys):
 def test_save_model_dino(make_napari_viewer, capsys):
     # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
-    imgs_dir = os.path.join(os.path.dirname(__file__), '_tests', 'test_imgs')
+    imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
     im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
     im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
     ground_truth = np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png')))
@@ -233,10 +236,12 @@ def test_save_model_dino(make_napari_viewer, capsys):
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()  # Update the classifier with the new parameters
     my_widget._on_predict()
-    os.makedirs('_tests/model_dir', exist_ok=True)
-    my_widget._on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
+    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(models_dir, exist_ok=True)
+    model_path_dino = os.path.join(models_dir, 'test_model_dino.pkl')
+    my_widget._on_save_model(save_file=model_path_dino)
     assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
-    assert os.path.exists('_tests/model_dir/test_model_dino.pkl')
+    assert os.path.exists(model_path_dino)
 
 
 def test_cross_attention_matches_mha_reference():
@@ -285,7 +290,7 @@ def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
     Reproduces a crash where MPS fails with:
     [MPSNDArrayDescriptor sliceDimension:withSubrange:] failed assertion
     """
-    imgs_dir = os.path.join(os.path.dirname(__file__), '_tests', 'test_imgs')
+    imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
     im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
     im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
 
@@ -329,7 +334,7 @@ def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
 def test_load_model_dino(make_napari_viewer, capsys):
     # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
-    imgs_dir = os.path.join(os.path.dirname(__file__), '_tests', 'test_imgs')
+    imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
     im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
     im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
     ground_truth = np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png')))
@@ -343,7 +348,9 @@ def test_load_model_dino(make_napari_viewer, capsys):
     my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Load the Dino model
-    my_widget._on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
+    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(models_dir, exist_ok=True)
+    my_widget._on_load_model(save_file=os.path.join(models_dir, 'test_model_dino.pkl'))
     # Ensure the model type is set correctly after loading
     assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
     my_widget._on_predict()
@@ -373,6 +380,8 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     # my_widget.rgb_img = True
     my_widget.cp_model.set_params(channel_mode='rgb')
 
+    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(models_dir, exist_ok=True)
     # Create and save the first model with scales [1]
     my_widget.qcombo_fe_type.setCurrentText('vgg16')
     my_widget.fe_scaling_factors.setCurrentText('[1]')
@@ -382,7 +391,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()
     my_widget._on_predict()
-    model_path_1 = '_tests/model_dir/test_model_vgg16_scale_1.pkl'
+    model_path_1 = os.path.join(models_dir, 'test_model_vgg16_scale_1.pkl')
     my_widget._on_save_model(save_file=model_path_1)
     assert os.path.exists(model_path_1)
 
@@ -396,7 +405,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()
     my_widget._on_predict()
-    model_path_2 = '_tests/model_dir/test_model_vgg16_scale_1248.pkl'
+    model_path_2 = os.path.join(models_dir, 'test_model_vgg16_scale_1248.pkl')
     my_widget._on_save_model(save_file=model_path_2)
     assert os.path.exists(model_path_2)
 
@@ -488,12 +497,15 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
         assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
         #save the model
-        model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
+        models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+        os.makedirs(models_dir, exist_ok=True)
+
+        model_path = os.path.join(models_dir, f'test_model_vgg16_custom_layers_{indices_to_select}.pkl')
         my_widget._on_save_model(save_file=model_path)
 
     #load the models again and check if the predictions are correct
     for indices_to_select in all_tests:
-        model_path = f'_tests/model_dir/test_model_vgg16_custom_layers_{indices_to_select}.pkl'
+        model_path = os.path.join(models_dir, f'test_model_vgg16_custom_layers_{indices_to_select}.pkl')
         my_widget._on_load_model(save_file=model_path)
         assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
@@ -645,5 +657,5 @@ def test_all_models_train_predict(make_napari_viewer, fe_name, image_type):
 
     assert 'segmentation' in viewer.layers, "Segmentation layer not created"
     seg = viewer.layers['segmentation'].data
-    assert seg.shape == annot.shape, f"Segmentation shape {seg.shape} != annotation shape {annot.shape}"
+    assert seg.shape == annot.shape, f"Segmentation shape {seg.shape} != annotations shape {annot.shape}"
     assert np.unique(seg).size > 1, "Segmentation is uniform — model produced no meaningful output"

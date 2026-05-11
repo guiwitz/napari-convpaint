@@ -773,7 +773,7 @@ class ConvpaintModel:
             Image to train the classifier on or list of images
         annotations : np.ndarray or list[np.ndarray]
             Annotations to train the classifier on or list of annotations.
-            Image and annotation lists must correspond to each other.
+            Image and annotations lists must correspond to each other.
         memory_mode : bool, optional
             Whether to use memory mode.
             If True, the annotations are registered and updated, and only features for new pixels are extracted.
@@ -941,7 +941,7 @@ class ConvpaintModel:
             Image(s) to extract features from
         annotations : np.ndarray or list[np.ndarray], optional
             Annotations to extract features from.
-            Image and annotation lists must correspond to each other.
+            Image and annotations lists must correspond to each other.
         restore_input_form : bool, optional
             Whether to restore the input form of the features.
             If True, no annotations are returned.
@@ -1017,15 +1017,21 @@ class ConvpaintModel:
             annotations = [utils.scale_img(a, factor, input_type="labels", upscale=upscale)
                         for a in annotations]
 
-        # --- Memory mode: annotation registering & updating ---------------------------------------
+        # --- Memory mode: annotations registering & updating ---------------------------------------
         if memory_mode:
             annotations = self._register_and_update_annots(
                 annotations, img_ids, params_for_extract.image_downsample
             )
-            num_new = np.sum([ann > 0 for ann in annotations])
+            num_new = sum(np.sum(ann > 0) for ann in annotations)
             if num_new == 0:
                 warnings.warn("No new annotations. Train with existing features.")
                 return [], [], [], [], params_for_extract.image_downsample
+            # Filter out the data where annots are totally empty
+            else:
+                data = [d for d, ann in zip(data, annotations) if np.sum(ann > 0) > 0]
+                annotations = [ann for ann in annotations if np.sum(ann > 0) > 0]
+                if img_ids is not None:
+                    img_ids = [img_id for img_id, ann in zip(img_ids, annotations) if np.sum(ann > 0) > 0]
             coords = [utils.get_coordinates_image(d) for d in data]
         else:
             coords = [None for _ in data]  # No coordinates if not in memory mode
@@ -1046,7 +1052,7 @@ class ConvpaintModel:
         else:
             coords = [None for _ in data]  # No coordinates if not in memory mode
 
-        # --- Annotation plane extraction -----------------------------------------
+        # --- Annotations plane extraction -----------------------------------------
         # Note: annotated planes are flattened (treating them as individual images)
         if use_annots:
             planes = [utils.get_annot_planes(d, a, c)
@@ -1071,7 +1077,7 @@ class ConvpaintModel:
         else:
             coords = [None for _ in data]
 
-        # --- Annotation tiling (optional) ----------------------------------------
+        # --- Annotations tiling (optional) ----------------------------------------
         # Note: tiles are flattened (treating them as individual images)
         if params_for_extract.tile_annotations:
             if use_annots:
@@ -1288,7 +1294,7 @@ class ConvpaintModel:
             return self.classifier, None, None
 
         if not memory_mode:
-            # Use _get_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
+            # Use _get_features to extract features and the suiting annotations parts (returns lists if restore_input_form=False)
             feature_parts, annot_parts = self._get_features(
                 data, annotations, restore_input_form=False, memory_mode=memory_mode,
                 in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
@@ -1301,7 +1307,7 @@ class ConvpaintModel:
             targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
 
         else: # memory mode
-            # Use _get_features to extract features and the suiting annotation parts (returns lists if restore_input_form=False)
+            # Use _get_features to extract features and the suiting annotations parts (returns lists if restore_input_form=False)
             feature_parts, annot_parts, coords, img_ids, scale = self._get_features(
                 data, annotations, restore_input_form=False, memory_mode=memory_mode,
                 img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
@@ -1379,7 +1385,7 @@ class ConvpaintModel:
                 # print("Num pixels to remove:", np.sum(mask_to_remove))
                 coords_to_remove = np.argwhere(mask_to_remove)
 
-                # Set the pixels that are the same as the old annotation to zero (no need to extract features)
+                # Set the pixels that are the same as the old annotations to zero (no need to extract features)
                 annot_to_extract[mask_to_ignore] = 0
 
                 # coords_to_remove: shape [N, 3], rows of (z, h, w)
