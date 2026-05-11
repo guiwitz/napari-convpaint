@@ -39,7 +39,7 @@ def test_filter_image():
     assert features.shape[0] == 320, f'Expecting 320 features but got {features.shape[1]}'
     assert features.shape[1] == 128, f'Expecting 128 annotated pixels but got {features.shape[0]}'
 
-    #disable annotation tiling should lead to the same results
+    #disable annotations tiling should lead to the same results
     model.set_param("tile_annotations", False)
     features = model.get_feature_image(data=image)
     assert features.shape[0] == 320, f'Expecting 320 features but got {features.shape[1]}'
