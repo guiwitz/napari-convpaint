@@ -85,6 +85,7 @@ def _assert_equal_segmentations(seg_a, seg_b, label_a, label_b):
         ("vgg-m", [1]),  # 3 layers, total_stride=2 — misalignment by 1 (odd tile)
         ("vgg-l", [1]),  # 5 layers, total_stride=4 — misalignment up to 3 (bigger hit)
         ("ilastik", [1]),  # ilastik filter set; FE-reported kernel_size=41 -> pad=20
+        ("gaussian", [1]),  # skimage.filters.gaussian, sigma=3; FE reports pad=2*sigma=6
     ],
 )
 @pytest.mark.parametrize("use_rf", [True, False], ids=["rf", "catboost"])
