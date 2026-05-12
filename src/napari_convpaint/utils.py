@@ -153,7 +153,7 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
 
 ### SCALING AND RESCALING
 
-def scale_img(image, scaling_factor, upscale=False, input_type="img"):
+def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_result=False):
     """
     Downscale an image by averaging over non-overlapping blocks of the specified size.
     OR Upscale by repeating the pixels.
@@ -169,6 +169,8 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
     input_type : str ("img", "labels", "coords")
         Type of the input image. Determines how to scale the image:
         If "img", use median, if "labels", use mode, if "coords", use max.
+    plot_result : bool
+        If True, plot the original and scaled images.
 
     Returns:
     ----------
@@ -197,7 +199,7 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         # NEW: By block-mean
         return scale_with_block_mean(image, scaling_factor)
         # OLD: by gaussian filter and striding
-        return scale_with_gaussian(image, scaling_factor)
+        return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
 
     # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
     # First, we pad to the next multiple of the scaling factor, distributing on each side (with 1 pixel more on bottom/right if uneven)
@@ -246,11 +248,13 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img"):
         if len(classes_before) != len(classes_after):
             warnings.warn(f"Classes have changed after downscaling from {classes_before} to {classes_after}.")
 
-        # from matplotlib import pyplot as plt
-        # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        # ax[0].imshow(image[0,...], cmap='gray')
-        # ax[1].imshow(scaled_img[0,...], cmap='gray')
-        # plt.show()
+        if plot_result:
+            from matplotlib import pyplot as plt
+            _, ax = plt.subplots(1, 2, figsize=(10, 5))
+            ax[0].imshow(image[0,...], cmap='gray')
+            ax[1].imshow(scaled_img[0,...], cmap='gray')
+            plt.show()
+        
         return scaled_img
 
     elif input_type == 'coords':
@@ -291,7 +295,7 @@ def scale_with_block_mean(image, scaling_factor):
     block_shape = (1,) * (image.ndim - 2) + (scaling_factor, scaling_factor)
     return block_reduce(image, block_size=block_shape, func=np.mean)
 
-def scale_with_gaussian(image, scaling_factor):
+def scale_with_gaussian(image, scaling_factor, plot_blurred=False):
     # Apply a small Gaussian blur to avoid aliasing
     sigma = 0.4 * scaling_factor
     sigma = [0] * (image.ndim - 2) + [sigma, sigma]  # Add zeros for batch and channel dimensions
@@ -301,12 +305,15 @@ def scale_with_gaussian(image, scaling_factor):
     start_h = (H % scaling_factor) // 2 # Move the start such that the image is centered
     start_w = (W % scaling_factor) // 2 # Move the start such that the image is centered
     scaled_img = blurred_img[..., start_h::scaling_factor, start_w::scaling_factor]
-    # from matplotlib import pyplot as plt
-    # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    # ax[0].imshow(image[0,0,...], cmap='gray')
-    # ax[1].imshow(blurred_img[0,0,...], cmap='gray')
-    # ax[2].imshow(scaled_img[0,0,...], cmap='gray')
-    # plt.show()
+
+    if plot_blurred:
+        from matplotlib import pyplot as plt
+        _, ax = plt.subplots(1, 3, figsize=(15, 5))
+        ax[0].imshow(image[0,0,...], cmap='gray')
+        ax[1].imshow(blurred_img[0,0,...], cmap='gray')
+        ax[2].imshow(scaled_img[0,0,...], cmap='gray')
+        plt.show()
+    
     return scaled_img
 
 def fast_mode(arr, axis):
@@ -516,11 +523,9 @@ def pad_to_shape(feat, target_shape):
         pad.append((pad_before, pad_after))
     return np.pad(feat, pad, mode='constant')
 
-
 def align_up(val, alignment):
     """Smallest multiple of `alignment` that is >= `val`. Alignment must be >= 1."""
     return ((val + alignment - 1) // alignment) * alignment
-
 
 def crop_to_shape(arr, target_shape, crop_top=None, crop_left=None):
     """
@@ -570,7 +575,6 @@ def crop_to_shape(arr, target_shape, crop_top=None, crop_left=None):
     w_end = -crop_right if crop_right > 0 else None
 
     return arr[..., crop_top:h_end, crop_left:w_end]
-
 
 def get_annot_planes(img, annot=None, coords=None):
     """
