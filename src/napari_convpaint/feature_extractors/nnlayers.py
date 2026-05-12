@@ -152,7 +152,7 @@ class Hookmodel(FeatureExtractor):
             param.fe_scalings = [1,2]
             param.fe_layers = self.selectable_layer_keys[:3] # Use the first 3 layers by default
 
-        # param.tile_annotations = True # Removed this in favour of setting it to not self.get_has_global_context() in the feature extractor superclass
+        # Note that tile_annotations is set to `not self.get_has_global_context()` in the feature extractor superclass
 
         return param
 
@@ -234,46 +234,6 @@ class Hookmodel(FeatureExtractor):
         self.padding = rf // 2
         self.patch_size = stride
         self.has_global_context = has_global
-
-    def get_max_kernel_size_and_depth(self):
-        """
-        Given a hookmodel, find the maximum kernel size needed for the deepest layer.
-        NOTE: This has been replaced by the more rigorous receptive field calculation above, but is kept here for reference.
-        
-        Parameters: None
-        ----------
-        
-        Returns
-        -------
-        max_kernel_size: int
-            maximum kernel size needed for the deepest layer
-        conv_depth: int
-            number of convolutional layers until the deepest layer (including the deepest layer)
-        """
-        # Initialize variables
-        max_kernel_size = 1
-        current_total_pool = 1
-        conv_depth = 1
-
-        if len(self.selected_layers) == 0:
-            # no layers selected yet
-            return 0
-        
-        # Find out which is the deepest layer
-        latest_layer = self.module_dict[self.selected_layers[-1]]
-        # Iterate over all layers to find the maximum kernel size
-        for curr_layer_key, curr_layer in self.module_dict.items():
-            # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
-            if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                current_total_pool *= curr_layer.kernel_size
-            # For each convolution, multiply the kernel size with the current total pool
-            elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                conv_depth += 1
-                max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
-            # Only iterate until the latest selected layer
-            if curr_layer == latest_layer:
-                break
-        return max_kernel_size, conv_depth
     
     def get_num_input_channels(self):
         return [self.named_modules[0][1].in_channels]
