@@ -153,7 +153,7 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
 
 ### SCALING AND RESCALING
 
-def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_result=False):
+def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_result=False, use_gaussian_scaling=False):
     """
     Downscale an image by averaging over non-overlapping blocks of the specified size.
     OR Upscale by repeating the pixels.
@@ -196,10 +196,12 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
 
     # IMAGES
     if input_type == 'img':
-        # NEW: By block-mean
-        return scale_with_block_mean(image, scaling_factor)
-        # OLD: by gaussian filter and striding
-        return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
+        if not use_gaussian_scaling:
+            # NEW: By block-mean
+            return scale_with_block_mean(image, scaling_factor)
+        else:
+            # OLD: by gaussian filter and striding
+            return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
 
     # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
     # First, we pad to the next multiple of the scaling factor, distributing on each side (with 1 pixel more on bottom/right if uneven)
