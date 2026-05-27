@@ -194,25 +194,27 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
     
     # Else DOWNSCALE the image
 
+    # Pre-pad to a multiple of `scaling_factor` so the reduction is exact and image,
+    # labels, and coords all produce the same output shape. Padding mode is per
+    # input_type (reflect for images, 0 for labels, -1 for coords) via `pad()`.
+    if image.shape[-2] % scaling_factor != 0 or image.shape[-1] % scaling_factor != 0:
+        pad_h = (scaling_factor - (image.shape[-2] % scaling_factor)) % scaling_factor
+        pad_w = (scaling_factor - (image.shape[-1] % scaling_factor)) % scaling_factor
+        pad_top, pad_left = pad_h // 2, pad_w // 2
+        pad_bot, pad_right = pad_h - pad_top, pad_w - pad_left
+        image = pad(image, (pad_top, pad_bot, pad_left, pad_right), input_type=input_type)
+
     # IMAGES
     if input_type == 'img':
         if not use_gaussian_scaling:
-            # NEW: By block-mean
+            # NEW: block-mean. Input is aligned by the pre-pad above, satisfying
+            # scale_with_block_mean's precondition.
             return scale_with_block_mean(image, scaling_factor)
         else:
             # OLD: by gaussian filter and striding
             return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
 
     # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
-    # First, we pad to the next multiple of the scaling factor, distributing on each side (with 1 pixel more on bottom/right if uneven)
-    if image.shape[-2] % scaling_factor != 0 or image.shape[-1] % scaling_factor != 0:
-        # Calculate padding sizes
-        pad_h = (scaling_factor - (image.shape[-2] % scaling_factor)) % scaling_factor
-        pad_w = (scaling_factor - (image.shape[-1] % scaling_factor)) % scaling_factor
-        pad_top, pad_left = pad_h // 2, pad_w // 2
-        pad_bot, pad_right = pad_h - pad_top, pad_w - pad_left
-        # Pad the image
-        image = pad(image, (pad_top, pad_bot, pad_left, pad_right), input_type=input_type)
     # Slice the last two dimensions
     slice_start = (0, 0) #((image.shape[-2] % scaling_factor) // 2,
                     #  (image.shape[-1] % scaling_factor) // 2)
@@ -279,21 +281,16 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
     
 def scale_with_block_mean(image, scaling_factor):
     """Rescale image by block-mean downsampling. Reads exactly `scaling_factor` input
-    pixels per output pixel — strictly local — so a sub-window aligned to
-    `scaling_factor` produces bit-identical features to the whole-image pass
-    at the same physical positions (no boundary-mode blur leak)."""
+    pixels per output pixel — strictly local, no boundary-mode blur leak — so a
+    sub-window aligned to `scaling_factor` produces bit-identical features to the
+    whole-image pass at the same physical positions.
+
+    Precondition: H and W must be multiples of `scaling_factor`. All in-tree
+    callers ensure this — `scale_img` pre-pads, and the FE pyramid receives
+    input aligned by `_get_overall_paddings`.
+    """
     # `block_reduce` needs strided ndarray semantics; materialise dask etc.
     image = np.asarray(image)
-    H, W = image.shape[-2:]
-    # Centre-crop to a multiple of `scaling_factor` (matches the prior
-    # centring behaviour). In convpaint's pipeline `_get_overall_paddings`
-    # already pads to a multiple of all scalings, so this is normally a no-op.
-    crop_h = H % scaling_factor
-    crop_w = W % scaling_factor
-    if crop_h or crop_w:
-        sh = crop_h // 2
-        sw = crop_w // 2
-        image = image[..., sh:H - (crop_h - sh), sw:W - (crop_w - sw)]
     block_shape = (1,) * (image.ndim - 2) + (scaling_factor, scaling_factor)
     return block_reduce(image, block_size=block_shape, func=np.mean)
 
