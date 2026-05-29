@@ -195,16 +195,12 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
     # Else DOWNSCALE the image
 
     # IMAGES
-    if input_type == 'img':
-        if not use_gaussian_scaling:
-            # NEW: By block-mean
-            return scale_with_block_mean(image, scaling_factor)
-        else:
-            # OLD: by gaussian filter and striding
-            return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
+    if input_type in ('img', 'image') and use_gaussian_scaling:
+        # OLD: by gaussian filter and striding
+        return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
 
-    # For LABELS and COORDINATES, we slice/stack the image to apply the downscaling along new axes
-    # First, we pad to the next multiple of the scaling factor, distributing on each side (with 1 pixel more on bottom/right if uneven)
+    # For IMAGE WITH BLOCK_REDUCE, LABELS and COORDINATES, we pad to the next multiple of the scaling factor,
+    # distributing on each side (with 1 pixel more on bottom/right if uneven)
     if image.shape[-2] % scaling_factor != 0 or image.shape[-1] % scaling_factor != 0:
         # Calculate padding sizes
         pad_h = (scaling_factor - (image.shape[-2] % scaling_factor)) % scaling_factor
@@ -213,7 +209,12 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
         pad_bot, pad_right = pad_h - pad_top, pad_w - pad_left
         # Pad the image
         image = pad(image, (pad_top, pad_bot, pad_left, pad_right), input_type=input_type)
-    # Slice the last two dimensions
+
+    if input_type in ('img', 'image'):
+        # For images, use block_reduce with mean
+        return scale_with_block_mean(image, scaling_factor)
+
+    # For LABELS and COORDINATES, slice the last two dimensions
     slice_start = (0, 0) #((image.shape[-2] % scaling_factor) // 2,
                     #  (image.shape[-1] % scaling_factor) // 2)
     slice_size = (image.shape[-2] // scaling_factor * scaling_factor, # These should now be equal to image shape, since we padded ...
@@ -286,8 +287,8 @@ def scale_with_block_mean(image, scaling_factor):
     image = np.asarray(image)
     H, W = image.shape[-2:]
     # Centre-crop to a multiple of `scaling_factor` (matches the prior
-    # centring behaviour). In convpaint's pipeline `_get_overall_paddings`
-    # already pads to a multiple of all scalings, so this is normally a no-op.
+    # centring behaviour). In convpaint's context images already get padded to
+    # a multiple the all scaling factor, so this is normally a no-op.
     crop_h = H % scaling_factor
     crop_w = W % scaling_factor
     if crop_h or crop_w:
