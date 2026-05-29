@@ -194,25 +194,26 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
     
     # Else DOWNSCALE the image
 
-    # IMAGES
-    # OLD: by gaussian filter and striding
-    if input_type in ('img', 'image') and use_gaussian_scaling:
-        return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
-
-    # For IMAGE WITH BLOCK_REDUCE, LABELS and COORDINATES, we pad to the next multiple of the scaling factor,
+    # Pad to the next multiple of the scaling factor,
     # distributing on each side (with 1 pixel more on bottom/right if uneven)
     if image.shape[-2] % scaling_factor != 0 or image.shape[-1] % scaling_factor != 0:
-        # Calculate padding sizes
         pad_h = (scaling_factor - (image.shape[-2] % scaling_factor)) % scaling_factor
         pad_w = (scaling_factor - (image.shape[-1] % scaling_factor)) % scaling_factor
         pad_top, pad_left = pad_h // 2, pad_w // 2
         pad_bot, pad_right = pad_h - pad_top, pad_w - pad_left
         # Pad the image
         image = pad(image, (pad_top, pad_bot, pad_left, pad_right), input_type=input_type)
-
-    # For IMAGES, use block_reduce with mean
-    if input_type in ('img', 'image'):
-        return scale_with_block_mean(image, scaling_factor)
+    
+    # IMAGES
+    img_strings = ('img', 'image', 'images') # Allow some flexibility in the input type string for images (but pass 'img' downstream)
+    if input_type in img_strings:
+        input_type = 'img'
+        if not use_gaussian_scaling:
+            # NEW (default): use block_reduce with mean
+            return scale_with_block_mean(image, scaling_factor)
+        else:
+            # OLD: by gaussian filter and striding
+            return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
 
     # For LABELS and COORDINATES, slice the last two dimensions
     slice_start = (0, 0) #((image.shape[-2] % scaling_factor) // 2,
@@ -282,7 +283,11 @@ def scale_with_block_mean(image, scaling_factor):
     """Rescale image by block-mean downsampling. Reads exactly `scaling_factor` input
     pixels per output pixel — strictly local — so a sub-window aligned to
     `scaling_factor` produces bit-identical features to the whole-image pass
-    at the same physical positions (no boundary-mode blur leak)."""
+    at the same physical positions (no boundary-mode blur leak).
+    
+    Intended for use on images that have been padded to a multiple of `scaling_factor`.
+    But also works otherwise, in which case it centre-crops to a multiple of `scaling_factor` before block-reducing.
+    """
     # `block_reduce` needs strided ndarray semantics; materialise dask etc.
     image = np.asarray(image)
     H, W = image.shape[-2:]
@@ -299,14 +304,20 @@ def scale_with_block_mean(image, scaling_factor):
     return block_reduce(image, block_size=block_shape, func=np.mean)
 
 def scale_with_gaussian(image, scaling_factor, plot_blurred=False):
+    """Rescale image by Gaussian-blur + strided downsampling. The blur is intended to mitigate aliasing artifacts from the strided downsampling,
+    but it also causes some bleed across blocks, so features at a given position are influenced by a slightly larger area of the input image compared to block-mean downscaling.
+
+    Intended for use on images that have been padded to a multiple of `scaling_factor`.
+    But also works otherwise, in which case it centre-crops to a multiple of `scaling_factor` before block-reducing.
+    """
     # Apply a small Gaussian blur to avoid aliasing
     sigma = 0.4 * scaling_factor
     sigma = [0] * (image.ndim - 2) + [sigma, sigma]  # Add zeros for batch and channel dimensions
     blurred_img = gaussian_filter(image, sigma=sigma)  # assuming shape (..., H, W)
     # Downsample by striding
     H, W = image.shape[-2:]
-    start_h = (H % scaling_factor) // 2 # Move the start such that the image is centered
-    start_w = (W % scaling_factor) // 2 # Move the start such that the image is centered
+    start_h = scaling_factor // 2 # Move the start such that the image is centered (and with padding, the picked pixels align at the center of blocks)
+    start_w = scaling_factor // 2 # Move the start such that the image is centered (and with padding, the picked pixels align at the center of blocks)
     scaled_img = blurred_img[..., start_h::scaling_factor, start_w::scaling_factor]
 
     if plot_blurred:
