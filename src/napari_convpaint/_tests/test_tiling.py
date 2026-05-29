@@ -198,3 +198,39 @@ def test_tile_annotations_textured_image_default_vgg(use_rf):
         seg(False), seg(True),
         'tile_annotations=False', 'tile_annotations=True',
     )
+
+
+# --------------------------------------------------------------------------- #
+# image_downsample × pipeline alignment: pins that train+segment succeed and  #
+# return original-shape output at each `image_downsample` value, including    #
+# odd factors that previously crashed get_features_targets (image/labels      #
+# shape drift before scale_img was made symmetric via pre-pad).               #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("image_downsample", [-2, 0, 2, 3, 4])
+def test_train_and_segment_across_image_downsample(image_downsample):
+    """End-to-end train+segment at boundary `image_downsample` values. Verifies
+    (a) no crash through scale_img + _get_overall_paddings + FE + restore, and
+    (b) segmentation comes back at the original input shape.
+    """
+    rng = np.random.default_rng(0)
+    h = w = 256  # 256 % 3 = 1 → exercises the odd-factor pad path
+    im_2d = rng.standard_normal((h, w)).astype(np.float32)
+    im = np.stack([im_2d, im_2d, im_2d], axis=0)
+    annot = np.zeros((h, w), dtype=np.uint16)
+    annot[40:55, 40:55] = 1
+    annot[180:195, 180:195] = 2
+
+    cp = ConvpaintModel(alias='vgg')
+    cp.set_params(
+        tile_annotations=False, tile_image=False,
+        channel_mode='rgb', normalize=1,
+        image_downsample=image_downsample,
+    )
+    cp.train(im, annot, fe_use_device='cpu', use_rf=True)
+    seg = cp.segment(im, fe_use_device='cpu')
+
+    assert seg.shape[-2:] == (h, w), (
+        f"image_downsample={image_downsample}: expected segmentation shape "
+        f"to restore to ({h},{w}), got {seg.shape}"
+    )

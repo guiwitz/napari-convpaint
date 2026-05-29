@@ -195,8 +195,8 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
     # Else DOWNSCALE the image
 
     # IMAGES
+    # OLD: by gaussian filter and striding
     if input_type in ('img', 'image') and use_gaussian_scaling:
-        # OLD: by gaussian filter and striding
         return scale_with_gaussian(image, scaling_factor, plot_blurred=plot_result)
 
     # For IMAGE WITH BLOCK_REDUCE, LABELS and COORDINATES, we pad to the next multiple of the scaling factor,
@@ -210,8 +210,8 @@ def scale_img(image, scaling_factor, upscale=False, input_type="img", plot_resul
         # Pad the image
         image = pad(image, (pad_top, pad_bot, pad_left, pad_right), input_type=input_type)
 
+    # For IMAGES, use block_reduce with mean
     if input_type in ('img', 'image'):
-        # For images, use block_reduce with mean
         return scale_with_block_mean(image, scaling_factor)
 
     # For LABELS and COORDINATES, slice the last two dimensions
