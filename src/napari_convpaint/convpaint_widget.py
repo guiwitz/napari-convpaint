@@ -2408,8 +2408,14 @@ class ConvpaintWidget(QWidget):
                       fe_order = self.spin_interpolation_order.value(),
                       fe_use_min_features = self.check_use_min_features.isChecked())
 
-        # Get default non-FE params from temp model and update the GUI (also setting the params)
-        fe_defaults = self.temp_fe_defaults
+        # Get default non-FE params from a temp model built with the
+        # user-selected layers so defaults (e.g. tile_annotations) reflect
+        # has_global_context for the chosen layers rather than the FE's
+        # module-level defaults.
+        # Create a temp FE using the user-selected layers so defaults (like
+        # tile_annotations) reflect the chosen layers' properties.
+        temp_fe_model_for_defaults = self._cpm_class.create_fe(new_param.fe_name, layers=new_layers)
+        fe_defaults = temp_fe_model_for_defaults.get_default_params()
         adjusted_params = [] # List of adjusted parameters for raising a warning
         img = self._get_selected_img()
         data_dims = self._get_data_dims(img.data, img.ndim) if img is not None else None

@@ -25,6 +25,10 @@ class FeatureExtractor:
         # Define specifications for the feature extractor model
         self.padding = 0
         self.patch_size = 1
+        self.has_global_context = False # Whether the FE contains operators that inject global (whole-input) context into per-pixel features 
+        # e.g. AdaptiveAvgPool2d inside SE blocks (EfficientNet), attention across all patches (ViT-like), etc
+        # For such FEs, tile_annotations / tile_image cannot match whole-image features at any finite padding
+        self.tile_block_size = None # If not None, this block size is used for tiling the image at segmentation
         self.num_input_channels = [1]
         self.norm_mode = "default"  # or "imagenet" or "percentile"
         self.rgb_input = False # Whether the model takes RGB input or not
@@ -100,6 +104,7 @@ class FeatureExtractor:
         def_param.fe_use_min_features = False
 
         # NOTE: Non-FE params should be set as default with caution
+        def_param.tile_annotations = not self.get_has_global_context()
 
         return def_param
     
@@ -129,6 +134,17 @@ class FeatureExtractor:
         if isinstance(self.proposed_scalings[0], int):
             return [self.proposed_scalings]
         return self.proposed_scalings
+    
+    def get_tile_block_size(self):
+        """
+        Get the tile block size that the feature extractor gives, if applicable. This is important for later tiling of the image at segmentation.
+
+        Returns:
+        ----------
+        tile_block_size : int or None
+            The tile block size that the feature extractor gives. If None, the default tile block size is used.
+        """
+        return self.tile_block_size
     
     def get_enforced_params(self, param=None):
         """
@@ -179,7 +195,8 @@ class FeatureExtractor:
         """
         Get the patch size that shall be used for feature extraction
         (images will be padded to multiples of patch-size).
-        Important: For some FEs this might have to be calculated based on certain parameters (e.g. layers).
+        Important: For some FEs this might have to be calculated based on certain parameters
+        (e.g. layers and the according stride given e.g. max_pool).
 
         Returns:
         ----------
@@ -187,6 +204,17 @@ class FeatureExtractor:
             The patch size that shall be used for feature extraction.
         """
         return self.patch_size
+
+    def get_has_global_context(self):
+        """
+        True if the FE contains operators that inject global (whole-input)
+        context into per-pixel features — e.g. AdaptiveAvgPool2d inside SE
+        blocks (EfficientNet), attention across all patches (ViT-like), etc.
+        For such FEs, tile_annotations / tile_image cannot match whole-image
+        features at any finite padding because each output pixel depends on
+        the entire input. Default False.
+        """
+        return self.has_global_context
 
     def get_num_input_channels(self):
         """
@@ -344,6 +372,7 @@ class FeatureExtractor:
             # Make sure the downscaled part is a multiple of the patch size
             patch_size = self.get_patch_size()
             pre_reduction_shape  = image_scaled.shape
+            # NOTE: reduce_to_patch_multiple should not do anything if the inputs are already multiples of the patch size at all scales
             image_scaled = reduce_to_patch_multiple(image_scaled, patch_size)
             reduced_shape = image_scaled.shape
 

@@ -19,6 +19,12 @@ from .feature_extractor import FeatureExtractor
 from .param import Param
 from . import utils
 
+# Target side-length of each block in `_parallel_predict_image`. The actual
+# block size is snapped down to the FE's alignment grid, so the effective
+# value is `(DEFAULT_TARGET_TILE_BLOCK // alignment) * alignment`.
+# If the FE gives a Tile block size, we use this instead.
+DEFAULT_TARGET_TILE_BLOCK = 1000
+
 class ConvpaintModel:
     """
     The `ConvpaintModel` class is the core of Convpaint and **combines feature extraction with pixel classification**.
@@ -197,7 +203,7 @@ class ConvpaintModel:
         try:
             module = importlib.import_module(module_path)
         except ImportError as e:
-            warnings.warn(f"Error when trying to import feature extractor module '{module_path}': {e}")
+            warnings.warn(f"Could not import feature extractor module '{module_path}': {e}")
             return
 
         model_names = getattr(module, "AVAILABLE_MODELS", None)
@@ -1043,8 +1049,9 @@ class ConvpaintModel:
         paddings = [self._get_overall_paddings(params_for_extract, d.shape) for d in data]
         # Pad the images and annotations with the correct padding size
         data = [utils.pad(d, p, input_type="img") for d, p in zip(data, paddings)]
-        # Save the padded shapes for reshaping/rescaling later
+        # Save the padded shapes and the per-image paddings for reshaping/cropping later
         self.padded_shapes = [d.shape for d in data]
+        self.paddings = paddings  # list of ((pad_top, pad_bottom), (pad_left, pad_right))
         if use_annots:
             annotations = [utils.pad(a, p, input_type="labels") for a, p in zip(annotations, paddings)]
         if memory_mode:
@@ -1081,8 +1088,10 @@ class ConvpaintModel:
         # Note: tiles are flattened (treating them as individual images)
         if params_for_extract.tile_annotations:
             if use_annots:
+                self._warn_if_global_context("tile_annotations")
                 coords = [None for _ in data] if coords is None else coords
-                tiles = [utils.tile_annot(d, a, c, p, plot_tiles=False)
+                alignment = self._get_fe_alignment(params_for_extract) # scalings_lcm * fe_patch
+                tiles = [utils.tile_annot(d, a, c, p, alignment=alignment, plot_tiles=False)
                         for d, a, c, p in zip(data, annotations, coords, paddings)]
                 data        = [t for trio in tiles for t in trio[0]]
                 annotations = [t for trio in tiles for t in trio[1]]
@@ -1146,6 +1155,7 @@ class ConvpaintModel:
         original_shapes = self.original_shapes # Before down/upsampling and padding
 
         # Only original (non-plane) images are expected here
+        paddings = self.paddings
         features = [
             self._restore_shape(
                 features[i],
@@ -1153,7 +1163,8 @@ class ConvpaintModel:
                 pre_pad_shapes[i],
                 original_shapes[i],
                 class_preds=class_output,
-                patched_features=self.fe_model.gives_patched_features()
+                patched_features=self.fe_model.gives_patched_features(),
+                paddings=paddings[i],
             )
             for i in range(len(features))
         ]
@@ -1283,7 +1294,7 @@ class ConvpaintModel:
 
     def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False,
                allow_writing_files=False, in_channels=None, skip_norm=False,
-               fe_use_device=None, clf_use_device=None):
+               fe_use_device=None, clf_use_device=None, sort_features=True):
         """
         Backend training method for the Convpaint model.
         """
@@ -1313,6 +1324,19 @@ class ConvpaintModel:
                 img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
             # Get all annotations and features from the table
             features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
+
+        # Sort (features, targets) into a canonical order so the classifier's
+        # seeded bootstrap sampling is invariant to the ordering produced by
+        # the feature-extraction path (tile_annotations on/off, memory_mode
+        # accumulation order across training rounds, etc.). Byte-view sort is
+        # ~23× faster than lexsort over F float columns because it hashes
+        # whole rows rather than walking them column-by-column.
+        if isinstance(features, np.ndarray) and features.size > 0 and sort_features:
+            features = np.ascontiguousarray(features)
+            row_view = features.view([('', features.dtype)] * features.shape[1]).ravel()
+            order = np.argsort(row_view, kind='stable')
+            features = features[order]
+            targets = targets[order]
 
         # Check if we have features and targets, and that we have at least two classes
         if len(features) == 0 or len(targets) == 0:
@@ -1573,12 +1597,14 @@ class ConvpaintModel:
         padded_shapes = self.padded_shapes # Saved when extracting features
         pre_pad_shapes = self.pre_pad_shapes # Saved when extracting features
         original_shapes = self.original_shapes # Saved when extracting features
+        paddings = self.paddings             # Saved when extracting features
         pred_reshaped = [self._restore_shape(predictions[i],
                                             padded_shapes[i],
                                             pre_pad_shapes[i],
                                             original_shapes[i],
                                             class_preds=False,
-                                            patched_features=self.fe_model.gives_patched_features())
+                                            patched_features=self.fe_model.gives_patched_features(),
+                                            paddings=paddings[i])
                          for i in range(len(predictions))]
 
         # If we want classes, take the argmax of the probabilities
@@ -1589,7 +1615,7 @@ class ConvpaintModel:
             return pred_reshaped[0]
         return pred_reshaped
 
-    def _parallel_predict_image(self, image, return_proba=True, use_dask=False, fe_use_device=None):
+    def _parallel_predict_image(self, image, return_proba=True, use_dask=False, fe_use_device=None, plot_tiles=False):
         """
         Backend method to predict an image using tiling and parallelization.
         Returns the class probabilities and optionally the segmentation of the images.
@@ -1600,10 +1626,23 @@ class ConvpaintModel:
         NOTE: As opposed to other methods, this method only takes single images as input.
         """
 
-        maxblock = 1000
+        self._warn_if_global_context("tile_image")
+        # Derive the per-tile margin from the FE's required padding at the largest
+        # scaling, so every pixel in the kept region sees the same receptive-field
+        # context it would see during whole-image processing. Snap both the block
+        # size and the margin to the FE's downsampling grid so tile origins and
+        # sizes are multiples of it — otherwise the deeper feature maps upsample
+        # at a slightly different ratio than the whole-image pass and features
+        # drift relative to physical pixel positions (same class of bug as
+        # tile_annot without alignment).
+        fe_block_size = self.fe_model.get_tile_block_size()
+        block_size = fe_block_size if fe_block_size is not None else DEFAULT_TARGET_TILE_BLOCK
+        alignment = self._get_fe_alignment(self._param) # scalings_lcm * fe_patch
+        fe_margin = self.fe_model.get_padding() * int(np.max(self._param.fe_scalings))
+        margin = utils.align_up(fe_margin, alignment)
+        maxblock = max(alignment, (block_size // alignment) * alignment)
         nblocks_rows = image.shape[-2] // maxblock
         nblocks_cols = image.shape[-1] // maxblock
-        margin = 50
 
         image = self._prep_dims_single(image)[0] # NOTE: should technically not be necessary, as done outside
 
@@ -1633,6 +1672,9 @@ class ConvpaintModel:
         new_max_row_ind_collection = []
         new_min_col_ind_collection = []
         new_min_row_ind_collection = []
+
+        if plot_tiles:
+            img_to_plot = image.copy()
 
         for row in range(nblocks_rows+1):
             for col in range(nblocks_cols+1):
@@ -1664,6 +1706,18 @@ class ConvpaintModel:
                     max_row = image.shape[-2]
 
                 image_block = image[..., min_row:max_row, min_col:max_col]
+
+                # For plotting:
+                # Take the entire image, add boarders for the block
+                if plot_tiles:
+                    img_to_plot[..., min_row, min_col:max_col] = 1
+                    img_to_plot[..., max_row-1, min_col:max_col] = 1
+                    img_to_plot[..., min_row:max_row, min_col] = 1
+                    img_to_plot[..., min_row:max_row, max_col-1] = 1
+                    img_to_plot[..., min_row_ind, min_col_ind:max_col_ind] = 0.5
+                    img_to_plot[..., max_row_ind-1, min_col_ind:max_col_ind] = 0.5
+                    img_to_plot[..., min_row_ind:max_row_ind, min_col_ind] = 0.5
+                    img_to_plot[..., min_row_ind:max_row_ind, max_col_ind-1] = 0.5
 
                 # Predict the block using dask or directly (with no normalization, as it is done outside)
                 if use_dask:
@@ -1707,7 +1761,12 @@ class ConvpaintModel:
                     min_row_ind_collection[k]:max_row_ind_collection[k],
                     min_col_ind_collection[k]:max_col_ind_collection[k]] = crop_out
             client.close()
-        
+
+        if plot_tiles:
+            from matplotlib import pyplot as plt
+            plt.imshow(img_to_plot[0, 0])
+            plt.show()
+
         return predicted_image_complete
 
     def _train_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False,
@@ -2006,14 +2065,42 @@ class ConvpaintModel:
                 new_param.set_single(key, enforced_params.get(key))
         return new_param
     
+    def _warn_if_global_context(self, mode):
+        """Emit a warning if the FE has global-context ops (e.g. SE blocks,
+        ViT attention) on the path to a selected layer — such features depend
+        on the whole input, so no finite padding makes tiled features match
+        whole-image features. `mode` is "tile_annotations" or "tile_image"."""
+        if self.fe_model.get_has_global_context():
+            warnings.warn(
+                f"{mode} is enabled but the feature extractor contains operators with "
+                "global receptive field (e.g. SE blocks in EfficientNet, attention in ViT). "
+                "Per-pixel features depend on the whole input, so tiling cannot produce the "
+                f"same features as whole-image processing. Consider disabling {mode} for this FE."
+            )
+
+    def _get_fe_alignment(self, param):
+        """Effective downsampling factor the FE imposes on the input grid.
+
+        Any sub-window of the image extracted for independent feature extraction
+        (annotation tiles, prediction tiles) must have spatial dims that are a
+        multiple of this value, otherwise the upsample ratio in
+        `rescale_features` differs from the whole-image pass and the resulting
+        features drift relative to their physical pixel position.
+        """
+        fe_scalings = param.fe_scalings
+        scalings_lcm = lcm(*fe_scalings)
+        fe_patch  = self.fe_model.get_patch_size()
+        return scalings_lcm * fe_patch
+
     def _get_overall_paddings(self, param, img_shape: Tuple[int, ...]):
         """
         Returns the overall padding sizes for the image in form ((top, bottom), (left, right)).
 
-        This takes into account the feature extractor's padding, its patch size and the image shape.
-        Makes sure, padding is at least the FE's padding at the largest downscaling factor,
-        and that the image is padded to a multiple of the patch size times at all scalings,
-        if the FE model uses patches.
+        Padding is at least the FE's receptive-field padding at the largest scaling,
+        and the padded image dims (and pad_top / pad_left) are multiples of the FE's
+        patch size at the LCM of fe_scalings. For Hookmodel, `patch_size` encodes
+        the internal MaxPool/Conv2d stride product (with `gives_patched_features=False`),
+        so the same alignment math handles both ViT-style and CNN feature extractors.
         """
         # Get the maximum scaling factor, base padding size and patch_size from the param and feature extractor
         fe_scalings = param.fe_scalings
@@ -2021,42 +2108,60 @@ class ConvpaintModel:
         fe_pad   = self.fe_model.get_padding()
         fe_patch = self.fe_model.get_patch_size()
 
-        # We need to pad at least the feature extractor's padding at the maximum scaling factor on each side
+        # `fe_pad` and `fe_patch` are two independent properties:
+        #   - `fe_pad = get_padding()` is the *receptive-field* requirement:
+        #     how many pixels of context must surround each output pixel so the
+        #     deepest feature equals the infinite-image answer. Scaled by
+        #     `max_scale` so the pyramid's coarsest level still has enough
+        #     context at its own resolution.
+        #   - `fe_patch = get_patch_size()` is the *grid alignment*
+        #     requirement: input dims must be a multiple of this so deeper
+        #     feature maps upsample cleanly (same ratio on whole image and on
+        #     sub-windows). Does not grow `min_pad`, only the alignment below.
         min_pad = fe_pad * max_scale
-        min_h = img_shape[-2] + 2 * min_pad
-        min_w = img_shape[-1] + 2 * min_pad
 
         # Calculate the least common multiple (LCM) of the feature extractor's scalings
         scalings_lcm = lcm(*fe_scalings)
-        # We need to pad to a multiple of the patch size at the lcm scaling factor (as it will be downscaled accordingly)
+        # Pad to a multiple of the patch size (for patch-based FEs, e.g. ViT)
+        # at the lcm scaling factor. Enforcing the patch alignment keeps the sub-pixel
+        # upsampling grid consistent between whole-image and tiled processing.
         patch_multiple = scalings_lcm * fe_patch
 
-        # Calculate the padding sizes for each dimension
-        padded_h = ( (min_h + patch_multiple - 1) // patch_multiple ) * patch_multiple
-        padded_w = ( (min_w + patch_multiple - 1) // patch_multiple ) * patch_multiple
-        pad_h = padded_h - img_shape[-2]
-        pad_w = padded_w - img_shape[-1]
+        # Snap the top/left pad up to a multiple of `patch_multiple` so the
+        # image content lives on the same downsampling grid regardless of how
+        # much the bottom/right must grow to reach a `padded_*` that is also a
+        # multiple of `patch_multiple`. Without aligned pad_top, a tile whose
+        # image-relative offset isn't a multiple of `patch_multiple` would have
+        # its content sit off-grid in the padded tile, shifting MaxPool windows
+        # and producing different features at the same physical pixel than the
+        # whole-image pass. This produces asymmetric paddings — `_restore_shape`
+        # passes the explicit pad_top/pad_left to `crop_to_shape` rather than
+        # assuming the old symmetric convention.
+        pad_top  = utils.align_up(min_pad, patch_multiple)
+        pad_left = utils.align_up(min_pad, patch_multiple)
+        padded_h = utils.align_up(pad_top + img_shape[-2] + min_pad, patch_multiple)
+        padded_w = utils.align_up(pad_left + img_shape[-1] + min_pad, patch_multiple)
+        pad_bottom = padded_h - img_shape[-2] - pad_top
+        pad_right  = padded_w - img_shape[-1] - pad_left
 
-        # Ensure that the padding is at least the minimum padding on each side, and a multiple of the lcm-scaled patch size
-        assert pad_h >= 2 * min_pad, f"Padding height {pad_h} is less than minimum padding 2x{min_pad}."
-        assert pad_w >= 2 * min_pad, f"Padding width {pad_w} is less than minimum padding 2x{min_pad}."
-        assert padded_h % patch_multiple == 0, f"Padded height {padded_h} is not a multiple of patch size {patch_multiple}."
-        assert padded_w % patch_multiple == 0, f"Padded width {padded_w} is not a multiple of patch size {patch_multiple}."
-
-        # Distribute to left/right and top/bottom, the bottom and right being 1 larger in uneven cases
-        pad_top = pad_h // 2
-        pad_bottom = pad_h - pad_top
-        pad_left = pad_w // 2
-        pad_right = pad_w - pad_left
+        assert pad_top    >= min_pad, f"pad_top {pad_top} < min_pad {min_pad}"
+        assert pad_bottom >= min_pad, f"pad_bottom {pad_bottom} < min_pad {min_pad}"
+        assert pad_left   >= min_pad, f"pad_left {pad_left} < min_pad {min_pad}"
+        assert pad_right  >= min_pad, f"pad_right {pad_right} < min_pad {min_pad}"
+        assert padded_h % patch_multiple == 0, f"Padded height {padded_h} is not a multiple of {patch_multiple}."
+        assert padded_w % patch_multiple == 0, f"Padded width {padded_w} is not a multiple of {patch_multiple}."
+        assert pad_top % patch_multiple == 0, f"pad_top {pad_top} is not aligned to {patch_multiple}."
+        assert pad_left % patch_multiple == 0, f"pad_left {pad_left} is not aligned to {patch_multiple}."
 
         # Return the overall padding sizes for the image
         return (pad_top, pad_bottom), (pad_left, pad_right)
 
-    def _restore_shape(self, outputs: np.ndarray, 
+    def _restore_shape(self, outputs: np.ndarray,
                              padded_shape: Tuple[int, ...],
                              pre_pad_shapes: Tuple[int, ...],
                              original_shape: Tuple[int, ...],
-                             class_preds: bool = False, patched_features: bool = False):
+                             class_preds: bool = False, patched_features: bool = False,
+                             paddings=None):
         """
         Reshapes outputs (prediction, probabilities, features) back to original spatial size,
         removing the padding and rescaling.
@@ -2076,6 +2181,11 @@ class ConvpaintModel:
         patched_features : bool
             If True, the features were extracted on a patch‐size resolution (e.g. DINOv2),
             so we need to rescale the outputs to the patch resolution before upsampling.
+        paddings : ((pad_top, pad_bottom), (pad_left, pad_right)), optional
+            The asymmetric padding applied by `_get_overall_paddings`. When
+            given, `crop_to_shape` uses `pad_top` / `pad_left` directly instead
+            of assuming symmetric padding. Required whenever padding was NOT
+            split evenly on each side (which is now the default).
 
         Returns
         ----------
@@ -2118,11 +2228,20 @@ class ConvpaintModel:
                 outputs_image, output_shape=new_shape,
                 order=order)
 
-        # 3) Remove padding
-        # Ensure to only remove the part of padding that was not removed by reduce_to_patch_multiple in the FE model
+        # 3) Remove padding. _get_overall_paddings produces asymmetric pad_top /
+        # pad_bottom (and likewise left/right) so pad_top lands on the FE's
+        # downsampling grid; pass those through explicitly rather than letting
+        # crop_to_shape fall back to its default symmetric split.
+        if paddings is not None:
+            crop_top = int(paddings[0][0])
+            crop_left = int(paddings[1][0])
+        else:
+            crop_top = crop_left = None
         outputs_image = utils.crop_to_shape(
             outputs_image,
-            pre_pad_shapes[-3:]
+            pre_pad_shapes[-3:],
+            crop_top=crop_top,
+            crop_left=crop_left,
         )
 
         # 4) Resize to original shape
