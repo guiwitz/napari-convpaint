@@ -101,6 +101,9 @@ class ComboFeatures(FeatureExtractor):
         self.patch_size = lcm(ps1, ps2)
         return self.patch_size
     
+    def get_has_global_context(self):
+        return self.model1.get_has_global_context() or self.model2.get_has_global_context()
+    
     def gives_patched_features(self):
         # Since we want to combine, we always rescale to image size, even if the models are patched
         # So, the combo FE itself is not patched, even if it works with a patch_size to comply with the models

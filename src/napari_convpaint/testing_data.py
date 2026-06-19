@@ -23,8 +23,8 @@ def generate_synthetic_circle_annotation(im_dims, circle1_xy, circle2_xy):
 
     circle1 = skimage.draw.disk(circle1_xy, 7)
     circle2 = skimage.draw.disk(circle2_xy, 7)
-    annotation = np.zeros(im_dims, dtype=np.uint8)
-    annotation[circle1] = 1
-    annotation[circle2] = 2
+    annotations = np.zeros(im_dims, dtype=np.uint8)
+    annotations[circle1] = 1
+    annotations[circle2] = 2
 
-    return annotation
+    return annotations

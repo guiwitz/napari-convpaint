@@ -34,6 +34,7 @@ class Dinov2Features(FeatureExtractor):
         self.patch_size = spec['patch_size']
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
         self.num_input_channels = [3] # RGB
+        self.has_global_context = True
         self.norm_mode = "imagenet"  # DINOv2 expects ImageNet normalization
         self.rgb_input = True  # DINOv2 expects RGB input
         self.proposed_scalings = [[1]]

@@ -1,7 +1,31 @@
 import itertools
+import math
 import numpy as np
 import importlib.util
 import warnings
+
+# fastfilters truncates each Gaussian / derivative kernel at half-length
+# `ceil((3 + order/2) * sigma)` (fir_kernel.c). `SingleFilter.kernel_size` in
+# ilastik.napari.filters returns `half_length + 1`, so `kernel_size // 2`
+# under-pads by ~2×. For compound filters the reaches chain: StructureTensor
+# computes a gradient at `inner_scale` (order=1) then smooths with a Gaussian
+# at `outer_scale` (order=0), and the two half-lengths *add*. DifferenceOfGaussians
+# runs two independent Gaussian smoothings and takes their difference, so the
+# reach is the max of the two.
+
+def _gauss_half_length(sigma, order):
+    """fastfilters' default Gaussian kernel half-length (each side, in pixels)
+    for derivative order `order`. Source: fir_kernel.c."""
+    return math.ceil((3.0 + 0.5 * order) * sigma)
+
+def _filter_reach(f):
+    """Boundary reach (pixels each side) of an ilastik FilterSet member."""
+    name = type(f).__name__
+    if name == "StructureTensorEigenvalues":
+        return _gauss_half_length(f.inner_k * f.scale, 1) + _gauss_half_length(f.scale, 0)
+    if name == "DifferenceOfGaussians":
+        return max(_gauss_half_length(f.scale, 0), _gauss_half_length(f.inner_k * f.scale, 0))
+    return _gauss_half_length(f.scale, f.order)
 
 def import_ilastik_filters():
     try:
@@ -61,7 +85,7 @@ class IlastikFeatures(FeatureExtractor):
         global FILTER_SET
         FILTER_SET = create_filter_set()
         super().__init__(model_name=model_name)
-        self.padding = FILTER_SET.kernel_size // 2
+        self.padding = max(_filter_reach(f) for f in FILTER_SET.filters)
 
     def get_description(self):
         return "Extraction of image features using the full filter set of the popular segmentation tool Ilastik."

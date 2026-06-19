@@ -45,6 +45,7 @@ class CellposeFeatures(FeatureExtractor):
 
         super().__init__(model_name=model_name, model=model)
         self.patch_size = 8
+        self.has_global_context = True
         self.num_input_channels = [2]
         self.norm_mode = "percentile"
 

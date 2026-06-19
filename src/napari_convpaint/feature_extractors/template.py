@@ -24,8 +24,9 @@ class GaussianFeatures(FeatureExtractor):
         super().__init__(model_name=model_name)
 
         # Define specifications for the feature extractor model, if necessary; examples:
-        # self.padding = 0
-        # self.patch_size = 1
+        # self.padding = 0 # If the model needs a certain padding around the extracted pixel, set it here. This is used to calculate the necessary padding for tiling.
+        # self.patch_size = 1 # If the model produces features at a lower resolution than the input image, e.g. because of pooling or ViT patching, set the patch size here. This is used to calculate the necessary padding and alignment for tiling.
+        # self.has_global_context = False # True if the model's features at a pixel depend on the whole image (e.g. ViT-style global attention) rather than just a local neighborhood (e.g. CNN with small kernels and little pooling)
         # self.num_input_channels = [1]
         # self.norm_mode = "default" # or "imagenet" or "percentile"
         # self.rgb_input = False # True if the model takes RGB input
