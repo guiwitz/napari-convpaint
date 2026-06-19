@@ -152,7 +152,7 @@ class Hookmodel(FeatureExtractor):
             param.fe_scalings = [1,2]
             param.fe_layers = self.selectable_layer_keys[:3] # Use the first 3 layers by default
 
-        param.tile_annotations = True # Overwrite non-FE settings
+        # Note that tile_annotations is set to `not self.get_has_global_context()` in the feature extractor superclass
 
         return param
 
@@ -178,47 +178,62 @@ class Hookmodel(FeatureExtractor):
             return [self.selectable_layer_keys[x] for x in layers]
         else:
             return layers
-    
-    def get_padding(self):
-        ks, depth = self.get_max_kernel_size_and_depth()
-        return ks * depth // 2  # Padding established empirically to avoid significant edge effects
 
-    def get_max_kernel_size_and_depth(self):
-        """
-        Given a hookmodel, find the maximum kernel size needed for the deepest layer.
-        
-        Parameters: None
-        ----------
-        
-        Returns
-        -------
-        max_kernel_size: int
-            maximum kernel size needed for the deepest layer
-        """
-        # Initialize variables
-        max_kernel_size = 1
-        current_total_pool = 1
-        conv_depth = 1
+    def gives_patched_features(self):
+        # We do define patches by the stride of the CNN, as we want the windows to align with the downsampling grid of the CNN.
+        # However, unlike e.g. ViTs, CNNs give per-pixel features, not patch-level features.
+        # So we return False here, even if the patch size is >1.
+        return False
 
+    def _compute_nn_properties(self):
+        """Walk the network in execution order, accumulating receptive field,
+        total stride, and whether any global-context op was encountered, up to
+        and including the deepest selected layer. RF grows by `(k-1) * stride`
+        on Conv2d/MaxPool/AvgPool; stride multiplies by `s` on strided Conv2d
+        and pooling.
+        padding:
+        Rigorous half-receptive-field bound: `floor(RF / 2)` — the minimum
+        context around an image pixel so its deepest selected feature equals
+        the infinite-image answer. `_get_overall_paddings` separately snaps
+        the padding up to a multiple of `get_total_stride()`.
+        patch_size (stride):
+        The total internal stride of the FE up to the deepest selected layer.
+        For CNNs with MaxPool, this is the minimum tile size for which features
+        can match whole-image features. For patch-based FEs (e.g. ViT), this
+        is the patch size.
+        has_global_context:
+        True if an AdaptiveAvgPool2d / AdaptiveMaxPool2d sits on the path to
+        the deepest selected layer (e.g. SE blocks in EfficientNet). Such
+        operators give every output pixel dependence on the entire input —
+        no finite padding makes tile features match whole-image features.
+        """
         if len(self.selected_layers) == 0:
-            # no layers selected yet
-            return 0
-        
-        # Find out which is the deepest layer
+            return 1, False
+        rf = 1
+        stride = 1
+        has_global = False
         latest_layer = self.module_dict[self.selected_layers[-1]]
-        # Iterate over all layers to find the maximum kernel size
-        for curr_layer_key, curr_layer in self.module_dict.items():
-            # If a maxpool layer is involved, kernel size needs to be multiplied for all future convolutions
-            if "MaxPool2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                current_total_pool *= curr_layer.kernel_size
-            # For each convolution, multiply the kernel size with the current total pool
-            elif "Conv2d" in str(curr_layer) and hasattr(curr_layer, 'kernel_size'):
-                conv_depth += 1
-                max_kernel_size = current_total_pool * curr_layer.kernel_size[0]
-            # Only iterate until the latest selected layer
-            if curr_layer == latest_layer:
+        for _, curr_layer in self.module_dict.items():
+            if isinstance(curr_layer, (nn.AdaptiveAvgPool2d, nn.AdaptiveMaxPool2d)):
+                has_global = True
+            k = s = None
+            if isinstance(curr_layer, nn.Conv2d):
+                k = curr_layer.kernel_size[0] if isinstance(curr_layer.kernel_size, tuple) else curr_layer.kernel_size
+                s = curr_layer.stride[0] if isinstance(curr_layer.stride, tuple) else curr_layer.stride
+            elif isinstance(curr_layer, (nn.MaxPool2d, nn.AvgPool2d)) and hasattr(curr_layer, 'kernel_size'):
+                ks = curr_layer.kernel_size
+                st = curr_layer.stride if curr_layer.stride is not None else ks
+                k = ks[0] if isinstance(ks, tuple) else ks
+                s = st[0] if isinstance(st, tuple) else st
+            if k is not None:
+                rf = rf + (k - 1) * stride
+                stride = stride * s
+            if curr_layer is latest_layer:
                 break
-        return max_kernel_size, conv_depth
+
+        self.padding = rf // 2
+        self.patch_size = stride
+        self.has_global_context = has_global
     
     def get_num_input_channels(self):
         return [self.named_modules[0][1].in_channels]
@@ -271,3 +286,4 @@ class Hookmodel(FeatureExtractor):
             else:
                 # print(f"registering hook for layer {selected_layers[ind]}")
                 self.module_dict[selected_layers[ind]].register_forward_hook(self.hook_normal)
+        self._compute_nn_properties() # Recompute RF, patch size, and global context properties based on the new layers

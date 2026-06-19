@@ -97,4 +97,6 @@ src/napari_convpaint/jafar/checkpoints/*.pth
 src/config/base.yaml
 src/config/*
 
+# others
 tools/*
+Multifile_Testing - Shortcut*

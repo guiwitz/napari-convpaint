@@ -18,6 +18,7 @@ class DinoFeatures(FeatureExtractor):
         
         self.patch_size = 14
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
+        self.has_global_context = True
         self.num_input_channels = [3]
         self.norm_mode = "imagenet"  # DINOv2 expects ImageNet normalization
         self.rgb_input = True  # DINOv2 expects RGB input

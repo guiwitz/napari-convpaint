@@ -1,6 +1,10 @@
+import numpy as np
+import pytest
+
 from napari_convpaint import convpaint_model
 from napari_convpaint.feature_extractors import Hookmodel
 from napari_convpaint.param import Param
+from napari_convpaint.utils import scale_img
 import skimage
 
 def test_hook_model():
@@ -39,8 +43,32 @@ def test_filter_image():
     assert features.shape[0] == 320, f'Expecting 320 features but got {features.shape[1]}'
     assert features.shape[1] == 128, f'Expecting 128 annotated pixels but got {features.shape[0]}'
 
-    #disable annotation tiling should lead to the same results
+    #disable annotations tiling should lead to the same results
     model.set_param("tile_annotations", False)
     features = model.get_feature_image(data=image)
     assert features.shape[0] == 320, f'Expecting 320 features but got {features.shape[1]}'
     assert features.shape[1] == 128, f'Expecting 128 annotated pixels but got {features.shape[0]}'
+
+
+@pytest.mark.parametrize("upscale", [False, True], ids=["down", "up"])
+@pytest.mark.parametrize("factor", [2, 3, 5, 7])
+@pytest.mark.parametrize("H,W", [(256, 256), (255, 257), (100, 101)])
+def test_scale_img_image_and_labels_shape_match(factor, H, W, upscale):
+    """Image and labels paths must produce the same spatial shape after scale_img.
+
+    Regression: previously the downsample image path centre-cropped (floor(H/f))
+    while the labels path padded (ceil(H/f)), so non-aligned `image_downsample`
+    crashed `get_features_targets` (boolean-mask shape mismatch). After the fix,
+    both paths pre-pad to a multiple of f and reduce, so shapes always agree.
+    """
+    rng = np.random.default_rng(0)
+    img = rng.standard_normal((1, H, W)).astype(np.float32)
+    lbl = rng.integers(0, 3, size=(1, H, W), dtype=np.uint16)
+
+    img_out = scale_img(img, factor, upscale=upscale, input_type="img")
+    lbl_out = scale_img(lbl, factor, upscale=upscale, input_type="labels")
+
+    assert img_out.shape[-2:] == lbl_out.shape[-2:], (
+        f"shape mismatch at factor={factor}, upscale={upscale}, (H,W)=({H},{W}): "
+        f"img={img_out.shape[-2:]}  lbl={lbl_out.shape[-2:]}"
+    )

@@ -1,3 +1,4 @@
+import math
 import skimage
 import numpy as np
 
@@ -14,7 +15,9 @@ class GaussianFeatures(FeatureExtractor):
     def __init__(self, model_name='gaussian_features', sigma=3, **kwargs):
         super().__init__(model_name=model_name)
         self.sigma = sigma
-        self.padding = 2*sigma # Padding established empirically to avoid edge effects
+        # skimage.filters.gaussian uses truncate=4.0 by default, so each
+        # output pixel reads `ceil(4 * sigma)` input pixels on each side.
+        self.padding = math.ceil(4 * sigma)
 
     def get_description(self):
         return "Minimal model to easily and rapidly extract basic image features."
