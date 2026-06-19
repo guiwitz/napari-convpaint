@@ -104,7 +104,7 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
         if viewer is not None:
             use_napari = True
     except ImportError:
-        pass
+        pass # Fall back to CLI progress if napari is not available
 
     if use_napari:
         viewer.window._status_bar._toggle_activity_dock(True)

@@ -73,9 +73,9 @@ class DinoJafarFeatures(FeatureExtractor):
         super().__init__(model_name=model_name)
 
         spec = JAFAR_BACKBONES[model_name]
-        self.patch_size = spec["patch_size"]   # ViT token size
-        self.padding    = 0                    # model-internal extra pad (none)
-        self.num_input_channels = [3]
+        self.patch_size = spec["patch_size"]    # ViT token size
+        self.padding    = 0                     # model-internal extra pad (none)
+        self.num_input_channels = [3]           # RGB
         self.norm_mode = "imagenet"
         self.rgb_input = True
         # The largest scale equals the backbone patch size — at that scale
@@ -149,7 +149,7 @@ class DinoJafarFeatures(FeatureExtractor):
 
     def get_description(self):
         spec = JAFAR_BACKBONES[self.model_name]
-        backbone_label = "DINOv3 ViT-S+" if "dinov3" in self.model_name else "DINOv2"
+        backbone_label = "DINOv3 ViT-S+" if "dinov3" in self.model_name.lower() else "DINOv2"
         return (f"{backbone_label} + JAFAR upsampler feature extractor\n"
                 f"Patch size {spec['patch_size']}, overlap blending, CPU-accumulated HR features.")
 
