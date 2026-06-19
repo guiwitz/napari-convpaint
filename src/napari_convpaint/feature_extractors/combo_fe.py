@@ -1,5 +1,5 @@
 import numpy as np
-from .dino import DinoFeatures
+from .dino import Dinov2Features
 from .nnlayers import Hookmodel
 from .gaussian import GaussianFeatures
 # from .cellpose import CellposeFeatures
@@ -8,20 +8,20 @@ from math import lcm
 # AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_ilastik', 'combo_dino_gauss', 'combo_dino_cellpose', 'combo_vgg_ilastik']
 AVAILABLE_MODELS = ['combo_dino_vgg', 'combo_dino_gauss']
 
-COMBOS = {'combo_dino_vgg': {'constructors': [Hookmodel, DinoFeatures],
-                             'model names': ['vgg16', 'dinov2_vits14_reg'],
+COMBOS = {'combo_dino_vgg': {'constructors': [Hookmodel, Dinov2Features],
+                             'model names': ['vgg16', 'dinov2_small-reg'],
                              'description': "Combining a default VGG16 with DINOv2."},
-        #   'combo_dino_ilastik': {'constructors': [IlastikFeatures, DinoFeatures],
-        #                      'model names': ['ilastik_2d', 'dinov2_vits14_reg'],
+        #   'combo_dino_ilastik': {'constructors': [IlastikFeatures, Dinov2Features],
+        #                      'model names': ['ilastik_2d', 'dinov2_small-reg'],
         #                      'description': "Combining Ilastik with DINOv2."},
         #   'combo_vgg_ilastik': {'constructors': [IlastikFeatures, Hookmodel],
         #                     'model names': ['ilastik_2d', 'vgg16'],
         #                     'description': "Combining Ilastik with a default VGG16."},
-          'combo_dino_gauss': {'constructors': [GaussianFeatures, DinoFeatures],
-                               'model names': ['gaussian_features', 'dinov2_vits14_reg'],
+          'combo_dino_gauss': {'constructors': [GaussianFeatures, Dinov2Features],
+                               'model names': ['gaussian_features', 'dinov2_small-reg'],
                                'description': "Combining a Gaussian filter with DINOv2."},
-        #   'combo_dino_cellpose': {'constructors': [CellposeFeatures, DinoFeatures],
-        #                           'model names': ['cellpose', 'dinov2_vits14_reg'],
+        #   'combo_dino_cellpose': {'constructors': [CellposeFeatures, Dinov2Features],
+        #                           'model names': ['cellpose', 'dinov2_small-reg'],
         #                           'description': "Combining Cellpose with DINOv2."}
                        }
 
@@ -29,8 +29,8 @@ COMBOS = {'combo_dino_vgg': {'constructors': [Hookmodel, DinoFeatures],
 try:
     from .ilastik import AVAILABLE_MODELS as Ilastik_models, IlastikFeatures
     if Ilastik_models:
-        COMBOS['combo_dino_ilastik'] = {'constructors': [IlastikFeatures, DinoFeatures],
-                                'model names': ['ilastik_2d', 'dinov2_vits14_reg'],
+        COMBOS['combo_dino_ilastik'] = {'constructors': [IlastikFeatures, Dinov2Features],
+                                'model names': ['ilastik_2d', 'dinov2_small-reg'],
                                 'description': "Combining Ilastik with DINOv2."}
         AVAILABLE_MODELS.append('combo_dino_ilastik')
 except Exception as e:

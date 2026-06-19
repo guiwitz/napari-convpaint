@@ -9,7 +9,7 @@ def _hf_url(timm_name):
     return f"https://huggingface.co/timm/{timm_name}/resolve/main/model.safetensors"
 
 DINOV3_MODELS = {
-    'dinov3_vits16plus': {
+    'dinov3_small-plus': {
         'timm_name': 'vit_small_plus_patch16_dinov3.lvd1689m',
         'patch_size': 16,
         'embed_dim': 384,
@@ -20,10 +20,10 @@ DINOV3_MODELS = {
     # 'dinov3_vith16plus': {'timm_name': 'vit_huge_plus_patch16_dinov3.lvd1689m',   'patch_size': 16, 'embed_dim': 1280},
 }
 
-AVAILABLE_MODELS = ['dinov3_vits16plus']
+AVAILABLE_MODELS = ['dinov3_small-plus']
 
 STD_MODELS = {
-    "dinov3": {"fe_name": "dinov3_vits16plus"},
+    "dinov3": {"fe_name": "dinov3_small-plus"},
 }
 
 from ..feature_extractor import FeatureExtractor
@@ -35,7 +35,7 @@ class Dinov3Features(FeatureExtractor):
     Loaded via the timm library (timm-mirrored HuggingFace weights, no gating).
     """
 
-    def __init__(self, model_name='dinov3_vits16plus', **kwargs):
+    def __init__(self, model_name='dinov3_small-plus', **kwargs):
 
         if model_name not in DINOV3_MODELS:
             raise ValueError(

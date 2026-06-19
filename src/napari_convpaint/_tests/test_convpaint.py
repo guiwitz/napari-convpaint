@@ -213,13 +213,13 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Simulate selecting the Dino model from the dropdown
-    my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
+    my_widget.qcombo_fe_type.setCurrentText('dinov2_small-reg')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg'
     
     cp_model = my_widget.cp_model
     cp_model._param.fe_scalings = [1]
     cp_model._param.fe_order = 0  # Set interpolation order to 0
-    cp_model._param.fe_name = 'dinov2_vits14_reg'
+    cp_model._param.fe_name = 'dinov2_small-reg'
     # cp_model._param.fe_use_gpu = False
     cp_model._param.fe_use_min_features = False
     cp_model._param.tile_annotations = False
@@ -228,14 +228,14 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget._update_gui_from_params()
     my_widget.set_fe_btn.click()  # Load the model
     assert cp_model._param.fe_scalings == [1]
-    assert cp_model._param.fe_name == 'dinov2_vits14_reg'
+    assert cp_model._param.fe_name == 'dinov2_small-reg'
 
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()  # Update the classifier with the new parameters
     my_widget._on_predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
     my_widget._on_save_model(save_file='_tests/model_dir/test_model_dino.pkl')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg'
     assert os.path.exists('_tests/model_dir/test_model_dino.pkl')
 
 
@@ -252,13 +252,13 @@ def test_save_model_dinov3(make_napari_viewer, capsys):
     my_widget._on_add_annot_layer()
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    my_widget.qcombo_fe_type.setCurrentText('dinov3_vits16plus')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_vits16plus'
+    my_widget.qcombo_fe_type.setCurrentText('dinov3_small-plus')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus'
 
     cp_model = my_widget.cp_model
     cp_model._param.fe_scalings = [1]
     cp_model._param.fe_order = 0
-    cp_model._param.fe_name = 'dinov3_vits16plus'
+    cp_model._param.fe_name = 'dinov3_small-plus'
     cp_model._param.fe_use_min_features = False
     cp_model._param.tile_annotations = False
     cp_model._param.image_downsample = 1
@@ -266,14 +266,14 @@ def test_save_model_dinov3(make_napari_viewer, capsys):
     my_widget._update_gui_from_params()
     my_widget.set_fe_btn.click()
     assert cp_model._param.fe_scalings == [1]
-    assert cp_model._param.fe_name == 'dinov3_vits16plus'
+    assert cp_model._param.fe_name == 'dinov3_small-plus'
 
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()
     my_widget._on_predict()
     os.makedirs('_tests/model_dir', exist_ok=True)
     my_widget._on_save_model(save_file='_tests/model_dir/test_model_dinov3.pkl')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_vits16plus'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus'
     assert os.path.exists('_tests/model_dir/test_model_dinov3.pkl')
 
 
@@ -293,7 +293,7 @@ def test_load_model_dinov3(make_napari_viewer, capsys):
     my_widget.cp_model.set_params(channel_mode='rgb')
 
     my_widget._on_load_model(save_file='_tests/model_dir/test_model_dinov3.pkl')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_vits16plus'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus'
     my_widget._on_predict()
 
     recovered = viewer.layers['segmentation'].data
@@ -342,8 +342,8 @@ def test_cross_attention_matches_mha_reference():
     not torch.backends.mps.is_available(),
     reason="MPS device not available"
 )
-def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
-    """Test dino_jafar_small on MPS with an RGB image.
+def test_dinov2_small_reg_jafar_mps_rgb(make_napari_viewer, capsys):
+    """Test dinov2_small-reg_jafar on MPS with an RGB image.
 
     Reproduces a crash where MPS fails with:
     [MPSNDArrayDescriptor sliceDimension:withSubrange:] failed assertion
@@ -359,14 +359,14 @@ def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
     my_widget._on_add_annot_layer()
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    # Select dino_jafar_small
-    my_widget.qcombo_fe_type.setCurrentText('dino_jafar_small')
-    assert my_widget.qcombo_fe_type.currentText() == 'dino_jafar_small'
+    # Select dinov2_small-reg_jafar
+    my_widget.qcombo_fe_type.setCurrentText('dinov2_small-reg_jafar')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg_jafar'
 
     cp_model = my_widget.cp_model
     cp_model._param.fe_scalings = [1]
     cp_model._param.fe_order = 0
-    cp_model._param.fe_name = 'dino_jafar_small'
+    cp_model._param.fe_name = 'dinov2_small-reg_jafar'
     # cp_model._param.fe_use_gpu = True  # Force MPS
     cp_model.lock_device("gpu", "fe") # New way to force GPU constantly...
     cp_model._param.fe_use_min_features = False
@@ -393,10 +393,10 @@ def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
     not torch.backends.mps.is_available(),
     reason="MPS device not available"
 )
-def test_dinov3_jafar_vits16plus_mps_rgb(make_napari_viewer, capsys):
-    """Test dinov3_jafar_vits16plus on MPS with an RGB image.
+def test_dinov3_small_plus_jafar_mps_rgb(make_napari_viewer, capsys):
+    """Test dinov3_small-plus_jafar on MPS with an RGB image.
 
-    Mirror of test_dino_jafar_small_mps_rgb for the DINOv3 backbone.
+    Mirror of test_dinov2_small_reg_jafar_mps_rgb for the DINOv3 backbone.
     """
     imgs_dir = os.path.join(os.path.dirname(__file__), '_tests', 'test_imgs')
     im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
@@ -409,13 +409,13 @@ def test_dinov3_jafar_vits16plus_mps_rgb(make_napari_viewer, capsys):
     my_widget._on_add_annot_layer()
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    my_widget.qcombo_fe_type.setCurrentText('dinov3_jafar_vits16plus')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_jafar_vits16plus'
+    my_widget.qcombo_fe_type.setCurrentText('dinov3_small-plus_jafar')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus_jafar'
 
     cp_model = my_widget.cp_model
     cp_model._param.fe_scalings = [1]
     cp_model._param.fe_order = 0
-    cp_model._param.fe_name = 'dinov3_jafar_vits16plus'
+    cp_model._param.fe_name = 'dinov3_small-plus_jafar'
     cp_model.lock_device("gpu", "fe")
     cp_model._param.fe_use_min_features = False
     cp_model._param.tile_annotations = False
@@ -456,7 +456,7 @@ def test_load_model_dino(make_napari_viewer, capsys):
     # Load the Dino model
     my_widget._on_load_model(save_file='_tests/model_dir/test_model_dino.pkl')
     # Ensure the model type is set correctly after loading
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg'
     my_widget._on_predict()
 
     # recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -546,7 +546,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         my_widget.cp_model.set_params(channel_mode='single') # Assuming only 2D images are generated
 
         # Load the Dino model
-        my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
+        my_widget.qcombo_fe_type.setCurrentText('dinov2_small-reg')
         # Set the scaling to 1
         my_widget.fe_scaling_factors.setCurrentText('[1]')
         my_widget.set_fe_btn.click()
@@ -694,17 +694,17 @@ ALL_FE_MODELS = [
     'vgg16',
     'efficient_netb0',
     'convnext',
-    'dinov2_vits14_reg',
-    'dinov3_vits16plus',
-    'dino_jafar_small',
-    'dinov3_jafar_vits16plus',
+    'dinov2_small-reg',
+    'dinov3_small-plus',
+    'dinov2_small-reg_jafar',
+    'dinov3_small-plus_jafar',
     'gaussian_features',
     'cellpose_backbone',
     'combo_dino_vgg',
     'combo_dino_gauss',
 ]
 
-# Use 252×252 so dimensions are divisible by 14 (dino patch size)
+# Use 252×252 so dimensions are divisible by 14 (dinov2 patch size)
 _IM_DIMS = (252, 252)
 _SQ_DIMS = (70, 70)
 

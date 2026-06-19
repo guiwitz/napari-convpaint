@@ -17,11 +17,11 @@ def import_vitwrapper_jafar():
         "JAFAR": JAFAR,
     }
 
-AVAILABLE_MODELS = ["dino_jafar_small", "dinov3_jafar_vits16plus"]
+AVAILABLE_MODELS = ["dinov2_small-reg_jafar", "dinov3_small-plus_jafar"]
 
 STD_MODELS = {
-    "dino-jafar": {"fe_name": "dino_jafar_small"},
-    "dinov3-jafar": {"fe_name": "dinov3_jafar_vits16plus"},
+    "dinov2-jafar": {"fe_name": "dinov2_small-reg_jafar"},
+    "dinov3-jafar": {"fe_name": "dinov3_small-plus_jafar"},
 }
 
 # Per-FE-name spec: which timm backbone, which weights URLs/filenames, and the
@@ -30,7 +30,7 @@ STD_MODELS = {
 # for DINOv3 the weights come from the timm-mirrored HuggingFace repo and we
 # hand the file to timm explicitly via checkpoint_path.
 JAFAR_BACKBONES = {
-    "dino_jafar_small": {
+    "dinov2_small-reg_jafar": {
         "internal_name": "vit_small_patch14_reg4_dinov2",
         "backbone_file": "dinov2_vits14_reg4_pretrain.pth",
         "backbone_url": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_reg4_pretrain.pth",
@@ -40,7 +40,7 @@ JAFAR_BACKBONES = {
         "patch_size": 14,
         "embed_dim": 384,
     },
-    "dinov3_jafar_vits16plus": {
+    "dinov3_small-plus_jafar": {
         "internal_name": "vit_small_plus_patch16_dinov3.lvd1689m",
         "backbone_file": "vit_small_plus_patch16_dinov3_lvd1689m.safetensors",
         "backbone_url": "https://huggingface.co/timm/vit_small_plus_patch16_dinov3.lvd1689m/resolve/main/model.safetensors",
@@ -69,7 +69,7 @@ class DinoJafarFeatures(FeatureExtractor):
     {github.com/PaulCouairon/JAFAR/}
     """
 
-    def __init__(self, model_name="dino_jafar_small", **kwargs):
+    def __init__(self, model_name="dinov2_small-reg_jafar", **kwargs):
         super().__init__(model_name=model_name)
 
         spec = JAFAR_BACKBONES[model_name]
@@ -94,7 +94,7 @@ class DinoJafarFeatures(FeatureExtractor):
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def create_model(model_name="dino_jafar_small"):
+    def create_model(model_name="dinov2_small-reg_jafar"):
         """
         Load ViT backbone and JAFAR head from remote .pth checkpoints using guided download.
         """

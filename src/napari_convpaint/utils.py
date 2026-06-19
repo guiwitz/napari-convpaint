@@ -75,7 +75,7 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
     Parameters:
     ----------
     model_file : str
-        Filename to save (e.g. "dinov2_vits14_reg.pth").
+        Filename to save (e.g. "dinov2_small-reg.pth").
     model_url : str
         Direct URL to the model.
     model_dir : str

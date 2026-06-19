@@ -70,7 +70,7 @@ class ConvpaintModel:
 
         The four **ways for initialization** in detail:
 
-        1. By providing an **alias** (e.g., "vgg-s", "dino", "gaussian", etc.), in which case a corresponding model
+        1. By providing an **alias** (e.g., "vgg-s", "dinov2", "gaussian", etc.), in which case a corresponding model
         configuration will be loaded.
         2. By providing a **saved model path** (model_path) to load a model defined earlier.
         This can be a .pkl file (holding the FE model, classifier and Param object) or .yml file (only defining the model parameters).
