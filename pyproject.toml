@@ -42,7 +42,7 @@ dependencies = [
     "scikit-learn",
     "scikit-image",
     "tifffile",
-    "timm",
+    "timm>=1.0.20",
     "torch",
     "torchvision>=0.13.0",
     "zarr",

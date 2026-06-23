@@ -46,7 +46,7 @@ You can use the Convpaint API in a fashion very similar to the napari plugin. Th
 Initialize a `ConvpaintModel` object, train its classifier and use it to segment an image:
 
 ```Python
-cp_model = ConvpaintModel("dino") # alternatively use vgg, cellpose or gaussian
+cp_model = ConvpaintModel("dinov2") # alternatively use vgg, cellpose or gaussian
 cp_model.train(image, annotations)
 segmentation = cp_model.segment(image)
 ```

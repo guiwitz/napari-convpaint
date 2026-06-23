@@ -17,21 +17,50 @@ def import_vitwrapper_jafar():
         "JAFAR": JAFAR,
     }
 
-AVAILABLE_MODELS = ["dino_jafar_small"]
+AVAILABLE_MODELS = ["dinov2_small-reg_jafar", "dinov3_small-plus_jafar"]
 
 STD_MODELS = {
-    "dino-jafar": {"fe_name": "dino_jafar_small"},
+    "dinov2-jafar": {"fe_name": "dinov2_small-reg_jafar"},
+    "dinov3-jafar": {"fe_name": "dinov3_small-plus_jafar"},
+}
+
+# Per-FE-name spec: which timm backbone, which weights URLs/filenames, and the
+# JAFAR head dims (must match the embed_dim of the backbone). For DINOv2 the
+# backbone weights live on Meta's CDN and timm finds them in torch hub cache;
+# for DINOv3 the weights come from the timm-mirrored HuggingFace repo and we
+# hand the file to timm explicitly via checkpoint_path.
+JAFAR_BACKBONES = {
+    "dinov2_small-reg_jafar": {
+        "internal_name": "vit_small_patch14_reg4_dinov2",
+        "backbone_file": "dinov2_vits14_reg4_pretrain.pth",
+        "backbone_url": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_reg4_pretrain.pth",
+        "backbone_via_checkpoint_path": False,
+        "jafar_file": "vit_small_patch14_reg4_dinov2.pth",
+        "jafar_url": "https://github.com/PaulCouairon/JAFAR/releases/download/Weights/vit_small_patch14_reg4_dinov2.pth",
+        "patch_size": 14,
+        "embed_dim": 384,
+    },
+    "dinov3_small-plus_jafar": {
+        "internal_name": "vit_small_plus_patch16_dinov3.lvd1689m",
+        "backbone_file": "vit_small_plus_patch16_dinov3_lvd1689m.safetensors",
+        "backbone_url": "https://huggingface.co/timm/vit_small_plus_patch16_dinov3.lvd1689m/resolve/main/model.safetensors",
+        "backbone_via_checkpoint_path": True,
+        "jafar_file": "vit_small_plus_patch16_dinov3.lvd1689m.pth",
+        "jafar_url": "https://github.com/PaulCouairon/JAFAR/releases/download/Weights/vit_small_plus_patch16_dinov3.lvd1689m.pth",
+        "patch_size": 16,
+        "embed_dim": 384,
+    },
 }
 
 from ..feature_extractor import FeatureExtractor
 
 class DinoJafarFeatures(FeatureExtractor):
     """
-    DINOv2 + JAFAR upsampler feature extractor integrated with ConvPaint.
+    DINO + JAFAR upsampler feature extractor integrated with ConvPaint.
     Expects that ConvPaint already padded/cropped images so H,W are multiples
-    of self.patch_size (14). Provides dynamic patch size: large images use
-    448px (14*32) sliding patches with overlap; smaller images shrink patch
-    size to the largest multiple of 14 that fits within min(H,W).
+    of self.patch_size. Provides dynamic patch size: large images use sliding
+    patches with overlap; smaller images shrink patch size to the largest
+    multiple of the backbone patch size that fits within min(H,W).
 
     This code is adapted from the JAFAR implementation:
     Paul Couairon, Loick Chambon, Louis Serrano, Jean-Emmanuel Haugeard, Matthieu Cord, Nicolas Thome
@@ -40,18 +69,20 @@ class DinoJafarFeatures(FeatureExtractor):
     {github.com/PaulCouairon/JAFAR/}
     """
 
-    def __init__(self, model_name="dino_jafar_small", **kwargs):
+    def __init__(self, model_name="dinov2_small-reg_jafar", **kwargs):
         super().__init__(model_name=model_name)
-        
-        self.patch_size = 14          # token size of ViT
-        self.padding    = 0           # model-internal extra pad (none)
-        self.has_global_context = True # DINOv2 and JAFAR's upsampler use global attention
-        self.num_input_channels = [3] # RGB
-        self.norm_mode = "imagenet"  # DINOv2 expects ImageNet normalization
-        self.rgb_input = True       # expects RGB input
+
+        spec = JAFAR_BACKBONES[model_name]
+        self.patch_size = spec["patch_size"]    # ViT token size
+        self.padding    = 0                     # model-internal extra pad (none)
+        self.num_input_channels = [3]           # RGB
+        self.norm_mode = "imagenet"
+        self.rgb_input = True
+        # The largest scale equals the backbone patch size — at that scale
+        # JAFAR is asked for native patch-resolution output (no upsampling).
         self.proposed_scalings = [[1],
-                                  [1,8],
-                                  [1,8,14]
+                                  [1, 8],
+                                  [1, 8, self.patch_size],
                                   ]
 
         # Parent .create_model() saves tuple (hr_head, backbone) in self.model
@@ -59,28 +90,22 @@ class DinoJafarFeatures(FeatureExtractor):
         self.device = get_device_from_torch_model(self.model)
 
     # ------------------------------------------------------------------ #
-    # Load JAFAR upscaler and DINOv2 backbone
+    # Load JAFAR upscaler and ViT backbone
     # ------------------------------------------------------------------ #
-    
+
     @staticmethod
-    def create_model(model_name="dino_jafar_small"):
+    def create_model(model_name="dinov2_small-reg_jafar"):
         """
-        Load DINOv2 backbone and JAFAR model head from remote .pth checkpoints using guided download.
+        Load ViT backbone and JAFAR head from remote .pth checkpoints using guided download.
         """
         device = torch.device("cpu") # Will move device at feature extraction time
 
-        # Define filenames
-        backbone_file = "dinov2_vits14_reg4_pretrain.pth"
-        backbone_url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/" + backbone_file
+        spec = JAFAR_BACKBONES[model_name]
 
-        jafar_file = "vit_small_patch14_reg4_dinov2.pth"
-        jafar_url = "https://github.com/PaulCouairon/JAFAR/releases/download/Weights/" + jafar_file
+        # Pre-fetch both checkpoints with guided progress.
+        backbone_path = guided_model_download(spec["backbone_file"], spec["backbone_url"])
+        jafar_ckpt    = guided_model_download(spec["jafar_file"],    spec["jafar_url"])
 
-        # Download checkpoints
-        _ = guided_model_download(backbone_file, backbone_url) # Just make sure the backbone is downloaded
-        jafar_ckpt = guided_model_download(jafar_file, jafar_url)
-
-        # --- Load backbone ---
         vitwrapper_jafar = import_vitwrapper_jafar()
         if vitwrapper_jafar is None:
             raise ImportError(
@@ -88,16 +113,21 @@ class DinoJafarFeatures(FeatureExtractor):
                 "Make sure to have the jafar module installed and available in your environment."
             )
         wrapper, head = vitwrapper_jafar["PretrainedViTWrapper"], vitwrapper_jafar["JAFAR"]
-        
-        internal_names = {"dino_jafar_small": "vit_small_patch14_reg4_dinov2"}
-        backbone = wrapper(name=internal_names[model_name]).to(device)
+
+        # DINOv3 weights come from HuggingFace, not torch hub cache, so we hand
+        # the local file to timm explicitly. DINOv2's torch-hub URL aligns with
+        # what timm fetches automatically, so the pre-download is enough.
+        if spec["backbone_via_checkpoint_path"]:
+            backbone = wrapper(name=spec["internal_name"], checkpoint_path=backbone_path).to(device)
+        else:
+            backbone = wrapper(name=spec["internal_name"]).to(device)
 
         # --- Instantiate JAFAR head ---
         model = head(
             input_dim=3,
             qk_dim=128,
-            v_dim=384,
-            feature_dim=384,
+            v_dim=spec["embed_dim"],
+            feature_dim=spec["embed_dim"],
             kernel_size=1,
             num_heads=4,
             name="jafar"
@@ -118,8 +148,10 @@ class DinoJafarFeatures(FeatureExtractor):
         return False
 
     def get_description(self):
-        return ("DINOv2 + JAFAR upsampler feature extractor\n"
-                "Patch size 14, overlap blending, CPU-accumulated HR features.")
+        spec = JAFAR_BACKBONES[self.model_name]
+        backbone_label = "DINOv3 ViT-S+" if "dinov3" in self.model_name.lower() else "DINOv2"
+        return (f"{backbone_label} + JAFAR upsampler feature extractor\n"
+                f"Patch size {spec['patch_size']}, overlap blending, CPU-accumulated HR features.")
 
     def get_default_params(self, param=None):
         param = super().get_default_params(param)

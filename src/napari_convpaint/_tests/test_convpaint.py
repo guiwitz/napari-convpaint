@@ -151,6 +151,10 @@ def test_multi_channel_prediction(make_napari_viewer, capsys):
 
 
 def test_save_model(make_napari_viewer, capsys):
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(model_dir, exist_ok=True)
+    file_path = os.path.join(model_dir, 'test_model.pkl')
+
     im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
@@ -165,13 +169,18 @@ def test_save_model(make_napari_viewer, capsys):
     my_widget._on_train()
     my_widget._on_predict()
 
-    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
-    os.makedirs(models_dir, exist_ok=True)
-    my_widget._on_save_model(save_file=os.path.join(models_dir, 'test_model.pkl'))
-    assert os.path.exists(os.path.join(models_dir, 'test_model.pkl'))
+    my_widget._on_save_model(save_file=file_path)
+    assert os.path.exists(file_path)
 
 
 def test_load_model(make_napari_viewer, capsys):
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    if not os.path.exists(model_dir):
+        pytest.skip("model_dir not present — run save tests to generate models")
+    file_path = os.path.join(model_dir, 'test_model.pkl')
+    if not os.path.exists(file_path):
+        pytest.skip("test_model.pkl not generated yet — run test_save_model first")
+
     im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
 
@@ -182,9 +191,7 @@ def test_load_model(make_napari_viewer, capsys):
     # my_widget.rgb_img = True
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
-    os.makedirs(models_dir, exist_ok=True)
-    my_widget._on_load_model(save_file=os.path.join(models_dir, 'test_model.pkl'))  # Changed to .pkl
+    my_widget._on_load_model(save_file=file_path)
     my_widget._on_predict()
 
     # recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -199,7 +206,12 @@ def test_load_model(make_napari_viewer, capsys):
     assert recall > 0.8, f"Recall: {recall}, too low"
 
 
-def test_save_model_dino(make_napari_viewer, capsys):
+def test_save_model_dinov2(make_napari_viewer, capsys):
+    # Setup model dir at start
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(model_dir, exist_ok=True)
+    file_path = os.path.join(model_dir, 'test_model_dinov2.pkl')
+
     # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
     imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
@@ -210,19 +222,20 @@ def test_save_model_dino(make_napari_viewer, capsys):
     viewer = make_napari_viewer()
     my_widget = ConvpaintWidget(viewer)
     my_widget.ensure_init()
+
     viewer.add_image(im)
     my_widget._on_add_annot_layer()
     # my_widget.rgb_img = True
     my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Simulate selecting the Dino model from the dropdown
-    my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
-    
+    my_widget.qcombo_fe_type.setCurrentText('dinov2_small-reg')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg'
+
     cp_model = my_widget.cp_model
     cp_model._param.fe_scalings = [1]
     cp_model._param.fe_order = 0  # Set interpolation order to 0
-    cp_model._param.fe_name = 'dinov2_vits14_reg'
+    cp_model._param.fe_name = 'dinov2_small-reg'
     # cp_model._param.fe_use_gpu = False
     cp_model._param.fe_use_min_features = False
     cp_model._param.tile_annotations = False
@@ -231,17 +244,85 @@ def test_save_model_dino(make_napari_viewer, capsys):
     my_widget._update_gui_from_params()
     my_widget.set_fe_btn.click()  # Load the model
     assert cp_model._param.fe_scalings == [1]
-    assert cp_model._param.fe_name == 'dinov2_vits14_reg'
+    assert cp_model._param.fe_name == 'dinov2_small-reg'
 
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()  # Update the classifier with the new parameters
     my_widget._on_predict()
-    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
-    os.makedirs(models_dir, exist_ok=True)
-    model_path_dino = os.path.join(models_dir, 'test_model_dino.pkl')
-    my_widget._on_save_model(save_file=model_path_dino)
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
-    assert os.path.exists(model_path_dino)
+    my_widget._on_save_model(save_file=file_path)
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg'
+    assert os.path.exists(file_path)
+
+
+def test_save_model_dinov3(make_napari_viewer, capsys):
+    # Setup model dir at start
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(model_dir, exist_ok=True)
+    file_path = os.path.join(model_dir, 'test_model_dinov3.pkl')
+
+    imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
+    im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
+    im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
+    ground_truth = np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png')))
+
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+    viewer.add_image(im)
+    my_widget._on_add_annot_layer()
+    my_widget.cp_model.set_params(channel_mode='rgb')
+
+    my_widget.qcombo_fe_type.setCurrentText('dinov3_small-plus')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus'
+
+    cp_model = my_widget.cp_model
+    cp_model._param.fe_scalings = [1]
+    cp_model._param.fe_order = 0
+    cp_model._param.fe_name = 'dinov3_small-plus'
+    cp_model._param.fe_use_min_features = False
+    cp_model._param.tile_annotations = False
+    cp_model._param.image_downsample = 1
+    cp_model._param.normalize = 1
+    my_widget._update_gui_from_params()
+    my_widget.set_fe_btn.click()
+    assert cp_model._param.fe_scalings == [1]
+    assert cp_model._param.fe_name == 'dinov3_small-plus'
+
+    viewer.layers['annotations'].data[...] = im_annot
+    my_widget._on_train()
+    my_widget._on_predict()
+    my_widget._on_save_model(save_file=file_path)
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus'
+    assert os.path.exists(file_path)
+
+
+def test_load_model_dinov3(make_napari_viewer, capsys):
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    if not os.path.exists(model_dir):
+        pytest.skip("model_dir not present — run save tests to generate models")
+    file_path = os.path.join(model_dir, 'test_model_dinov3.pkl')
+    if not os.path.exists(file_path):
+        pytest.skip("test_model_dinov3.pkl not generated yet — run test_save_model_dinov3 first")
+
+    imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
+    im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
+    ground_truth = np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png')))
+
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+
+    viewer.add_image(im)
+    my_widget.cp_model.set_params(channel_mode='rgb')
+
+    my_widget._on_load_model(save_file=file_path)
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus'
+    my_widget._on_predict()
+
+    recovered = viewer.layers['segmentation'].data
+    precision, recall = compute_precision_recall(ground_truth, recovered)
+    assert precision > 0.8, f"Precision: {precision}, too low"
+    assert recall > 0.8, f"Recall: {recall}, too low"
 
 
 def test_cross_attention_matches_mha_reference():
@@ -284,8 +365,8 @@ def test_cross_attention_matches_mha_reference():
     not torch.backends.mps.is_available(),
     reason="MPS device not available"
 )
-def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
-    """Test dino_jafar_small on MPS with an RGB image.
+def test_dinov2_small_reg_jafar_mps_rgb(make_napari_viewer, capsys):
+    """Test dinov2_small-reg_jafar on MPS with an RGB image.
 
     Reproduces a crash where MPS fails with:
     [MPSNDArrayDescriptor sliceDimension:withSubrange:] failed assertion
@@ -301,14 +382,14 @@ def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
     my_widget._on_add_annot_layer()
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    # Select dino_jafar_small
-    my_widget.qcombo_fe_type.setCurrentText('dino_jafar_small')
-    assert my_widget.qcombo_fe_type.currentText() == 'dino_jafar_small'
+    # Select dinov2_small-reg_jafar
+    my_widget.qcombo_fe_type.setCurrentText('dinov2_small-reg_jafar')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg_jafar'
 
     cp_model = my_widget.cp_model
     cp_model._param.fe_scalings = [1]
     cp_model._param.fe_order = 0
-    cp_model._param.fe_name = 'dino_jafar_small'
+    cp_model._param.fe_name = 'dinov2_small-reg_jafar'
     # cp_model._param.fe_use_gpu = True  # Force MPS
     cp_model.lock_device("gpu", "fe") # New way to force GPU constantly...
     cp_model._param.fe_use_min_features = False
@@ -331,7 +412,62 @@ def test_dino_jafar_small_mps_rgb(make_napari_viewer, capsys):
     assert recall > 0.7, f"Recall: {recall}, too low"
 
 
-def test_load_model_dino(make_napari_viewer, capsys):
+@pytest.mark.skipif(
+    not torch.backends.mps.is_available(),
+    reason="MPS device not available"
+)
+def test_dinov3_small_plus_jafar_mps_rgb(make_napari_viewer, capsys):
+    """Test dinov3_small-plus_jafar on MPS with an RGB image.
+
+    Mirror of test_dinov2_small_reg_jafar_mps_rgb for the DINOv3 backbone.
+    """
+    imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
+    im = np.array(Image.open(os.path.join(imgs_dir, '0000_img.png')))
+    im_annot = np.array(Image.open(os.path.join(imgs_dir, '0000_scribbles_all_01500_w3.png')))
+
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+    viewer.add_image(im)
+    my_widget._on_add_annot_layer()
+    my_widget.cp_model.set_params(channel_mode='rgb')
+
+    my_widget.qcombo_fe_type.setCurrentText('dinov3_small-plus_jafar')
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov3_small-plus_jafar'
+
+    cp_model = my_widget.cp_model
+    cp_model._param.fe_scalings = [1]
+    cp_model._param.fe_order = 0
+    cp_model._param.fe_name = 'dinov3_small-plus_jafar'
+    cp_model.lock_device("gpu", "fe")
+    cp_model._param.fe_use_min_features = False
+    cp_model._param.tile_annotations = False
+    cp_model._param.image_downsample = 1
+    cp_model._param.normalize = 1
+    my_widget._update_gui_from_params()
+    my_widget.set_fe_btn.click()
+
+    viewer.layers['annotations'].data[...] = im_annot
+    my_widget._on_train()
+    my_widget._on_predict()
+
+    recovered = viewer.layers['segmentation'].data
+    precision, recall = compute_precision_recall(
+        np.array(Image.open(os.path.join(imgs_dir, '0000_ground_truth.png'))),
+        recovered
+    )
+    assert precision > 0.7, f"Precision: {precision}, too low"
+    assert recall > 0.7, f"Recall: {recall}, too low"
+
+
+def test_load_model_dinov2(make_napari_viewer, capsys):
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    if not os.path.exists(model_dir):
+        pytest.skip("model_dir not present — run save tests to generate models")
+    file_path = os.path.join(model_dir, 'test_model_dinov2.pkl')
+    if not os.path.exists(file_path):
+        pytest.skip("test_model_dinov2.pkl not generated yet — run test_save_model_dinov2 first")
+
     # im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     # im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
     imgs_dir = os.path.join(os.path.dirname(__file__), 'test_imgs')
@@ -348,11 +484,9 @@ def test_load_model_dino(make_napari_viewer, capsys):
     my_widget.cp_model.set_params(channel_mode='rgb')
 
     # Load the Dino model
-    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
-    os.makedirs(models_dir, exist_ok=True)
-    my_widget._on_load_model(save_file=os.path.join(models_dir, 'test_model_dino.pkl'))
+    my_widget._on_load_model(save_file=file_path)
     # Ensure the model type is set correctly after loading
-    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_vits14_reg'
+    assert my_widget.qcombo_fe_type.currentText() == 'dinov2_small-reg'
     my_widget._on_predict()
 
     # recovered = viewer.layers['segmentation'].data[ground_truth==1]
@@ -371,6 +505,8 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     # Setup synthetic data
     im, ground_truth = generate_synthetic_square(im_dims=(252,252), square_dims=(70,70))
     im_annot = generate_synthetic_circle_annotation(im_dims=(252,252), circle1_xy=(125,70), circle2_xy=(125,125))
+    model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+    os.makedirs(model_dir, exist_ok=True)
 
     viewer = make_napari_viewer()
     my_widget = ConvpaintWidget(viewer)
@@ -380,8 +516,6 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     # my_widget.rgb_img = True
     my_widget.cp_model.set_params(channel_mode='rgb')
 
-    models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
-    os.makedirs(models_dir, exist_ok=True)
     # Create and save the first model with scales [1]
     my_widget.qcombo_fe_type.setCurrentText('vgg16')
     my_widget.fe_scaling_factors.setCurrentText('[1]')
@@ -391,7 +525,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()
     my_widget._on_predict()
-    model_path_1 = os.path.join(models_dir, 'test_model_vgg16_scale_1.pkl')
+    model_path_1 = os.path.join(model_dir, 'test_model_vgg16_scale_1.pkl')
     my_widget._on_save_model(save_file=model_path_1)
     assert os.path.exists(model_path_1)
 
@@ -405,7 +539,7 @@ def test_save_and_load_vgg16_models(make_napari_viewer, capsys):
     viewer.layers['annotations'].data[...] = im_annot
     my_widget._on_train()
     my_widget._on_predict()
-    model_path_2 = os.path.join(models_dir, 'test_model_vgg16_scale_1248.pkl')
+    model_path_2 = os.path.join(model_dir, 'test_model_vgg16_scale_1248.pkl')
     my_widget._on_save_model(save_file=model_path_2)
     assert os.path.exists(model_path_2)
 
@@ -444,7 +578,7 @@ def test_dino_model_with_different_image_sizes(make_napari_viewer, capsys):
         my_widget.cp_model.set_params(channel_mode='single') # Assuming only 2D images are generated
 
         # Load the Dino model
-        my_widget.qcombo_fe_type.setCurrentText('dinov2_vits14_reg')
+        my_widget.qcombo_fe_type.setCurrentText('dinov2_small-reg')
         # Set the scaling to 1
         my_widget.fe_scaling_factors.setCurrentText('[1]')
         my_widget.set_fe_btn.click()
@@ -497,15 +631,15 @@ def test_custom_vgg16_layers(make_napari_viewer, capsys):
         assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
         #save the model
-        models_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
-        os.makedirs(models_dir, exist_ok=True)
+        model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
+        os.makedirs(model_dir, exist_ok=True)
 
-        model_path = os.path.join(models_dir, f'test_model_vgg16_custom_layers_{indices_to_select}.pkl')
+        model_path = os.path.join(model_dir, f'test_model_vgg16_custom_layers_{indices_to_select}.pkl')
         my_widget._on_save_model(save_file=model_path)
 
     #load the models again and check if the predictions are correct
     for indices_to_select in all_tests:
-        model_path = os.path.join(models_dir, f'test_model_vgg16_custom_layers_{indices_to_select}.pkl')
+        model_path = os.path.join(model_dir, f'test_model_vgg16_custom_layers_{indices_to_select}.pkl')
         my_widget._on_load_model(save_file=model_path)
         assert len(my_widget.fe_layer_selection.selectedItems()) == len(indices_to_select)
 
@@ -595,15 +729,17 @@ ALL_FE_MODELS = [
     'vgg16',
     'efficient_netb0',
     'convnext',
-    'dinov2_vits14_reg',
-    'dino_jafar_small',
+    'dinov2_small-reg',
+    'dinov3_small-plus',
+    'dinov2_small-reg_jafar',
+    'dinov3_small-plus_jafar',
     'gaussian_features',
     'cellpose_backbone',
     'combo_dino_vgg',
     'combo_dino_gauss',
 ]
 
-# Use 252×252 so dimensions are divisible by 14 (dino patch size)
+# Use 252×252 so dimensions are divisible by 14 (dinov2 patch size)
 _IM_DIMS = (252, 252)
 _SQ_DIMS = (70, 70)
 

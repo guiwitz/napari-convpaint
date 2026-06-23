@@ -76,7 +76,7 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
     Parameters:
     ----------
     model_file : str
-        Filename to save (e.g. "dinov2_vits14_reg.pth").
+        Filename to save (e.g. "dinov2_small-reg.pth").
     model_url : str
         Direct URL to the model.
     model_dir : str
@@ -95,45 +95,55 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
     if os.path.exists(model_path):
         return model_path  # Already downloaded
 
-    # Try importing Napari tools
     use_napari = False
+    viewer = None
     try:
         from napari.utils.progress import progress as napari_progress
-        from napari.utils.notifications import show_info, show_error
+        from napari.utils.notifications import show_error
         import napari
-        if napari.current_viewer():
+        viewer = napari.current_viewer()
+        if viewer is not None:
             use_napari = True
     except ImportError:
-        pass  # Fall back to CLI mode
+        pass # Fall back to CLI progress if napari is not available
+
+    if use_napari:
+        viewer.window._status_bar._toggle_activity_dock(True)
 
     try:
-        if use_napari:
-            show_info(f"🔄 Downloading model weights: {model_file}")
-
         with requests.get(model_url, stream=True) as r:
             r.raise_for_status()
             total = int(r.headers.get('content-length', 0))
-            chunk_size = 8192
+            chunk_size = 256 * 1024  # large enough to keep tqdm's chunk counter short
             num_chunks = total // chunk_size + 1
+            update_every = max(1, num_chunks // 100)
 
             if use_napari:
-                progress_bar = napari_progress(total=num_chunks, desc=f"Downloading {model_file}")
+                pbr_ctx = napari_progress(total=num_chunks)
+                # No-op display() suppresses the activity-dock ETA label (which would
+                # otherwise overflow the row); the QProgressBar still advances via the
+                # 'value' event emitted by update().
+                pbr_ctx.display = lambda msg=None, pos=None: None
             else:
                 print(f"Downloading {model_file} ({total / 1e6:.2f} MB) from {model_url}...")
-                progress_bar = range(num_chunks)
+                pbr_ctx = None
 
-            with open(model_path, 'wb') as f:
-                for i, chunk in enumerate(r.iter_content(chunk_size=chunk_size)):
-                    if chunk:
-                        f.write(chunk)
-                    if use_napari:
-                        progress_bar.update(1)
-                    elif i % 50 == 0 or i == num_chunks - 1:
-                        print(f"  {min((i + 1) * chunk_size / total * 100, 100):.1f}% done", end="\r")
+            try:
+                if pbr_ctx is not None:
+                    pbr_ctx.set_description("Downloading weights")
 
-        # Confirm completion
-        if use_napari:
-            show_info(f"✅ Download completed: {model_file}")
+                with open(model_path, 'wb') as f:
+                    for i, chunk in enumerate(r.iter_content(chunk_size=chunk_size)):
+                        if chunk:
+                            f.write(chunk)
+                        if pbr_ctx is not None:
+                            if i % update_every == 0 or i == num_chunks - 1:
+                                pbr_ctx.update(update_every)
+                        elif i % 50 == 0 or i == num_chunks - 1:
+                            print(f"  {min((i + 1) * chunk_size / total * 100, 100):.1f}% done", end="\r")
+            finally:
+                if pbr_ctx is not None:
+                    pbr_ctx.close()
 
     except Exception as e:
         if use_napari:
@@ -147,6 +157,9 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
             print(f"Please manually download from:\n{model_url}")
             print(f"And place it in:\n{model_dir}")
         raise RuntimeError(f"Model download failed: {e}")
+    finally:
+        if use_napari:
+            viewer.window._status_bar._toggle_activity_dock(False)
 
     return model_path
 

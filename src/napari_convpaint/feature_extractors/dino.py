@@ -2,24 +2,39 @@ import torch
 import numpy as np
 from ..utils import get_device_from_torch_model, scale_img, guided_model_download
 
-AVAILABLE_MODELS = ['dinov2_vits14_reg']
+DINOV2_MODELS = {
+    'dinov2_small-reg': {
+        'internal_name': 'dinov2_vits14_reg',
+        'patch_size': 14,
+        'embed_dim': 384,
+    }
+}
+
+AVAILABLE_MODELS = ['dinov2_small-reg']
 
 STD_MODELS = {
-    "dino": {"fe_name": "dinov2_vits14_reg"},
+    "dinov2": {"fe_name": "dinov2_small-reg"},
 }
 
 from ..feature_extractor import FeatureExtractor
 
-class DinoFeatures(FeatureExtractor):
+class Dinov2Features(FeatureExtractor):
     """Feature extractor using DINOv2, a self-supervised vision transformer model from Facebook AI Research (Meta)."""
-    def __init__(self, model_name='dinov2_vits14_reg', **kwargs):
+    
+    def __init__(self, model_name='dinov2_small-reg', **kwargs):
+
+        if model_name not in DINOV2_MODELS:
+            raise ValueError(
+                f"Unknown DINOv2 model '{model_name}'. Available: {list(DINOV2_MODELS)}"
+            )
+        spec = DINOV2_MODELS[model_name]
         
         super().__init__(model_name=model_name)
         
-        self.patch_size = 14
+        self.patch_size = spec['patch_size']
         self.padding = 0 # Note: final padding is automatically 1/2 patch size
+        self.num_input_channels = [3] # RGB
         self.has_global_context = True
-        self.num_input_channels = [3]
         self.norm_mode = "imagenet"  # DINOv2 expects ImageNet normalization
         self.rgb_input = True  # DINOv2 expects RGB input
         self.proposed_scalings = [[1]]
@@ -29,19 +44,21 @@ class DinoFeatures(FeatureExtractor):
 
     @staticmethod
     def create_model(model_name):
+        spec = DINOV2_MODELS[model_name]
+        internal_model_name = spec['internal_name']
         # Validate for forks to prevent rate limit error on GitHub Actions: https://github.com/pytorch/pytorch/issues/61755
         torch.hub._validate_not_a_forked_repo=lambda a, b, c: True
 
         # Extract model backbone name
-        model_backbone = model_name.split('_')[0] + "_" + model_name.split('_')[1]
+        model_backbone = internal_model_name.split('_')[0] + "_" + internal_model_name.split('_')[1]
 
-        model_file = f"{model_name}4_pretrain.pth"
+        model_file = f"{internal_model_name}4_pretrain.pth"
         model_url = f"https://dl.fbaipublicfiles.com/dinov2/{model_backbone}/{model_file}"
 
         # Ensure weights are downloaded
         _ = guided_model_download(model_file, model_url)
 
-        model = torch.hub.load('facebookresearch/dinov2', model_name, pretrained=True, verbose=False)
+        model = torch.hub.load('facebookresearch/dinov2', internal_model_name, pretrained=True, verbose=False)
 
         # Set model to evaluation mode. Device is selected at feature extraction time.
         model.eval()
