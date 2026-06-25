@@ -871,7 +871,47 @@ class ConvpaintModel:
         probas = self._predict(image, add_seg=False, in_channels=in_channels,
                        skip_norm=skip_norm, use_dask=use_dask, fe_use_device=fe_use_device)
         return probas
-    
+
+    def get_instances(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None,
+                      min_size=0, classes=None, per_plane=False, warn=True):
+        """
+        Creates instance masks from the semantic segmentation of an image.
+
+        Parameters
+        ----------
+        image : np.ndarray or list[np.ndarray]
+            Image to create instances for or list of images
+        in_channels : list[int], optional
+            List of channels to use for instance creation
+        skip_norm : bool, optional
+            Whether to skip normalization of the images before instance creation
+        use_dask : bool, optional
+            Whether to use dask for parallel processing
+        fe_use_device : str, optional
+            Device policy for feature extractor ("auto", "gpu", "cpu")
+        min_size : int, optional
+            Minimum size of instances to keep (default: 0)
+        classes : list[int], optional
+            List of classes to create instances for (default: all classes)
+        warn : bool, optional
+            Whether to show warnings (default: True)
+
+        Returns
+        ----------
+        instances : np.ndarray or list[np.ndarray]
+            Instance masks created from the semantic segmentation or list of instance masks for each image if input is a list.
+        """
+        _, seg = self._predict(image, add_seg=True, in_channels=in_channels,
+                            skip_norm=skip_norm, use_dask=use_dask, fe_use_device=fe_use_device)
+        
+        return utils.create_instances_from_semantic(
+            segmentations=seg,
+            min_size=min_size,
+            classes=classes,
+            per_plane=per_plane,
+            warn=warn
+        )
+
     def get_feature_image(self, data,
                           in_channels=None, skip_norm=False,
                           pca_components=0, kmeans_clusters=0,

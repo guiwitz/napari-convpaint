@@ -66,6 +66,89 @@ def apply_kmeans_to_f_image(feature_img, n_clusters, random_state=None):
     return kmeans_labels
 
 
+### Instance creation from semantic segmentaiton
+
+def create_instances_from_semantic(segmentations, min_size=300, classes=None, per_plane=False, warn=True):
+    """
+    Create instance masks from semantic segmentation masks.
+
+    Parameters:
+    ----------
+    segmentations : list of np.ndarray or a single np.ndarray
+        List of semantic segmentation masks. Each mask should have shape (H, W) or (Z, H, W).
+    min_size : int
+        Minimum size of objects to keep. Smaller objects will be removed, and smaller holes will be filled. Use 0 to ignore.
+    classes : list of int, optional
+        List of classes to create instances for. If None, all classes in the segmentations will be used, except 1 (background).
+    per_plane : bool
+        If True, and the segmentation masks are 3D, each plane will be labeled separately. If False, the 3D mask will be labeled as a whole.
+    warn : bool
+        If True, a warning will be issued if no class 1 is found in the segmentations.
+    
+    """
+    # Assure list input for segmentations
+    single_input = hasattr(segmentations, 'ndim') and segmentations.ndim >= 2 and not isinstance(segmentations, (list, tuple))
+    if single_input:
+        segmentations = [segmentations]
+
+    # Check for classes across segmentations
+    if classes is None:
+        classes = np.unique(np.concatenate([s.ravel() for s in segmentations]))
+        if not 1 in classes:
+            if warn:
+                warnings.warn(f"No class 1 found in segmentations. Found classes: {classes}.\n" +
+                              f"This might be intentional. But typically class 1 is the background class, and classes > 1 are the objects of interest.\n" +
+                              f"You can turn this warning off by setting `warn=False`.")
+
+    from skimage.morphology import remove_small_holes, remove_small_objects
+    from skimage.measure import label
+
+    instance_masks = [np.zeros_like(segmentation, dtype=np.int32) for segmentation in segmentations]
+    global_max = 0
+
+    for c in classes:
+        if c == 1:
+            continue # Skip background class
+
+        class_start = global_max + 1
+
+        for segmentation, instance_mask in zip(segmentations, instance_masks):
+            
+            mask = segmentation == c
+
+            mask = remove_small_holes(mask, max_size=min_size)
+            mask = remove_small_objects(mask, max_size=min_size)
+
+            if per_plane and mask.ndim == 3: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
+                labels_stack = np.zeros_like(mask, dtype=np.int32)
+                for z in range(mask.shape[0]):
+                    mask_plane = mask[z]
+                    instance_mask_plane = instance_mask[z]
+
+                    l = label(mask_plane)
+                    labels_stack[z] = l
+
+                    new_slice = labels_stack[z] + global_max
+                    instance_mask_plane[mask_plane] = new_slice[mask_plane]
+
+                    global_max = instance_mask.max()
+
+            else: # For true 3D and 2D, we can label the mask directly
+                l = label(mask)
+                
+                new_mask = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across segmentations
+                instance_mask[mask] = new_mask[mask]
+
+            global_max = instance_mask.max()
+        
+        
+        print(f"Turned class {c} into instances {class_start}-{global_max}.")
+
+    if single_input:
+        return instance_masks[0]
+    return instance_masks
+
+
 ### MODEL DOWNLOAD
 
 def guided_model_download(model_file: str, model_url: str, model_dir: str = None) -> str:
