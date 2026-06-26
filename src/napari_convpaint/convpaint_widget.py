@@ -383,7 +383,7 @@ class ConvpaintWidget(QWidget):
             # Reset to initial state
             self.reset_class_names_btn = QPushButton('Reset to default')
             self.classes_layout.addWidget(self.reset_class_names_btn, len(self.initial_names)+3, 0, 1, 10)
-            self.btn_class_distribution_annot = QPushButton('Show class distribution (in annotation)')
+            self.btn_class_distribution_annot = QPushButton('Show class distribution (in annotations layer)')
             self.classes_layout.addWidget(self.btn_class_distribution_annot, len(self.initial_names)+4, 0, 1, 10)
 
             # Create the class names
@@ -522,6 +522,26 @@ class ConvpaintWidget(QWidget):
             self.check_add_probas = QCheckBox('Probabilities')
             self.check_add_probas.setChecked(self.add_probas)
             self.advanced_output_group.glayout.addWidget(self.check_add_probas, 0, 1, 1, 1)
+
+            # Checkbox for adding instances
+            self.check_add_instances = QCheckBox('Instances')
+            self.check_add_instances.setChecked(self.add_instances)
+            self.advanced_output_group.glayout.addWidget(self.check_add_instances, 0, 2, 1, 1)
+
+            # Make output checkbox columns expand with widget width.
+            self.advanced_output_group.glayout.setColumnStretch(0, 1)
+            self.advanced_output_group.glayout.setColumnStretch(1, 1)
+            self.advanced_output_group.glayout.setColumnStretch(2, 1)
+
+            # Instance size option
+            self.inst_min_size_label = QLabel('Instance min_num_pix (0 = ignore)')
+            self.text_inst_min_size = QtWidgets.QLineEdit()
+            self.text_inst_min_size.setStyleSheet("font-size: 12px;")
+            self.text_inst_min_size.setPlaceholderText('e.g. 100')
+            self.text_inst_min_size.setText(self.inst_min_size)
+            self.advanced_output_group.glayout.addWidget(self.inst_min_size_label, 1, 0, 1, 2)
+            self.advanced_output_group.glayout.addWidget(self.text_inst_min_size, 1, 2, 1, 1)
+            # self.advanced_output_group.glayout.setColumnStretch(1, 2)
 
             # Button to add features for the current plane
             self.btn_add_features = QPushButton('Get features image')
@@ -754,6 +774,9 @@ class ConvpaintWidget(QWidget):
             self.btn_switch_axes.setToolTip('Switch first two axes of a 4D input image (to match the convention to have channels first).')
             self.check_add_seg.setToolTip('Add a layer with the predicted segmentation as output (= highest class probability).')
             self.check_add_probas.setToolTip('Add a layer with class probabilities as output.')
+            self.check_add_instances.setToolTip('Add a layer with instance masks as output.')
+            for w in [self.inst_min_size_label, self.text_inst_min_size]:
+                w.setToolTip('Minimum number of pixels an instance must have to be kept. Set to 0 to disable filtering and watershedding (uses connected components instead).')
             self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane.')
             self.btn_add_features_stack.setToolTip('Add a layer with the features extracted for the whole stack.')
             for w in [self.pca_label, self.text_features_pca]:
@@ -823,7 +846,7 @@ class ConvpaintWidget(QWidget):
                       self.check_auto_select_annot, # 	self.text_annot_prefix,
                       self.btn_train_on_selected, self.radio_img_training, self.radio_global_training, self.radio_single_training, # self.check_cont_training,
                       self.btn_class_distribution_trained, self.btn_reset_training, self.check_use_dask, self.channels_label,
-                      self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.btn_add_features, self.btn_add_features_stack,
+                    self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.btn_add_features, self.btn_add_features_stack,
                       self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans]:
                 w.setToolTip('')
 
@@ -1065,6 +1088,10 @@ class ConvpaintWidget(QWidget):
                 self, 'add_seg', self.check_add_seg.isChecked()))
             self.check_add_probas.stateChanged.connect(lambda: setattr(
                 self, 'add_probas', self.check_add_probas.isChecked()))
+            self.check_add_instances.stateChanged.connect(lambda: setattr(
+                self, 'add_instances', self.check_add_instances.isChecked()))
+            self.text_inst_min_size.textChanged.connect(lambda: setattr(
+                self, 'inst_min_size', self.text_inst_min_size.text()))
 
             # Textboxes for PCA and Kmeans
             self.text_features_pca.textChanged.connect(lambda: setattr(
@@ -1613,6 +1640,7 @@ class ConvpaintWidget(QWidget):
                 # Set flags that new outputs need to be generated (and not planes of the old ones populated)
                 self.new_seg = True
                 self.new_proba = True
+                self.new_instances = True
                 self.new_features = True
                 # Activate button to add annotations and segmentation layers
                 self.add_layers_btn.setEnabled(True)
@@ -1776,8 +1804,8 @@ class ConvpaintWidget(QWidget):
         """Predict the segmentation of the currently viewed frame based
         on a classifier trained with annotations."""
 
-        if not (self.add_seg or self.add_probas):
-            warnings.warn('Neither segmentation nor probabilities output selected to be added. Nothing to do.')
+        if not (self.add_seg or self.add_probas or self.add_instances):
+            warnings.warn('Neither segmentation, probabilities nor instances output selected to be added. Nothing to do.')
             return
 
         with warnings.catch_warnings():
@@ -1797,10 +1825,19 @@ class ConvpaintWidget(QWidget):
             # Get the data
             image_plane = self._get_current_plane_norm()
             in_channels = self._parse_in_channels(self.input_channels)
+            min_size = self._parse_inst_min_size()
 
-            # Predict image (use backend function which returns probabilities and segmentation); skip norm as it is done above
-            probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True,
-                                                          use_dask=self.use_dask, fe_use_device=self.fe_device)
+            # Predict image outputs; skip norm as it is done above
+            if self.add_seg or self.add_probas:
+                probas, segmentation = self.cp_model._predict(image_plane, add_seg=True, in_channels=in_channels, skip_norm=True,
+                                                              use_dask=self.use_dask, fe_use_device=self.fe_device)
+                if self.add_instances: # If we already have segmentation, we can create instances from it directly instead of predicting them again
+                    from napari_convpaint.utils import create_instances_from_semantic
+                    instances = create_instances_from_semantic(segmentation, min_size=min_size)
+            elif self.add_instances: # If we only want instances, we can predict them directly
+                instances = self.cp_model.get_instances(image_plane, in_channels=in_channels, skip_norm=True,
+                                                        use_dask=self.use_dask, fe_use_device=self.fe_device,
+                                                        min_size=min_size)
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -1839,6 +1876,21 @@ class ConvpaintWidget(QWidget):
                 self.viewer.layers[self.proba_prefix].data[:, step] = probas
             # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
             self.viewer.layers[self.proba_prefix].refresh()
+
+        # Add instances if enabled
+        if self.add_instances:
+            # Check if we need to create a new instances layer
+            self._check_create_instances_layer()
+            # Set the flag to False, so we don't create a new layer every time
+            self.new_instances = False
+
+            # Update instances layer
+            if data_dims in ['2D', '2D_RGB', '3D_multi']:
+                self.viewer.layers[self.instances_prefix].data = instances
+            elif data_dims in ['3D_single', '4D', '3D_RGB']:
+                self.viewer.layers[self.instances_prefix].data[step] = instances
+            # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
+            self.viewer.layers[self.instances_prefix].refresh()
 
     def _on_get_feature_image(self, event=None):
         """Get the feature image for the currently viewed frame based
@@ -1926,9 +1978,19 @@ class ConvpaintWidget(QWidget):
 
             # Predict the current step; skip normalization as it is done above
             in_channels = self._parse_in_channels(self.input_channels)
+            min_size = self._parse_inst_min_size()
+
             # Use the backend function which returns probabilities and segmentation
-            probas, seg = self.cp_model._predict(image, add_seg=True, in_channels=in_channels, skip_norm=True,
-                                                 use_dask=self.use_dask, fe_use_device=self.fe_device)
+            if self.add_seg or self.add_probas:
+                probas, segmentation = self.cp_model._predict(image, add_seg=True, in_channels=in_channels, skip_norm=True,
+                                                              use_dask=self.use_dask, fe_use_device=self.fe_device)
+                if self.add_instances: # If we already have segmentation, we can create instances from it directly instead of predicting them again
+                    from napari_convpaint.utils import create_instances_from_semantic
+                    instances = create_instances_from_semantic(segmentation, min_size=min_size)
+            elif self.add_instances: # If we only want instances, we can predict them directly
+                instances = self.cp_model.get_instances(image, in_channels=in_channels, skip_norm=True,
+                                                        use_dask=self.use_dask, fe_use_device=self.fe_device,
+                                                        min_size=min_size)
 
             # In the first iteration, check if we need to create a new probas layer
             # (we need the information about the number of classes)
@@ -1941,11 +2003,17 @@ class ConvpaintWidget(QWidget):
 
             # Add the slices to the segmentation and probabilities layers
             if self.add_seg:
-                self.viewer.layers[self.seg_tag].data[step] = seg
+                self.viewer.layers[self.seg_tag].data[step] = segmentation
                 self.viewer.layers[self.seg_tag].refresh()
             if self.add_probas:
                 self.viewer.layers[self.proba_prefix].data[..., step, :, :] = probas
                 self.viewer.layers[self.proba_prefix].refresh()
+            if self.add_instances:
+                if step == 0:
+                    self._check_create_instances_layer()
+                    self.new_instances = False
+                self.viewer.layers[self.instances_prefix].data[step] = instances
+                self.viewer.layers[self.instances_prefix].refresh()
 
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -2149,6 +2217,7 @@ class ConvpaintWidget(QWidget):
             # Set flags that new outputs need to be generated (and not planes of the old ones populated)
             self.new_seg = True
             self.new_proba = True
+            self.new_instances = True
             self.new_features = True
 
     def _on_norm_changed(self):
@@ -2200,6 +2269,8 @@ class ConvpaintWidget(QWidget):
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
+        self.check_add_instances.setChecked(self.add_instances)
+        self.text_inst_min_size.setText(self.inst_min_size)
         self.text_features_pca.setText(self.features_pca_components)
         self.text_features_kmeans.setText(self.features_kmeans_clusters)
         # Reset the model description
@@ -2267,6 +2338,7 @@ class ConvpaintWidget(QWidget):
         self.old_annot_tag = "None" # Tag for the annotations, saved to be able to rename them later
         self.old_seg_tag = "None" # Tag for the segmentation, saved to be able to rename them later
         self.old_proba_tag = "None" # Tag for the probabilities, saved to be able to rename them later
+        self.old_instances_tag = "None" # Tag for the instances, saved to be able to rename them later
         self.add_layers_flag = True # Flag to prevent adding layers twice on one trigger
         # self.update_layer_flag = True # Flag to prevent updating layers twice on one trigger
         # self.rgb_img = getattr(self, "rgb_img", None) or False # Tag to register if the image is RGB
@@ -2279,6 +2351,7 @@ class ConvpaintWidget(QWidget):
         self.annot_tag = 'annotations' # Prefix for the annotations layer names
         self.seg_tag = 'segmentation' # Prefix for the segmentation layer names
         self.proba_prefix = 'probabilities' # Prefix for the class probabilities layer names
+        self.instances_prefix = 'instances' # Prefix for the instances layer names
         self.features_prefix = 'features' # Prefix for the feature image layer name
         self.cont_training = "Image" # Update features for subsequent training ("Image" or "Off" or "Global")
         self.use_dask = False # Use Dask for parallel processing
@@ -2287,8 +2360,11 @@ class ConvpaintWidget(QWidget):
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)
         self.add_seg = True # Add a layer with segmentation
         self.add_probas = False # Add a layer with class probabilities
+        self.add_instances = False # Add a layer with instances
+        self.inst_min_size = "100" # Minimum number of pixels for instances (0 = ignore)
         self.new_seg = True # Flags to indicate if new outputs are created
         self.new_proba = True
+        self.new_instances = True
         self.new_features = True
         self.features_pca_components = "0" # Number of PCA components for feature image (0 = no PCA)
         self.features_kmeans_clusters = "0" # Number of k-means clusters for feature image (0 = no k-means)
@@ -2709,6 +2785,34 @@ class ConvpaintWidget(QWidget):
             # Save information about the probabilities layer to be able to rename it later
             self._set_old_proba_tag()
 
+    def _check_create_instances_layer(self):
+        """Check if instances layer exists and create it if not."""
+
+        img = self._get_selected_img(check=True)
+        if img is None:
+            warnings.warn('No image selected. No layers added.')
+            return
+
+        layer_shape = self._get_annot_shape(img)
+        num_spatial = len(layer_shape)
+        transform_kwargs = self._get_layer_transform_kwargs(img, num_spatial_dims=num_spatial, num_leading_dims=0)
+
+        instances_exists = self.instances_prefix in self.viewer.layers
+
+        if self.new_instances & instances_exists:
+            if self.keep_layers:
+                self._rename_instances_for_backup()
+            else:
+                self.viewer.layers.remove(self.instances_prefix)
+
+        if (not instances_exists) or self.new_instances:
+            self.viewer.add_labels(
+                data=np.zeros((layer_shape), dtype=np.int32),
+                name=self.instances_prefix,
+                **transform_kwargs
+                )
+            self._set_old_instances_tag()
+
     def _check_create_features_layer(self, num_features):
         """Check if feature image layer exists and create it if not."""
 
@@ -2789,6 +2893,14 @@ class ConvpaintWidget(QWidget):
             full_name = self._get_unique_layer_name(self.old_proba_tag)
             self.viewer.layers[self.proba_prefix].name = full_name
 
+    def _rename_instances_for_backup(self):
+        """Name the instances layer with a unique name according to its image,
+        so it can be kept when adding a new with the standard name."""
+        # Rename the layer to avoid overwriting it
+        if self.instances_prefix in self.viewer.layers:
+            full_name = self._get_unique_layer_name(self.old_instances_tag)
+            self.viewer.layers[self.instances_prefix].name = full_name
+
     def _rename_features_for_backup(self):
         """Name the features layer with a unique name according to its image,
         so it can be kept when adding a new with the standard name."""
@@ -2837,6 +2949,11 @@ class ConvpaintWidget(QWidget):
         """Set the old probabilities tag based on the current image layer and data dimensions.
         This is used to rename old probabilities layers when creating new ones."""
         self.old_proba_tag = f"{self.proba_prefix}_{self._get_old_data_tag()}"
+
+    def _set_old_instances_tag(self):
+        """Set the old instances tag based on the current image layer and data dimensions.
+        This is used to rename old instances layers when creating new ones."""
+        self.old_instances_tag = f"{self.instances_prefix}_{self._get_old_data_tag()}"
 
     def _set_old_features_tag(self):
         """Set the old features tag based on the current image layer and data dimensions.
@@ -3849,6 +3966,15 @@ class ConvpaintWidget(QWidget):
             return channels
         except ValueError:
             return None
+
+    def _parse_inst_min_size(self):
+        """Parse the minimum instance size from text."""
+        if not self.inst_min_size:
+            self.inst_min_size = '100'
+        elif not self.inst_min_size.isdigit():
+            warnings.warn('Instance min_num_pix must be an integer. Using 100.')
+            self.inst_min_size = '100'
+        return int(self.inst_min_size)
         
 
 ### MULTIFILE TAB
