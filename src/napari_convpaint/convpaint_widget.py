@@ -528,6 +528,11 @@ class ConvpaintWidget(QWidget):
             self.check_add_instances.setChecked(self.add_instances)
             self.advanced_output_group.glayout.addWidget(self.check_add_instances, 0, 2, 1, 1)
 
+            # Make output checkbox columns expand with widget width.
+            self.advanced_output_group.glayout.setColumnStretch(0, 1)
+            self.advanced_output_group.glayout.setColumnStretch(1, 1)
+            self.advanced_output_group.glayout.setColumnStretch(2, 1)
+
             # Instance size option
             self.inst_min_size_label = QLabel('Instance min_num_pix (0 = ignore)')
             self.text_inst_min_size = QtWidgets.QLineEdit()
@@ -536,6 +541,7 @@ class ConvpaintWidget(QWidget):
             self.text_inst_min_size.setText(self.inst_min_size)
             self.advanced_output_group.glayout.addWidget(self.inst_min_size_label, 1, 0, 1, 2)
             self.advanced_output_group.glayout.addWidget(self.text_inst_min_size, 1, 2, 1, 1)
+            # self.advanced_output_group.glayout.setColumnStretch(1, 2)
 
             # Button to add features for the current plane
             self.btn_add_features = QPushButton('Get features image')
@@ -770,7 +776,7 @@ class ConvpaintWidget(QWidget):
             self.check_add_probas.setToolTip('Add a layer with class probabilities as output.')
             self.check_add_instances.setToolTip('Add a layer with instance masks as output.')
             for w in [self.inst_min_size_label, self.text_inst_min_size]:
-                w.setToolTip('Minimum number of pixels an instance must have to be kept. Set to 0 to disable filtering.')
+                w.setToolTip('Minimum number of pixels an instance must have to be kept. Set to 0 to disable filtering and watershedding (uses connected components instead).')
             self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane.')
             self.btn_add_features_stack.setToolTip('Add a layer with the features extracted for the whole stack.')
             for w in [self.pca_label, self.text_features_pca]:
