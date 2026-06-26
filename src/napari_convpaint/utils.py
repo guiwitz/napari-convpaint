@@ -103,6 +103,8 @@ def create_instances_from_semantic(segmentations, min_size=300, classes=None, pe
     from skimage.morphology import remove_small_holes, remove_small_objects
     from skimage.measure import label
 
+    min_distance = max(2, 2*int((min_size / np.pi)**0.5)) # Approximate min distance for ~circular objects of area min_size, to separate touching objects with watershed
+
     instance_masks = [np.zeros_like(segmentation, dtype=np.int32) for segmentation in segmentations]
     global_max = 0
 
@@ -114,30 +116,40 @@ def create_instances_from_semantic(segmentations, min_size=300, classes=None, pe
 
         for segmentation, instance_mask in zip(segmentations, instance_masks):
             
-            mask = segmentation == c
+            semantic_class_mask = segmentation == c
 
-            mask = remove_small_holes(mask, max_size=min_size)
-            mask = remove_small_objects(mask, max_size=min_size)
+            semantic_class_mask = remove_small_holes(semantic_class_mask, max_size=min_size)
+            semantic_class_mask = remove_small_objects(semantic_class_mask, max_size=min_size)
 
-            if per_plane and mask.ndim == 3: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
-                labels_stack = np.zeros_like(mask, dtype=np.int32)
-                for z in range(mask.shape[0]):
-                    mask_plane = mask[z]
+            if per_plane and semantic_class_mask.ndim == 3: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
+                labels_stack = np.zeros_like(semantic_class_mask, dtype=np.int32)
+                for z in range(semantic_class_mask.shape[0]):
+                    semantic_mask_plane = semantic_class_mask[z]
                     instance_mask_plane = instance_mask[z]
 
-                    l = label(mask_plane)
+                    # from skimage.morphology import binary_erosion, disk
+                    # semantic_mask_plane = binary_erosion(semantic_mask_plane, disk(1)) # Separate touching objects
+                    if min_size == 0:
+                        l = label(semantic_mask_plane)
+                    else:
+                        l = distance_watershed(semantic_mask_plane, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
                     labels_stack[z] = l
 
                     new_slice = labels_stack[z] + global_max
-                    instance_mask_plane[mask_plane] = new_slice[mask_plane]
+                    instance_mask_plane[semantic_mask_plane] = new_slice[semantic_mask_plane]
 
                     global_max = instance_mask.max()
 
             else: # For true 3D and 2D, we can label the mask directly
-                l = label(mask)
-                
+                # from skimage.morphology import binary_erosion, disk
+                # semantic_class_mask = binary_erosion(semantic_class_mask, disk(1)) # Separate touching objects
+                if min_size == 0:
+                    l = label(semantic_class_mask)
+                else:
+                    l = distance_watershed(semantic_class_mask, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+
                 new_mask = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across segmentations
-                instance_mask[mask] = new_mask[mask]
+                instance_mask[semantic_class_mask] = new_mask[semantic_class_mask]
 
             global_max = instance_mask.max()
         
@@ -147,6 +159,22 @@ def create_instances_from_semantic(segmentations, min_size=300, classes=None, pe
     if single_input:
         return instance_masks[0]
     return instance_masks
+
+def distance_watershed(mask, min_distance):
+
+    from scipy import ndimage as ndi
+    from skimage.feature import peak_local_max
+    from skimage.segmentation import watershed
+
+    distance = ndi.distance_transform_edt(mask)
+
+    coords = peak_local_max(distance, min_distance=min_distance, labels=mask, exclude_border=False)
+    markers = np.zeros_like(mask, dtype=np.int32)
+    markers[tuple(coords.T)] = np.arange(1, len(coords)+1)
+
+    labels = watershed(-distance, markers, mask=mask)
+
+    return labels
 
 
 ### MODEL DOWNLOAD
