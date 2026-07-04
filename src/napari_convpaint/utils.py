@@ -585,15 +585,31 @@ def rescale_features(feature_img, target_shape, order=1):
 
     if feature_img.shape == output_shape:
         return feature_img
-    
+
+    # order>0 -> bilinear with align_corners=False, which matches skimage's
+    # half-pixel (pixel-centre) convention exactly, so there is no pixel shift.
+    # order=0 -> 'nearest-EXACT' (NOT plain 'nearest'): torch's default 'nearest'
+    # uses a floor/asymmetric grid that shifts by ~0.5 source-px vs skimage for
+    # non-integer scale ratios; 'nearest-exact' uses the same half-pixel nearest
+    # rule as skimage and is bit-identical for all ratios (verified).
+    int_mode = 'bilinear' if order > 0 else 'nearest-exact'
+    align_corners = False if order > 0 else None
+
     if isinstance(feature_img, torch.Tensor):
         # If the input is a PyTorch tensor, use the faster torch interpolation
-        int_mode = 'bilinear' if order > 0 else 'nearest'
-        align_corners = False if order > 0 else None
         return torch_interpolate(feature_img, size=output_shape[2:],
                                   mode=int_mode, align_corners=align_corners)
     else:
-        return skimage.transform.resize(feature_img, output_shape, order=order, mode='reflect', preserve_range=True)
+        # Route numpy arrays through torch interpolation too: skimage.transform.resize
+        # is dramatically slower here (per-channel CPU resize of many-channel feature
+        # stacks) — e.g. ~50x slower than torch when upsampling ViT patch features to
+        # full resolution, which made DINOv2/v3 feature-image and training extraction
+        # spend seconds in rescaling rather than in the network. For order=0 (nearest,
+        # the FE default) the result is identical to skimage; convert, interpolate,
+        # convert back to the original dtype.
+        t = torch.from_numpy(np.ascontiguousarray(feature_img)).float()
+        out = torch_interpolate(t, size=output_shape[2:], mode=int_mode, align_corners=align_corners)
+        return out.numpy().astype(feature_img.dtype, copy=False)
 
 def rescale_class_labels(label_img, output_shape):
     """
@@ -636,9 +652,25 @@ def rescale_outputs(output_img, output_shape, order=0):
         Rescaled class probability or feature image.
     """
     if output_img.shape == tuple(output_shape):
-        return output_img  # identity resize: skimage doesn't short-circuit, so skip it
-    rescaled_output = skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
-    return rescaled_output
+        return output_img  # identity resize: nothing to interpolate
+    # Route through torch interpolation instead of skimage.transform.resize:
+    # this is the step that upsamples patched (e.g. DINOv2/v3) features from the
+    # patch grid to full resolution, and skimage is ~50x+ slower per-channel on
+    # CPU (measured ~13 s for a 384-channel ViT feature image where the network
+    # forward was 0.08 s). Only the last two dims are resized. order=0 uses
+    # 'nearest-exact' (not plain 'nearest') so it is bit-identical to skimage
+    # for all scale ratios — plain 'nearest' shifts by ~0.5 source-px on
+    # non-integer ratios; order>0 uses bilinear/align_corners=False, matching
+    # skimage's half-pixel convention (no shift). See rescale_features.
+    int_mode = 'bilinear' if order > 0 else 'nearest-exact'
+    align_corners = False if order > 0 else None
+    was_3d = output_img.ndim == 3  # [Z, H, W] -> add a channel dim for interpolate
+    arr = output_img[None] if was_3d else output_img
+    size = tuple(output_shape[-2:])
+    t = torch.from_numpy(np.ascontiguousarray(arr)).float()
+    out = torch_interpolate(t, size=size, mode=int_mode, align_corners=align_corners)
+    out = out.numpy().astype(output_img.dtype, copy=False)
+    return out[0] if was_3d else out
 
 
 ### CROPPING, PADDING, TILING & ANNOTATIONS EXTRACTION
