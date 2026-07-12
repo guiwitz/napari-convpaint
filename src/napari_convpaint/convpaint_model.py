@@ -1341,12 +1341,16 @@ class ConvpaintModel:
             if num_new == 0:
                 warnings.warn("No new annotations. Train with existing features.")
                 return self._get_all_features_annots()
-            # Filter out the data where annots are totally empty
+            # Filter out the data where annots are totally empty (one keep-mask
+            # for data, ids and annotations — filtering img_ids against the
+            # already-filtered annotations would just truncate the list and
+            # misalign ids with images).
             else:
-                data = [d for d, ann in zip(data, annotations) if np.sum(ann > 0) > 0]
-                annotations = [ann for ann in annotations if np.sum(ann > 0) > 0]
+                keep = [np.sum(ann > 0) > 0 for ann in annotations]
+                data = [d for d, k in zip(data, keep) if k]
                 if img_ids is not None:
-                    img_ids = [img_id for img_id, ann in zip(img_ids, annotations) if np.sum(ann > 0) > 0]
+                    img_ids = [img_id for img_id, k in zip(img_ids, keep) if k]
+                annotations = [ann for ann, k in zip(annotations, keep) if k]
             coords = [utils.get_coordinates_image(d) for d in data]
         else:
             coords = [None for _ in data]  # No coordinates if not in memory mode
