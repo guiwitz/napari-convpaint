@@ -70,7 +70,7 @@ class ConvpaintModel:
         'fe_order': list(range(0, 6)), # from 0 (nearest) to 5
     }
 
-    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, **kwargs):
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, _fe_model=None, **kwargs):
         """
         **Initializes a Convpaint model**. This can be done with an alias, a model path, a param object, or a feature extractor name.
         If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
@@ -177,7 +177,7 @@ class ConvpaintModel:
         if model_path is not None:
             self._load(model_path)
         elif param is not None:
-            self._load_param(param)
+            self._load_param(param, fe_model=_fe_model)
         elif fe_name is not None:
             fe_layers = kwargs.pop('fe_layers', None)
             self._set_fe(fe_name, fe_layers)
@@ -552,12 +552,14 @@ class ConvpaintModel:
         self._set_fe(new_param.fe_name, new_param.fe_layers)
         self._param = new_param
 
-    def _load_param(self, param: Param):
+    def _load_param(self, param: Param, fe_model=None):
         """
         Loads the given param object into the model and sets the model accordingly.
         Only intended for internal use at model initiation.
+        `fe_model` optionally injects an already-constructed FeatureExtractor
+        matching param.fe_name/fe_layers, to avoid loading model weights twice.
         """
-        self._set_fe(param.fe_name, param.fe_layers)
+        self._set_fe(param.fe_name, param.fe_layers, fe_model=fe_model)
         self._param = self.get_fe_defaults()
         self.set_params(ignore_warnings=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
@@ -601,11 +603,14 @@ class ConvpaintModel:
 
 
 ### FE METHODS
-    def _set_fe(self, fe_name=None, fe_layers=None):
+    def _set_fe(self, fe_name=None, fe_layers=None, fe_model=None):
         """
         Sets the FE model based on the given FE parameters.
         Creates new feature extractor, and resets the classifier.
         Only intended for internal use at model initiation.
+        `fe_model` optionally provides an already-constructed FeatureExtractor
+        for exactly these fe_name/fe_layers (heavy FEs load weights on
+        construction — reusing an instance avoids a second load).
         """
         # Lazy-import catboost here (before torch loads model weights) to avoid
         # a segfault on Apple Silicon caused by catboost initialising shared
