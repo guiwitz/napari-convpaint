@@ -1,3 +1,4 @@
+import copy
 import pickle
 from pathlib import Path
 import importlib
@@ -763,7 +764,7 @@ class ConvpaintModel:
     
     def train(self, image, annotations, memory_mode=False, img_ids=None, use_rf=False,
               allow_writing_files=False, in_channels=None, skip_norm=False,
-              fe_use_device=None, clf_use_device=None):
+              fe_use_device=None, clf_use_device=None, cancel_token=None):
         """
         Trains the Convpaint model's classifier given images and annotations.
 
@@ -798,18 +799,30 @@ class ConvpaintModel:
             Device policy for feature extractor ("auto", "gpu", "cpu").
         clf_use_device : str, optional
             Device policy for classifier training ("auto", "gpu", "cpu").
+        cancel_token : CancelToken, optional
+            Cooperative cancellation token. Call its `cancel()` method (typically
+            from another thread) to abort training at the next checkpoint, which
+            raises a `CancelledError`. On cancellation the classifier keeps its
+            previous state, and in memory mode the annotation bookkeeping is
+            rolled back so the same training can simply be retried.
 
         Returns
         ----------
             clf : CatBoostClassifier or RandomForestClassifier
                 Trained classifier (also saved inside the model instance)
+
+        Raises
+        ----------
+        CancelledError
+            If `cancel_token` is cancelled before training completes.
         """
         clf, _, _ = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm,
-                          fe_use_device=fe_use_device, clf_use_device=clf_use_device)
+                          fe_use_device=fe_use_device, clf_use_device=clf_use_device,
+                          cancel_token=cancel_token)
         return clf
 
-    def segment(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
+    def segment(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Segments images by predicting the most probable class of each pixel using the trained classifier.
 
@@ -829,18 +842,27 @@ class ConvpaintModel:
             Whether to use dask for parallel processing
         fe_use_device : str, optional
             Device policy for feature extractor ("auto", "gpu", "cpu").
+        cancel_token : CancelToken, optional
+            Cooperative cancellation token. Call its `cancel()` method (typically
+            from another thread) to abort segmentation at the next checkpoint,
+            which raises a `CancelledError`.
 
         Returns
         ----------
         seg : np.ndarray or list[np.ndarray]
             Segmented image or list of segmented images (according to the input)
             Dimensions are equal to the input image(s) without the channel dimension
+
+        Raises
+        ----------
+        CancelledError
+            If `cancel_token` is cancelled before segmentation completes.
         """
         _, seg = self._predict(image, add_seg=True, in_channels=in_channels, skip_norm=skip_norm,
-                               use_dask=use_dask, fe_use_device=fe_use_device)
+                               use_dask=use_dask, fe_use_device=fe_use_device, cancel_token=cancel_token)
         return seg
 
-    def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
+    def predict_probas(self, image, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Predicts the probabilities of the classes of the pixels in an image using the trained classifier.
 
@@ -860,6 +882,10 @@ class ConvpaintModel:
             Whether to use dask for parallel processing
         fe_use_device : str, optional
             Device policy for feature extractor ("auto", "gpu", "cpu").
+        cancel_token : CancelToken, optional
+            Cooperative cancellation token. Call its `cancel()` method (typically
+            from another thread) to abort prediction at the next checkpoint,
+            which raises a `CancelledError`.
 
         Returns
         ----------
@@ -867,15 +893,21 @@ class ConvpaintModel:
             Predicted probabilities of the classes of the pixels in the image or list of images
             Dimensions are equal to the input image(s) without the channel dimension,
             with the class dimension added first
+
+        Raises
+        ----------
+        CancelledError
+            If `cancel_token` is cancelled before prediction completes.
         """
         probas = self._predict(image, add_seg=False, in_channels=in_channels,
-                       skip_norm=skip_norm, use_dask=use_dask, fe_use_device=fe_use_device)
+                       skip_norm=skip_norm, use_dask=use_dask, fe_use_device=fe_use_device,
+                       cancel_token=cancel_token)
         return probas
     
     def get_feature_image(self, data,
                           in_channels=None, skip_norm=False,
                           pca_components=0, kmeans_clusters=0,
-                          use_device=None):
+                          use_device=None, cancel_token=None):
         """
         Returns the feature images extracted by the feature extractor model.
         For details, see the underlying `_get_features` method.
@@ -891,26 +923,38 @@ class ConvpaintModel:
             If True, the images are not normalized according to the parameter `normalize` in the model parameters.
         pca_components : int, optional
             Number of PCA components to reduce the features to (0 for no PCA)
+        cancel_token : CancelToken, optional
+            Cooperative cancellation token. Call its `cancel()` method (typically
+            from another thread) to abort feature extraction at the next
+            checkpoint, which raises a `CancelledError`.
 
         Returns
         ----------
         features : np.ndarray or list[np.ndarray]
             Extracted features of the image(s) or list of features for each image if input is a list.
-            Reshaped to the input imges' shapes. Features dimension is added first (FHW or FZHW).    
+            Reshaped to the input imges' shapes. Features dimension is added first (FHW or FZHW).
+
+        Raises
+        ----------
+        CancelledError
+            If `cancel_token` is cancelled before feature extraction completes.
         """
-        # Extract features
-        features = self._get_features(
-                data,
-                annotations=None,
-                restore_input_form=True,
-                memory_mode=False, # Only valid when using annotations
-                img_ids=None, # Only needed when using memory_mode
-                in_channels=in_channels,
-                skip_norm=skip_norm,
-                use_device=use_device,
-                pca_components=pca_components,
-                kmeans_clusters=kmeans_clusters
-            )
+        # Extract features; the cancel token is installed as the ambient token
+        # (utils.cancel_scope), so all downstream check_cancel() calls see it
+        # without it being passed through every signature.
+        with utils.cancel_scope(cancel_token):
+            features = self._get_features(
+                    data,
+                    annotations=None,
+                    restore_input_form=True,
+                    memory_mode=False, # Only valid when using annotations
+                    img_ids=None, # Only needed when using memory_mode
+                    in_channels=in_channels,
+                    skip_norm=skip_norm,
+                    use_device=use_device,
+                    pca_components=pca_components,
+                    kmeans_clusters=kmeans_clusters,
+                )
 
         return features
     
@@ -1123,12 +1167,12 @@ class ConvpaintModel:
             supported_devices=self.fe_model.supported_devices(),
             warn=True,
         )
-        features = [self.fe_model.extract_features_pyramid(
-                d,
-                params_for_extract,
-                patched=keep_patched,
+        features = [
+            self.fe_model.extract_features_pyramid(
+                d, params_for_extract, patched=keep_patched,
                 device=fe_runtime_device)
-                    for d in data]
+            for d in data
+        ]
         
         if pca_components:
             features = [utils.apply_pca_to_f_image(f, n_components=pca_components)
@@ -1216,12 +1260,15 @@ class ConvpaintModel:
         clf : CatBoostClassifier or RandomForestClassifier
             Trained classifier (also saved in the model instance)
         """
+        # NOTE: The new classifier is fit into a local variable and adopted as
+        # self.classifier only after a successful fit — a failed or cancelled
+        # fit must not clobber the previously trained classifier.
         if not use_rf:
             use_device = self.check_locked_device(use_device, part='clf')
             task_type = utils.get_catboost_device(use_device, warn=True)
             # Fixed seed for reproducibility; can be set to None for random seed
             from catboost import CatBoostClassifier
-            self.classifier = CatBoostClassifier(
+            clf = CatBoostClassifier(
                 iterations=self._param.clf_iterations,
                 learning_rate=self._param.clf_learning_rate,
                 depth=self._param.clf_depth,
@@ -1229,16 +1276,35 @@ class ConvpaintModel:
                 task_type=task_type,
                 random_seed=0,
             )
-            self.classifier.fit(features, targets)
+            fit_kwargs = {}
+            if task_type == 'CPU':
+                # Make the boosting loop cancellable: the callback checks the
+                # ambient cancel token after every iteration and stops the fit
+                # early when cancelled; the check_cancel() after fit then turns
+                # the (partially trained, to-be-discarded) result into a proper
+                # CancelledError. CatBoost only supports callbacks on CPU;
+                # GPU fits remain uninterruptible.
+                class _CancelFitCallback:
+                    def after_iteration(self, info):
+                        try:
+                            utils.check_cancel()
+                        except utils.CancelledError:
+                            return False  # stop the fit at this iteration
+                        return True
+                fit_kwargs['callbacks'] = [_CancelFitCallback()]
+            clf.fit(features, targets, **fit_kwargs)
+            utils.check_cancel() # Discard the partial fit if it was stopped by cancellation
+            self.classifier = clf
             self._param.classifier = 'CatBoost'
         else: # train a random forest classififer (does not support GPU)
                 from sklearn.ensemble import RandomForestClassifier
                 # Fix random_state for reproducibility; can be set to None for random seed
-                self.classifier = RandomForestClassifier(n_estimators=100, n_jobs=-1, random_state=0)
-                self.classifier.fit(features, targets)
+                # (sklearn has no fit callbacks, so an RF fit is uninterruptible)
+                clf = RandomForestClassifier(n_estimators=100, n_jobs=-1, random_state=0)
+                clf.fit(features, targets)
+                self.classifier = clf
                 self._param.classifier = 'RandomForest'
 
-        clf = self.classifier
         self.num_features = features.shape[1] if isinstance(features, np.ndarray) else features[0].shape[1] if isinstance(features, list) else None
         return clf
     
@@ -1268,12 +1334,23 @@ class ConvpaintModel:
         features = np.moveaxis(features, 0, -1)
         features = np.reshape(features, (-1, nb_features)) # flatten
 
-        # Predict
-        if return_proba:
-            predictions = self.classifier.predict_proba(features)
-            predictions = np.moveaxis(predictions, -1, 0) # [nb_classes, width*height]
+        # Predict in row chunks: a single predict/predict_proba call over a full
+        # plane (H*W rows) is one uninterruptible C call that can take many
+        # seconds on large images; chunking bounds the cancel latency to one
+        # chunk while producing bit-identical results.
+        chunk_size = 1_000_000
+        num_rows = features.shape[0]
+        predict_fn = self.classifier.predict_proba if return_proba else self.classifier.predict
+        if num_rows > chunk_size:
+            parts = []
+            for i in range(0, num_rows, chunk_size):
+                utils.check_cancel()
+                parts.append(predict_fn(features[i:i+chunk_size]))
+            predictions = np.concatenate(parts, axis=0)
         else:
-            predictions = self.classifier.predict(features)
+            predictions = predict_fn(features)
+        if return_proba:
+            predictions = np.moveaxis(predictions, -1, 0) # [nb_classes, width*height]
 
         return predictions
 
@@ -1294,7 +1371,8 @@ class ConvpaintModel:
 
     def _train(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False,
                allow_writing_files=False, in_channels=None, skip_norm=False,
-               fe_use_device=None, clf_use_device=None, sort_features=True):
+               fe_use_device=None, clf_use_device=None, sort_features=True,
+               cancel_token=None):
         """
         Backend training method for the Convpaint model.
         """
@@ -1304,6 +1382,36 @@ class ConvpaintModel:
             warnings.warn('No annotations provided for training.')
             return self.classifier, None, None
 
+        # Snapshot the memory-mode bookkeeping so we can roll it back on
+        # CancelledError. _register_and_update_annots mutates self.annot_dict
+        # and self.table *before* feature extraction runs; without rollback a
+        # cancelled train would leave the annotations registered, and the next
+        # Train click would see "no new annotations" and fail with
+        # "No features or targets found".
+        mem_backup = None
+        if memory_mode:
+            mem_backup = (copy.deepcopy(self.annot_dict), self.table.copy(deep=True))
+
+        # Install the cancel token as the ambient token (utils.cancel_scope), so
+        # all downstream check_cancel() calls see it without it being passed
+        # through every signature (including custom FE subclasses).
+        try:
+            with utils.cancel_scope(cancel_token):
+                return self._train_body(data, annotations, memory_mode=memory_mode,
+                                        img_ids=img_ids, use_rf=use_rf,
+                                        allow_writing_files=allow_writing_files,
+                                        in_channels=in_channels, skip_norm=skip_norm,
+                                        fe_use_device=fe_use_device,
+                                        clf_use_device=clf_use_device,
+                                        sort_features=sort_features)
+        except utils.CancelledError:
+            if mem_backup is not None:
+                self.annot_dict, self.table = mem_backup
+            raise
+
+    def _train_body(self, data, annotations, memory_mode=False, img_ids=None, use_rf=False,
+                    allow_writing_files=False, in_channels=None, skip_norm=False,
+                    fe_use_device=None, clf_use_device=None, sort_features=True):
         if not memory_mode:
             # Use _get_features to extract features and the suiting annotations parts (returns lists if restore_input_form=False)
             feature_parts, annot_parts = self._get_features(
@@ -1344,6 +1452,9 @@ class ConvpaintModel:
         if len(np.unique(targets)) < 2:
             # print("Targets:", targets, "values:", np.unique(targets))
             raise ValueError('Not enough classes found in the targets. At least two classes are required for training.')
+
+        # Last cancel checkpoint before the (uninterruptible) classifier fit
+        utils.check_cancel()
 
         # Train the classifier
         self._clf_train(features, targets, use_rf=use_rf,
@@ -1504,7 +1615,7 @@ class ConvpaintModel:
 
         return features, annotations
 
-    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
+    def _predict(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None, cancel_token=None):
         """
         Backend method to predict images as a whole or tiling and parallelizing the prediction.
 
@@ -1518,6 +1629,16 @@ class ConvpaintModel:
         # Check if there is a trained classifier
         if self.classifier is None:
             raise ValueError('No trained classifier found.')
+
+        # Install the cancel token as the ambient token (utils.cancel_scope), so
+        # all downstream check_cancel() calls see it without it being passed
+        # through every signature (including custom FE subclasses).
+        with utils.cancel_scope(cancel_token):
+            return self._predict_body(data, add_seg=add_seg, in_channels=in_channels,
+                                      skip_norm=skip_norm, use_dask=use_dask,
+                                      fe_use_device=fe_use_device)
+
+    def _predict_body(self, data, add_seg=False, in_channels=None, skip_norm=False, use_dask=False, fe_use_device=None):
 
         # Check if we have only a single image input
         single_input = hasattr(data, 'ndim') and data.ndim >= 2 and not isinstance(data, list)
@@ -1535,9 +1656,11 @@ class ConvpaintModel:
         if not skip_norm:
             data = [self._norm_single_image(d) for d in data]
 
-        # Get class probabilities, using tiling if enabled
+        # Get class probabilities, using tiling if enabled. The per-tile check
+        # inside _parallel_predict_image takes over cancellation responsiveness.
         if self._param.tile_image:
-            probas = [self._parallel_predict_image(d, return_proba=True, use_dask=use_dask, fe_use_device=fe_use_device)
+            probas = [self._parallel_predict_image(
+                        d, return_proba=True, use_dask=use_dask, fe_use_device=fe_use_device)
                       for d in data]
         else:
             probas = self._predict_image(data, return_proba=True, fe_use_device=fe_use_device) # Can handle lists directly
@@ -1592,7 +1715,11 @@ class ConvpaintModel:
         # Predict pixels based on the features and classifier
         # NOTE: We always first predict probabilities and then take the argmax
         feature_img = feature_img if isinstance(feature_img, list) else [feature_img]
-        predictions = [self._clf_predict(f, return_proba=True) for f in feature_img]
+        predictions = []
+        for f in feature_img:
+            utils.check_cancel()
+            predictions.append(self._clf_predict(f, return_proba=True))
+        utils.check_cancel() # Checkpoint before the (potentially large) reshaping
         # Reshape the predictions to the original image shape
         padded_shapes = self.padded_shapes # Saved when extracting features
         pre_pad_shapes = self.pre_pad_shapes # Saved when extracting features
@@ -1676,91 +1803,112 @@ class ConvpaintModel:
         if plot_tiles:
             img_to_plot = image.copy()
 
-        for row in range(nblocks_rows+1):
-            for col in range(nblocks_cols+1):
-                min_row = np.max([0, row*maxblock-margin])
-                min_col = np.max([0, col*maxblock-margin])
-                max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
-                max_col = np.min([image.shape[-1], (col+1)*maxblock+margin])
+        # The try/finally guarantees the dask cluster is torn down even when a
+        # cancellation (or any other error) aborts the loops below — otherwise
+        # a cancel mid-run would leak the client and its worker processes.
+        # NOTE: cancellation inside dask workers is not supported (the ambient
+        # token does not cross process boundaries); cancel takes effect at the
+        # per-tile submission and gathering checkpoints, and pending tiles are
+        # cancelled in the finally block.
+        try:
+            for row in range(nblocks_rows+1):
+                for col in range(nblocks_cols+1):
+                    utils.check_cancel()
+                    min_row = np.max([0, row*maxblock-margin])
+                    min_col = np.max([0, col*maxblock-margin])
+                    max_row = np.min([image.shape[-2], (row+1)*maxblock+margin])
+                    max_col = np.min([image.shape[-1], (col+1)*maxblock+margin])
 
-                min_row_ind = 0
-                new_min_row_ind = 0
-                if min_row > 0:
-                    min_row_ind = min_row + margin
-                    new_min_row_ind = margin
-                min_col_ind = 0
-                new_min_col_ind = 0
-                if min_col > 0:
-                    min_col_ind = min_col + margin
-                    new_min_col_ind = margin
+                    min_row_ind = 0
+                    new_min_row_ind = 0
+                    if min_row > 0:
+                        min_row_ind = min_row + margin
+                        new_min_row_ind = margin
+                    min_col_ind = 0
+                    new_min_col_ind = 0
+                    if min_col > 0:
+                        min_col_ind = min_col + margin
+                        new_min_col_ind = margin
 
-                max_col = (col+1)*maxblock+margin
-                max_col_ind = np.min([min_col_ind+maxblock,image.shape[-1]])
-                new_max_col_ind = new_min_col_ind + (max_col_ind-min_col_ind)
-                if max_col > image.shape[-1]:
-                    max_col = image.shape[-1]
-                max_row = (row+1)*maxblock+margin
-                max_row_ind = np.min([min_row_ind+maxblock,image.shape[-2]])
-                new_max_row_ind = new_min_row_ind + (max_row_ind-min_row_ind)
-                if max_row > image.shape[-2]:
-                    max_row = image.shape[-2]
+                    max_col = (col+1)*maxblock+margin
+                    max_col_ind = np.min([min_col_ind+maxblock,image.shape[-1]])
+                    new_max_col_ind = new_min_col_ind + (max_col_ind-min_col_ind)
+                    if max_col > image.shape[-1]:
+                        max_col = image.shape[-1]
+                    max_row = (row+1)*maxblock+margin
+                    max_row_ind = np.min([min_row_ind+maxblock,image.shape[-2]])
+                    new_max_row_ind = new_min_row_ind + (max_row_ind-min_row_ind)
+                    if max_row > image.shape[-2]:
+                        max_row = image.shape[-2]
 
-                image_block = image[..., min_row:max_row, min_col:max_col]
+                    image_block = image[..., min_row:max_row, min_col:max_col]
 
-                # For plotting:
-                # Take the entire image, add boarders for the block
-                if plot_tiles:
-                    img_to_plot[..., min_row, min_col:max_col] = 1
-                    img_to_plot[..., max_row-1, min_col:max_col] = 1
-                    img_to_plot[..., min_row:max_row, min_col] = 1
-                    img_to_plot[..., min_row:max_row, max_col-1] = 1
-                    img_to_plot[..., min_row_ind, min_col_ind:max_col_ind] = 0.5
-                    img_to_plot[..., max_row_ind-1, min_col_ind:max_col_ind] = 0.5
-                    img_to_plot[..., min_row_ind:max_row_ind, min_col_ind] = 0.5
-                    img_to_plot[..., min_row_ind:max_row_ind, max_col_ind-1] = 0.5
+                    # For plotting:
+                    # Take the entire image, add boarders for the block
+                    if plot_tiles:
+                        img_to_plot[..., min_row, min_col:max_col] = 1
+                        img_to_plot[..., max_row-1, min_col:max_col] = 1
+                        img_to_plot[..., min_row:max_row, min_col] = 1
+                        img_to_plot[..., min_row:max_row, max_col-1] = 1
+                        img_to_plot[..., min_row_ind, min_col_ind:max_col_ind] = 0.5
+                        img_to_plot[..., max_row_ind-1, min_col_ind:max_col_ind] = 0.5
+                        img_to_plot[..., min_row_ind:max_row_ind, min_col_ind] = 0.5
+                        img_to_plot[..., min_row_ind:max_row_ind, max_col_ind-1] = 0.5
 
-                # Predict the block using dask or directly (with no normalization, as it is done outside)
-                if use_dask:
-                    processes.append(client.submit(
-                        self._predict_image, image=image_block, return_proba=return_proba, fe_use_device=fe_use_device))
-                    
-                    min_row_ind_collection.append(min_row_ind)
-                    min_col_ind_collection.append(min_col_ind)
-                    max_row_ind_collection.append(max_row_ind)
-                    max_col_ind_collection.append(max_col_ind)
-                    new_max_col_ind_collection.append(new_max_col_ind)
-                    new_max_row_ind_collection.append(new_max_row_ind)
-                    new_min_col_ind_collection.append(new_min_col_ind)
-                    new_min_row_ind_collection.append(new_min_row_ind)
+                    # Predict the block using dask or directly (with no normalization, as it is done outside)
+                    if use_dask:
+                        processes.append(client.submit(
+                            self._predict_image, image=image_block, return_proba=return_proba, fe_use_device=fe_use_device))
 
-                else:
-                    predicted_image = self._predict_image(image_block, return_proba=return_proba, fe_use_device=fe_use_device)
-                    crop_pred = predicted_image[...,
-                        new_min_row_ind: new_max_row_ind,
-                        new_min_col_ind: new_max_col_ind]
+                        min_row_ind_collection.append(min_row_ind)
+                        min_col_ind_collection.append(min_col_ind)
+                        max_row_ind_collection.append(max_row_ind)
+                        max_col_ind_collection.append(max_col_ind)
+                        new_max_col_ind_collection.append(new_max_col_ind)
+                        new_max_row_ind_collection.append(new_max_row_ind)
+                        new_min_col_ind_collection.append(new_min_col_ind)
+                        new_min_row_ind_collection.append(new_min_row_ind)
+
+                    else:
+                        predicted_image = self._predict_image(image_block, return_proba=return_proba, fe_use_device=fe_use_device)
+                        crop_pred = predicted_image[...,
+                            new_min_row_ind: new_max_row_ind,
+                            new_min_col_ind: new_max_col_ind]
+                        if not return_proba:
+                            crop_pred = crop_pred.astype(np.uint8)
+                        predicted_image_complete[...,
+                            min_row_ind:max_row_ind,
+                            min_col_ind:max_col_ind] = crop_pred
+
+            # Gather the results of the dask processes if enabled
+            if use_dask:
+                from dask.distributed import TimeoutError as DaskTimeoutError
+                for k in range(len(processes)):
+                    future = processes[k]
+                    # Poll instead of blocking indefinitely, so a cancel is
+                    # honored while waiting for a tile that is still computing.
+                    while True:
+                        utils.check_cancel()
+                        try:
+                            out = future.result(timeout=1)
+                            break
+                        except DaskTimeoutError:
+                            continue
+                    crop_out = out[...,
+                        new_min_row_ind_collection[k]:new_max_row_ind_collection[k],
+                        new_min_col_ind_collection[k]:new_max_col_ind_collection[k]]
                     if not return_proba:
-                        crop_pred = crop_pred.astype(np.uint8)
+                        crop_out = crop_out.astype(np.uint8)
+                    # Release the future's result once it is written to the complete image
+                    future.cancel()
                     predicted_image_complete[...,
-                        min_row_ind:max_row_ind,
-                        min_col_ind:max_col_ind] = crop_pred
-
-        # Terminate dask processes if enabled
-        if use_dask:
-            for k in range(len(processes)):
-                future = processes[k]
-                out = future.result()
-                crop_out = out[...,
-                    new_min_row_ind_collection[k]:new_max_row_ind_collection[k],
-                    new_min_col_ind_collection[k]:new_max_col_ind_collection[k]]
-                if not return_proba:
-                    crop_out = crop_out.astype(np.uint8)
-                # Write the result to the complete image
-                future.cancel()
-                del future
-                predicted_image_complete[...,
-                    min_row_ind_collection[k]:max_row_ind_collection[k],
-                    min_col_ind_collection[k]:max_col_ind_collection[k]] = crop_out
-            client.close()
+                        min_row_ind_collection[k]:max_row_ind_collection[k],
+                        min_col_ind_collection[k]:max_col_ind_collection[k]] = crop_out
+        finally:
+            if use_dask:
+                for future in processes:
+                    future.cancel()
+                client.close()
 
         if plot_tiles:
             from matplotlib import pyplot as plt

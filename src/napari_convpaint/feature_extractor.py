@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import warnings
 from .param import Param
-from .utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape, get_device_from_torch_model
+from .utils import scale_img, rescale_features, reduce_to_patch_multiple, pad_to_shape, get_device_from_torch_model, check_cancel, cancel_scope
 
 class FeatureExtractor:
     def __init__(self, model_name="vgg16", model=None, **kwargs):
@@ -300,7 +300,7 @@ class FeatureExtractor:
 
 ### FEATURE EXTRACTION METHODS
 
-    def extract_features(self, data, param, device=torch.device("cpu")):
+    def extract_features(self, data, param, device=torch.device("cpu"), cancel_token=None):
         """
         Extracts the features of an image (stack) with an arbitrary number of channels.
         This is the main method to call for feature extraction, which will handle scaling and rescaling of the features as needed.
@@ -314,6 +314,13 @@ class FeatureExtractor:
             The parameters for the feature extraction.
         device : torch.device, optional
             The device on which to perform feature extraction.
+        cancel_token : CancelToken, optional
+            Cooperative cancellation token. If provided and cancelled (e.g. from
+            another thread), extraction aborts at the next checkpoint by raising
+            CancelledError. The token is installed as the ambient token for the
+            duration of the call, so subclass overrides don't need to accept or
+            forward it — the check_cancel() calls in the base-class loops pick
+            it up automatically.
 
         Returns:
         ----------
@@ -324,7 +331,8 @@ class FeatureExtractor:
         # self.move_model_to_device(device)
 
         # Extract features with scaling and rescaling as needed
-        features = self.extract_features_pyramid(data=data, param=param, patched=self.gives_patched_features(), device=device)
+        with cancel_scope(cancel_token):
+            features = self.extract_features_pyramid(data=data, param=param, patched=self.gives_patched_features(), device=device)
 
         return features
 
@@ -363,8 +371,20 @@ class FeatureExtractor:
         if not param.fe_scalings in self.get_proposed_scalings():
             warnings.warn(f"The selected scalings {param.fe_scalings} are not in the proposed scalings {self.proposed_scalings}. Please check if this is intentional.")
 
+        # Post-processing of extracted features (rescaling, device transfer) works
+        # on one array per channel-series/layer; checking between elements keeps
+        # cancellation responsive even for huge feature images (e.g. many-channel
+        # inputs), where a single rescale/transfer can take seconds.
+        def _rescale_all(feats, shape):
+            out = []
+            for f in feats:
+                check_cancel()
+                out.append(rescale_features(feature_img=f, target_shape=shape, order=param.fe_order))
+            return out
+
         # Iterate over the scales and extract features for each scale
         for s in param.fe_scalings:
+            check_cancel()
 
             # Downscale the image
             image_scaled = scale_img(data, s)
@@ -396,11 +416,7 @@ class FeatureExtractor:
                 # NOTE: this should not be necessary if the inputs are already multiples of the patch size at all scales
                 if patch_size > 1 and reduced_shape[2:] != pre_reduction_shape[2:] :
                     # Step 1: rescale to the reduced (cropped to patch multiple) shape
-                    features = [rescale_features(
-                                    feature_img=f,
-                                    target_shape=reduced_shape,
-                                    order=param.fe_order)
-                                for f in features]
+                    features = _rescale_all(features, reduced_shape)
 
                     # Step 2: pad back to original pre_reduction_shape (but still downscaled)
                     features = [pad_to_shape(f, pre_reduction_shape[2:] ) for f in features]
@@ -408,18 +424,19 @@ class FeatureExtractor:
                 # Rescale to the full original shape
                 target_shape = data.shape
 
-            features = [rescale_features(
-                                feature_img=f,
-                                target_shape=target_shape,
-                                order=param.fe_order)
-                        for f in features]
+            features = _rescale_all(features, target_shape)
 
             # If torch tensor is returned, convert to numpy array
             if isinstance(features[0], torch.Tensor):
-                # Detach, move to cpu, make np array
-                features = [feature.detach().cpu().numpy() for feature in features]
-            
+                # Detach, move to cpu, make np array (checking between transfers)
+                converted = []
+                for feature in features:
+                    check_cancel()
+                    converted.append(feature.detach().cpu().numpy())
+                features = converted
+
             # Put together features for each input_channels procession (and layers if applicable)
+            check_cancel() # Last checkpoint before the (potentially large) concatenation
             features = np.concatenate(features, axis=0)
 
             # If use_min_features is True, shorten features
@@ -486,12 +503,12 @@ class FeatureExtractor:
         # For each channel, create a replicate with the needed number of input channels
         fe_input_channels = min(fe_input_channels)
         channel_series = [np.tile(ch, (fe_input_channels, 1, 1, 1)) for ch in image]
-        
-        # Get outputs for each channel_series
+
+        # Get outputs for each channel_series. The per-Z-plane check inside
+        # extract_features_from_stack fires almost immediately, so no extra
+        # check is needed at this loop boundary.
         all_outputs = []
         for channel in channel_series:
-            # Output is either a single array or a list of features,
-            # possibly from different layers (and thus with different sizes)
             output = self.extract_features_from_stack(channel, device=device)
             # Make one list of all outputs (aligning different channel_series and layers)
             if isinstance(output, list):
@@ -526,6 +543,7 @@ class FeatureExtractor:
         all_features = []
         # Go through the stack, and get features for each plane
         for z in range(image.shape[1]):
+            check_cancel()
             features = self.extract_features_from_plane(image[:,z], device=device)
             all_features.append(features)
 

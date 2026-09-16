@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 from torch import nn
-from ..utils import get_device_from_torch_model, guided_model_download
+from ..utils import get_device_from_torch_model, guided_model_download, check_cancel
+
 
 def import_models():
     try:
@@ -254,7 +255,7 @@ class Hookmodel(FeatureExtractor):
                 pass # Stop at hook
             except Exception as ex:
                 raise ex
-            
+
         # Move the z dimension back to the second position (and features to first)
         outputs = [o.permute(1, 0, 2, 3) for o in self.outputs]
 
@@ -265,12 +266,15 @@ class Hookmodel(FeatureExtractor):
         return self.model(tensor_image_dev)
 
     def hook_normal(self, module, input, output):
-        # print("extracting with normal layer")
         self.outputs.append(output)
+        # Checking the ambient token between hooked layers lets a cancel take
+        # effect mid-forward-pass; without it, heavy VGG16 configs only cancel
+        # after the whole forward completes.
+        check_cancel()
 
     def hook_last(self, module, input, output):
-        # print("extracting with last layer")
         self.outputs.append(output)
+        check_cancel()
         assert False
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
