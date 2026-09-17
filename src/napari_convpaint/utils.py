@@ -586,27 +586,19 @@ def rescale_features(feature_img, target_shape, order=1):
     if feature_img.shape == output_shape:
         return feature_img
 
-    # order>0 -> bilinear with align_corners=False, which matches skimage's
-    # half-pixel (pixel-centre) convention exactly, so there is no pixel shift.
-    # order=0 -> 'nearest-EXACT' (NOT plain 'nearest'): torch's default 'nearest'
-    # uses a floor/asymmetric grid that shifts by ~0.5 source-px vs skimage for
-    # non-integer scale ratios; 'nearest-exact' uses the same half-pixel nearest
-    # rule as skimage and is bit-identical for all ratios (verified).
+    # Torch interpolation for numpy arrays too (skimage.transform.resize resizes many-channel
+    # feature stacks per channel and single-threaded: 20-130x slower, seconds per ViT feature image).
+    # order 0 -> 'nearest-exact' (same half-pixel rule as skimage: identical results when upsampling,
+    # which is the case here; plain 'nearest' would shift by ~0.5 px for non-integer ratios).
+    # order > 0 -> bilinear with align_corners=False (skimage's pixel-centre convention; results
+    # differ from skimage only at the image borders, where the two handle the edge differently).
     int_mode = 'bilinear' if order > 0 else 'nearest-exact'
     align_corners = False if order > 0 else None
 
     if isinstance(feature_img, torch.Tensor):
-        # If the input is a PyTorch tensor, use the faster torch interpolation
         return torch_interpolate(feature_img, size=output_shape[2:],
                                   mode=int_mode, align_corners=align_corners)
     else:
-        # Route numpy arrays through torch interpolation too: skimage.transform.resize
-        # is dramatically slower here (per-channel CPU resize of many-channel feature
-        # stacks) — e.g. ~50x slower than torch when upsampling ViT patch features to
-        # full resolution, which made DINOv2/v3 feature-image and training extraction
-        # spend seconds in rescaling rather than in the network. For order=0 (nearest,
-        # the FE default) the result is identical to skimage; convert, interpolate,
-        # convert back to the original dtype.
         t = torch.from_numpy(np.ascontiguousarray(feature_img)).float()
         out = torch_interpolate(t, size=output_shape[2:], mode=int_mode, align_corners=align_corners)
         return out.numpy().astype(feature_img.dtype, copy=False)
@@ -653,15 +645,8 @@ def rescale_outputs(output_img, output_shape, order=0):
     """
     if output_img.shape == tuple(output_shape):
         return output_img  # identity resize: nothing to interpolate
-    # Route through torch interpolation instead of skimage.transform.resize:
-    # this is the step that upsamples patched (e.g. DINOv2/v3) features from the
-    # patch grid to full resolution, and skimage is ~50x+ slower per-channel on
-    # CPU (measured ~13 s for a 384-channel ViT feature image where the network
-    # forward was 0.08 s). Only the last two dims are resized. order=0 uses
-    # 'nearest-exact' (not plain 'nearest') so it is bit-identical to skimage
-    # for all scale ratios — plain 'nearest' shifts by ~0.5 source-px on
-    # non-integer ratios; order>0 uses bilinear/align_corners=False, matching
-    # skimage's half-pixel convention (no shift). See rescale_features.
+    # Torch interpolation instead of skimage.transform.resize (see rescale_features for the why and
+    # the interpolation modes); only the last two dims are resized
     int_mode = 'bilinear' if order > 0 else 'nearest-exact'
     align_corners = False if order > 0 else None
     was_3d = output_img.ndim == 3  # [Z, H, W] -> add a channel dim for interpolate
