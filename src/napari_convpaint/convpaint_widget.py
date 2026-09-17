@@ -2971,9 +2971,8 @@ class ConvpaintWidget(QWidget):
                 setattr(new_param, attr, val) # Set the default value in the param object
         if adjusted_params: show_info(f'The feature extractor adjusted the parameters {adjusted_params}')
 
-        # Create a new model with the new FE, reusing the temp FE instance so
-        # heavy extractors (torch weights) are not loaded a second time.
-        self.cp_model = self._cpm_class(param=new_param, _fe_model=temp_fe_model_for_defaults)
+        # Create a new model with the new FE (reusing the temp FE instance, so the weights are loaded only once)
+        self.cp_model = self._cpm_class(param=new_param, fe_model=temp_fe_model_for_defaults)
         # Sync the channel-mode and normalization radios with the new model's params
         self._reset_radio_channel_mode_choices()
         self._reset_radio_norm_choices()

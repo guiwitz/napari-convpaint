@@ -70,7 +70,7 @@ class ConvpaintModel:
         'fe_order': list(range(0, 6)), # from 0 (nearest) to 5
     }
 
-    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, _fe_model=None, **kwargs):
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_model=None, **kwargs):
         """
         **Initializes a Convpaint model**. This can be done with an alias, a model path, a param object, or a feature extractor name.
         If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
@@ -98,6 +98,9 @@ class ConvpaintModel:
             Param object with the model parameters (see Param class for details)
         fe_name : str, optional
             Name of the feature extractor model
+        fe_model : FeatureExtractor, optional
+            An already created feature extractor instance for the given param (same fe_name and fe_layers),
+            to be reused instead of creating it again (avoids loading heavy model weights twice)
         **kwargs : additional parameters, optional
             Additional parameters to override defaults for the model or feature extractor (see Param class for details)
 
@@ -177,7 +180,7 @@ class ConvpaintModel:
         if model_path is not None:
             self._load(model_path)
         elif param is not None:
-            self._load_param(param, fe_model=_fe_model)
+            self._load_param(param, fe_model=fe_model)
         elif fe_name is not None:
             fe_layers = kwargs.pop('fe_layers', None)
             self._set_fe(fe_name, fe_layers)
@@ -625,12 +628,15 @@ class ConvpaintModel:
         fe_name_changed = fe_name != self._param.get("fe_name")
         fe_layers_changed = fe_layers != self._param.get("fe_layers")
 
-        # Create the feature extractor model
+        # Create the feature extractor model (or reuse the given instance, if it matches)
         if fe_name_changed or fe_layers_changed:
-            self.fe_model = ConvpaintModel.create_fe(
-                name=fe_name,
-                layers=fe_layers
-            )
+            if fe_model is not None and fe_model.model_name == fe_name:
+                self.fe_model = fe_model
+            else:
+                self.fe_model = ConvpaintModel.create_fe(
+                    name=fe_name,
+                    layers=fe_layers
+                )
             if self._feature_cache is not None:
                 # The cache key holds the extraction signature, so entries of the old FE could never be
                 # returned anyway; clearing frees the RAM they would occupy until evicted
