@@ -100,7 +100,13 @@ def test_create_instances_from_semantic():
     assert np.array_equal(np.unique(inst), [0, 1, 2])
     assert inst[11, 81] == 0, "16 px blob must be removed"
     assert inst[52, 34] != 0, "4 px hole must be filled"
+    assert create_instances_from_semantic(seg, min_size=12)[52, 34] == 0, "Hole as big as a quarter of min_size stays"
     assert inst[50, 35] != inst[50, 62], "Touching discs must get different instance IDs"
+
+    # Filtering and splitting are independent: keep touching objects merged, but still remove the blob
+    inst = create_instances_from_semantic(seg, min_size=100, split_touching=False)
+    assert np.array_equal(np.unique(inst), [0, 1]) # discs merged
+    assert inst[11, 81] == 0, "16 px blob must still be removed"
 
     # An object with exactly min_size pixels is kept, one pixel less is removed
     assert create_instances_from_semantic(seg, min_size=16)[11, 81] != 0
@@ -129,6 +135,23 @@ def test_create_instances_from_semantic_3d_and_list():
     assert isinstance(insts, list) and len(insts) == 2
     assert np.array_equal(np.unique(insts[0]), [0, 1, 2])
     assert np.array_equal(np.unique(insts[1]), [0, 3, 4])
+
+    # An image without objects of a class must not reset the running ID (unique IDs across the list)
+    other = np.ones_like(seg); other[20:40, 20:40] = 3
+    insts = create_instances_from_semantic([seg, other], min_size=100, warn=False)
+    assert set(np.unique(insts[0])).isdisjoint(set(np.unique(insts[1])) - {0})
+
+    # per_plane filters per plane: a column too small in every plane is removed, although it is big in 3D
+    column = np.ones((5, 20, 20), dtype=np.uint8); column[:, 5:13, 5:13] = 2 # 64 px per plane, 320 in 3D
+    assert (create_instances_from_semantic(column, min_size=100, per_plane=True) > 0).sum() == 0
+    assert (create_instances_from_semantic(column, min_size=100) > 0).sum() == 320
+
+    # Class 0 (unlabelled) is skipped like the background, and the inputs are checked
+    unlabelled = np.where(seg == 1, 0, seg) # background 1 -> 0, objects stay class 2
+    assert np.array_equal(np.unique(create_instances_from_semantic(unlabelled, min_size=100, warn=False)), [0, 1, 2])
+    with pytest.raises(ValueError):
+        create_instances_from_semantic(seg, min_size=-1)
+    assert create_instances_from_semantic([], warn=False) == []
 
     # No background class 1 present -> warning (unless warn=False)
     with pytest.warns(UserWarning, match="No class 1"):

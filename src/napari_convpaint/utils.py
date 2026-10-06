@@ -68,7 +68,7 @@ def apply_kmeans_to_f_image(feature_img, n_clusters, random_state=None):
 
 ### Instance creation from semantic segmentaiton
 
-def create_instances_from_semantic(segmentations, min_size=100, classes=None, per_plane=False, warn=True):
+def create_instances_from_semantic(segmentations, min_size=100, split_touching=True, classes=None, per_plane=False, warn=True):
     """
     Create instance masks from semantic segmentation masks.
 
@@ -77,20 +77,30 @@ def create_instances_from_semantic(segmentations, min_size=100, classes=None, pe
     segmentations : list of np.ndarray or a single np.ndarray
         List of semantic segmentation masks. Each mask should have shape (H, W) or (Z, H, W).
     min_size : int
-        Minimum size (in pixels) of objects to keep. Smaller objects will be removed, and smaller holes will be filled.
-        Also determines the minimum distance for separating touching objects with watershed. Use 0 to ignore (only connected components).
+        Minimum size (in pixels) of objects to keep. Smaller objects are removed, and holes smaller than a quarter of
+        it are filled (a hole as large as an object is a feature, not noise, e.g. in ring-shaped objects).
+        Use 0 to keep everything. With split_touching, it also sets the minimum distance between two objects.
+    split_touching : bool
+        If True, objects that touch are separated with a distance watershed (seeds for roughly circular objects of
+        area min_size, so it needs min_size > 0). If False, every connected region is one instance, and min_size
+        only removes and fills.
     classes : list of int, optional
-        List of classes to create instances for. If None, all classes in the segmentations will be used. Always skips 1 (background).
+        List of classes to create instances for. If None, all classes in the segmentations will be used. Always skips 0 (unlabelled) and 1 (background).
     per_plane : bool
-        If True, and the segmentation masks are 3D, each plane will be labeled separately. If False, the 3D mask will be labeled as a whole.
+        If True, and the segmentation masks are 3D, each plane will be labeled and filtered separately. If False, the 3D mask is treated as a whole.
     warn : bool
         If True, a warning will be issued if no class 1 is found in the segmentations.
     
     """
+    if min_size < 0:
+        raise ValueError(f'min_size must be >= 0 (0 = no filtering), got {min_size}.')
+
     # Assure list input for segmentations
     single_input = hasattr(segmentations, 'ndim') and segmentations.ndim >= 2 and not isinstance(segmentations, (list, tuple))
     if single_input:
         segmentations = [segmentations]
+    if len(segmentations) == 0:
+        return []
 
     # Check for classes across segmentations
     if classes is None:
@@ -104,57 +114,64 @@ def create_instances_from_semantic(segmentations, min_size=100, classes=None, pe
     from skimage.morphology import remove_small_holes, remove_small_objects
     from skimage.measure import label
 
+    split = split_touching and min_size > 0 # Without a size, there is no distance to separate the objects by
+    max_hole_size = max(0, min_size // 4 - 1) # Only small holes are noise; a large one is part of the object (e.g. a ring)
     min_distance = max(2, 2*int((min_size / np.pi)**0.5)) # Approximate min distance for ~circular objects of area min_size, to separate touching objects with watershed
 
     instance_masks = [np.zeros_like(segmentation, dtype=np.int32) for segmentation in segmentations]
     global_max = 0
 
     for c in classes:
-        if c == 1:
-            continue # Skip background class
+        if c in (0, 1):
+            continue # Skip the unlabelled (0) and background (1) classes
 
         class_start = global_max + 1
 
         for segmentation, instance_mask in zip(segmentations, instance_masks):
             
             semantic_class_mask = segmentation == c
+            per_plane_3d = per_plane and semantic_class_mask.ndim == 3
 
-            if min_size > 0: # Remove objects and fill holes smaller than min_size (skimage removes sizes <= max_size)
-                semantic_class_mask = remove_small_holes(semantic_class_mask, max_size=min_size-1)
+            if min_size > 0 and not per_plane_3d: # Remove small objects and fill small holes (skimage removes sizes <= max_size)
+                semantic_class_mask = remove_small_holes(semantic_class_mask, max_size=max_hole_size)
                 semantic_class_mask = remove_small_objects(semantic_class_mask, max_size=min_size-1)
 
-            if per_plane and semantic_class_mask.ndim == 3: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
+            if per_plane_3d: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
                 for z in range(semantic_class_mask.shape[0]):
                     semantic_mask_plane = semantic_class_mask[z]
                     instance_mask_plane = instance_mask[z]
 
+                    if min_size > 0: # Filter per plane as well, since the plane is the unit here
+                        semantic_mask_plane = remove_small_holes(semantic_mask_plane, max_size=max_hole_size)
+                        semantic_mask_plane = remove_small_objects(semantic_mask_plane, max_size=min_size-1)
+
                     # from skimage.morphology import binary_erosion, disk
                     # semantic_mask_plane = binary_erosion(semantic_mask_plane, disk(1)) # Separate touching objects
-                    if min_size == 0:
-                        l = label(semantic_mask_plane)
-                    else:
+                    if split:
                         l = distance_watershed(semantic_mask_plane, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+                    else:
+                        l = label(semantic_mask_plane)
 
                     new_slice = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across planes
                     instance_mask_plane[semantic_mask_plane] = new_slice[semantic_mask_plane]
 
-                    global_max = instance_mask.max()
+                    global_max = max(global_max, int(instance_mask.max()))
 
             else: # For true 3D and 2D, we can label the mask directly
                 # from skimage.morphology import binary_erosion, disk
                 # semantic_class_mask = binary_erosion(semantic_class_mask, disk(1)) # Separate touching objects
-                if min_size == 0:
-                    l = label(semantic_class_mask)
-                else:
+                if split:
                     l = distance_watershed(semantic_class_mask, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+                else:
+                    l = label(semantic_class_mask)
 
                 new_mask = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across segmentations
                 instance_mask[semantic_class_mask] = new_mask[semantic_class_mask]
 
-            global_max = instance_mask.max()
-        
-        
-        print(f"Turned class {c} into instances {class_start}-{global_max}.")
+            global_max = max(global_max, int(instance_mask.max()))
+
+        if global_max >= class_start: # Nothing to report for classes without objects
+            print(f"Turned class {c} into instances {class_start}-{global_max}.")
 
     if single_input:
         return instance_masks[0]

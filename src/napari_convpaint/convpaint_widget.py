@@ -533,14 +533,17 @@ class ConvpaintWidget(QWidget):
             self.advanced_output_group.glayout.setColumnStretch(1, 1)
             self.advanced_output_group.glayout.setColumnStretch(2, 1)
 
-            # Instance size option
-            self.inst_min_size_label = QLabel('Min. instance size (px, 0 = off)')
+            # Instance options: size filter and whether touching objects are separated
+            self.inst_min_size_label = QLabel('Min. inst. size (px)')
             self.text_inst_min_size = QtWidgets.QLineEdit()
             self.text_inst_min_size.setStyleSheet("font-size: 12px;")
             self.text_inst_min_size.setPlaceholderText('e.g. 100')
             self.text_inst_min_size.setText(self.inst_min_size)
-            self.advanced_output_group.glayout.addWidget(self.inst_min_size_label, 1, 0, 1, 2)
-            self.advanced_output_group.glayout.addWidget(self.text_inst_min_size, 1, 2, 1, 1)
+            self.check_split_touching = QCheckBox('Split touching')
+            self.check_split_touching.setChecked(self.split_touching)
+            self.advanced_output_group.glayout.addWidget(self.inst_min_size_label, 1, 0, 1, 1)
+            self.advanced_output_group.glayout.addWidget(self.text_inst_min_size, 1, 1, 1, 1)
+            self.advanced_output_group.glayout.addWidget(self.check_split_touching, 1, 2, 1, 1)
             # self.advanced_output_group.glayout.setColumnStretch(1, 2)
 
             # Button to add features for the current plane
@@ -776,7 +779,13 @@ class ConvpaintWidget(QWidget):
             self.check_add_probas.setToolTip('Add a layer with class probabilities as output.')
             self.check_add_instances.setToolTip('Add a layer with instance masks as output.')
             for w in [self.inst_min_size_label, self.text_inst_min_size]:
-                w.setToolTip('Minimum number of pixels an instance must have to be kept. Set to 0 to disable filtering and watershedding (uses connected components instead).')
+                w.setToolTip('Minimum number of pixels an instance must have to be kept.\n' +
+                             'Holes smaller than a quarter of it are filled.\n' +
+                             'With "Split touching", it also sets the distance between two objects.\n' +
+                             'Set to 0 to keep everything (and no splitting).')
+            self.check_split_touching.setToolTip('Separate objects that touch each other (watershed, seeds for objects\n' +
+                                                 'of about the size above). Without it, every connected region is one instance.\n' +
+                                                 'With a minimum size of 0 there is no distance to split by, so splitting is off.')
             self.btn_add_features.setToolTip('Add a layer with the features extracted for the current plane.')
             self.btn_add_features_stack.setToolTip('Add a layer with the features extracted for the whole stack.')
             for w in [self.pca_label, self.text_features_pca]:
@@ -846,7 +855,7 @@ class ConvpaintWidget(QWidget):
                       self.check_auto_select_annot, # 	self.text_annot_prefix,
                       self.btn_train_on_selected, self.radio_img_training, self.radio_global_training, self.radio_single_training, # self.check_cont_training,
                       self.btn_class_distribution_trained, self.btn_reset_training, self.check_use_dask, self.channels_label,
-                    self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.btn_add_features, self.btn_add_features_stack,
+                    self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching, self.btn_add_features, self.btn_add_features_stack,
                       self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans]:
                 w.setToolTip('')
 
@@ -1092,6 +1101,8 @@ class ConvpaintWidget(QWidget):
                 self, 'add_instances', self.check_add_instances.isChecked()))
             self.text_inst_min_size.textChanged.connect(lambda: setattr(
                 self, 'inst_min_size', self.text_inst_min_size.text()))
+            self.check_split_touching.stateChanged.connect(lambda: setattr(
+                self, 'split_touching', self.check_split_touching.isChecked()))
 
             # Textboxes for PCA and Kmeans
             self.text_features_pca.textChanged.connect(lambda: setattr(
@@ -1833,7 +1844,8 @@ class ConvpaintWidget(QWidget):
                                                               use_dask=self.use_dask, fe_use_device=self.fe_device)
                 if self.add_instances:
                     from napari_convpaint.utils import create_instances_from_semantic
-                    instances = create_instances_from_semantic(segmentation, min_size=self._parse_inst_min_size())
+                    instances = create_instances_from_semantic(segmentation, min_size=self._parse_inst_min_size(),
+                                                                  split_touching=self.split_touching)
             else: # Only the probabilities are needed
                 probas = self.cp_model._predict(image_plane, add_seg=False, in_channels=in_channels, skip_norm=True,
                                                 use_dask=self.use_dask, fe_use_device=self.fe_device)
@@ -1987,7 +1999,8 @@ class ConvpaintWidget(QWidget):
                                                               use_dask=self.use_dask, fe_use_device=self.fe_device)
                 if self.add_instances:
                     from napari_convpaint.utils import create_instances_from_semantic
-                    instances = create_instances_from_semantic(segmentation, min_size=self._parse_inst_min_size())
+                    instances = create_instances_from_semantic(segmentation, min_size=self._parse_inst_min_size(),
+                                                                  split_touching=self.split_touching)
             else: # Only the probabilities are needed
                 probas = self.cp_model._predict(image, add_seg=False, in_channels=in_channels, skip_norm=True,
                                                 use_dask=self.use_dask, fe_use_device=self.fe_device)
@@ -2268,6 +2281,7 @@ class ConvpaintWidget(QWidget):
         self.check_add_probas.setChecked(self.add_probas)
         self.check_add_instances.setChecked(self.add_instances)
         self.text_inst_min_size.setText(self.inst_min_size)
+        self.check_split_touching.setChecked(self.split_touching)
         self.text_features_pca.setText(self.features_pca_components)
         self.text_features_kmeans.setText(self.features_kmeans_clusters)
         # Reset the model description
@@ -2359,6 +2373,7 @@ class ConvpaintWidget(QWidget):
         self.add_probas = False # Add a layer with class probabilities
         self.add_instances = False # Add a layer with instances
         self.inst_min_size = "100" # Minimum number of pixels for instances (0 = ignore)
+        self.split_touching = True # Separate touching objects (watershed); off = one instance per connected region
         self.new_seg = True # Flags to indicate if new outputs are created
         self.new_proba = True
         self.new_instances = True
