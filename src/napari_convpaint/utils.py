@@ -406,6 +406,10 @@ def rescale_class_labels(label_img, output_shape):
     rescaled_label_img : np.ndarray
         Rescaled label image.
     """
+    if label_img.shape == tuple(output_shape):
+        # Identity resize: skimage doesn't short-circuit, so skip it (keeping
+        # this function's uint8 output contract).
+        return label_img if label_img.dtype == np.uint8 else label_img.astype(np.uint8)
     rescaled_label_img = skimage.transform.resize(label_img, output_shape, order=0, mode='reflect', preserve_range=True).astype(np.uint8)
     return rescaled_label_img
 
@@ -426,6 +430,8 @@ def rescale_outputs(output_img, output_shape, order=0):
     rescaled_output : np.ndarray
         Rescaled class probability or feature image.
     """
+    if output_img.shape == tuple(output_shape):
+        return output_img  # identity resize: skimage doesn't short-circuit, so skip it
     rescaled_output = skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
     return rescaled_output
 
@@ -548,7 +554,17 @@ def pad_to_shape(feat, target_shape):
         pad_before = diff // 2
         pad_after = diff - pad_before  # ensures bottom/right get the extra pixel if diff is odd
         pad.append((pad_before, pad_after))
+    if isinstance(feat, torch.Tensor):
+        # torch.nn.functional.pad orders pads (left, right, top, bottom) for the
+        # last two dims; same symmetric convention as the numpy branch.
+        return torch.nn.functional.pad(feat, (pad[3][0], pad[3][1], pad[2][0], pad[2][1]))
     return np.pad(feat, pad, mode='constant')
+
+def concat_features(arrays, axis=0):
+    """Concatenate along `axis`, staying on-device for torch tensors."""
+    if len(arrays) and isinstance(arrays[0], torch.Tensor):
+        return torch.cat(arrays, dim=axis)
+    return np.concatenate(arrays, axis=axis)
 
 def align_up(val, alignment):
     """Smallest multiple of `alignment` that is >= `val`. Alignment must be >= 1."""

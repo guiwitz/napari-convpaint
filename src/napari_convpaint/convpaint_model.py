@@ -110,6 +110,7 @@ class ConvpaintModel:
         self.num_features = 0
         self._fe_locked_device = None
         self._clf_locked_device = None
+        self._feature_cache = None  # created by enable_feature_cache
         self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
@@ -618,6 +619,10 @@ class ConvpaintModel:
                 name=fe_name,
                 layers=fe_layers
             )
+            if self._feature_cache is not None:
+                # The cache key holds the FE signature, so entries of the old FE could never be
+                # returned anyway; clearing frees the RAM they would occupy until evicted
+                self._feature_cache.clear()
         
         # Set the parameters
         self._param.set(fe_name=fe_name, fe_layers=fe_layers)
@@ -914,6 +919,72 @@ class ConvpaintModel:
 
         return features
     
+### FEATURE CACHE (off unless enable_feature_cache() is called; the widget enables it by default; see feature_cache.py)
+
+    def enable_feature_cache(self, enabled=True, max_bytes=None):
+        """Turn on whole-image feature caching. When on, the (resolution-
+        independent) native features of an extracted image are cached and reused
+        the next time the *same* image is processed with the same FE settings —
+        e.g. re-segmenting while refining scribbles, or the train->predict of one
+        image — instead of recomputing them. Cache entries are content-addressed
+        (a hash of the prepared image), so it is self-invalidating: a changed
+        image simply misses. Bounded by a RAM budget (``max_bytes``, default 2 GB).
+        Off by default in the API (call this method to enable it); the widget
+        enables it by default."""
+        from .feature_cache import FeatureCache
+        self._feature_cache = FeatureCache(max_bytes=max_bytes, enabled=enabled)
+        return self._feature_cache
+
+    def clear_feature_cache(self):
+        """Drop the cached features, keeping the cache itself (and its budget) in place."""
+        if self._feature_cache is not None:
+            self._feature_cache.clear()
+
+    def _fe_cache_signature(self):
+        """The FE-relevant part of the cache key: the parameters whose change
+        invalidates extracted features (the model's own train-reset set), taken
+        from the user's params (before FE enforcement, which e.g. moves the
+        JAFAR scalings out of the Param)."""
+        def _hashable(v):
+            # fe_scalings / fe_layers are lists -> make them hashable for the key.
+            if isinstance(v, (list, tuple)):
+                return tuple(_hashable(x) for x in v)
+            return v
+        return tuple((k, _hashable(getattr(self._param, k, None))) for k in self._params_to_reset_training)
+
+    @staticmethod
+    def _data_hash(d):
+        """Content hash of a prepared image tile, so train/predict of the same
+        pixels share a cache entry without threading an id through the pipeline."""
+        import hashlib
+        arr = np.ascontiguousarray(d)
+        h = hashlib.blake2b(arr.view(np.uint8), digest_size=16)
+        h.update(str(arr.shape).encode())
+        h.update(str(arr.dtype).encode())
+        return h.hexdigest()
+
+    def _extract_pyramid_cached(self, d, param, patched=True, device=None, skip_reuse=False):
+        """Extract the feature pyramid for one image, consulting the feature
+        cache. Behaviour with the cache disabled (the default) is exactly
+        extract_features_pyramid; enabled, it caches/reuses the native features
+        (bit-identical output, since the pyramid split is exact)."""
+        cache = self._feature_cache
+        fe = self.fe_model
+        if skip_reuse or cache is None or not cache.enabled or not fe.supports_feature_reuse(param):
+            return fe.extract_features_pyramid(d, param, patched=patched, device=device)
+        key = (self._data_hash(d), self._fe_cache_signature())
+        entry = cache.get(key)
+        if entry is not None:
+            # Hit: lift the native features back onto `device` (if that is the FE's native
+            # form) and reconstruct there — same backend as a fresh extraction, so hits are
+            # as fast as (and identical to) misses.
+            native = fe.native_from_numpy(entry, device)
+        else:
+            # Miss: extract once; the features and the cache entry both come from these natives
+            native = fe.extract_native(d, param, device)
+            cache.put(key, fe.native_to_numpy(native))
+        return fe.reconstruct_from_native(native, d.shape, param, patched)
+
 ### BACKEND METHOD FOR FEATURE EXTRACTION
 
     def _get_features(self, data, annotations=None, restore_input_form=True,
@@ -1123,11 +1194,15 @@ class ConvpaintModel:
             supported_devices=self.fe_model.supported_devices(),
             warn=True,
         )
-        features = [self.fe_model.extract_features_pyramid(
+        # Annotation tiles are cut around the (new) annotations, so they never repeat and
+        # cannot serve a prediction -> do not cache them (only whole planes / prediction tiles)
+        skip_reuse = use_annots and params_for_extract.tile_annotations
+        features = [self._extract_pyramid_cached(
                 d,
                 params_for_extract,
                 patched=keep_patched,
-                device=fe_runtime_device)
+                device=fe_runtime_device,
+                skip_reuse=skip_reuse)
                     for d in data]
         
         if pca_components:
