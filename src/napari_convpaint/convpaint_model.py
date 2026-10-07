@@ -110,6 +110,8 @@ class ConvpaintModel:
         self.num_features = 0
         self._fe_locked_device = None
         self._clf_locked_device = None
+        self._feature_cache = None  # created by enable_feature_cache
+        self._feature_store = None  # created by enable_feature_store
         self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
@@ -618,6 +620,10 @@ class ConvpaintModel:
                 name=fe_name,
                 layers=fe_layers
             )
+            if self._feature_cache is not None:
+                # The cache key holds the extraction signature, so entries of the old FE could never be
+                # returned anyway; clearing frees the RAM they would occupy until evicted
+                self._feature_cache.clear()
         
         # Set the parameters
         self._param.set(fe_name=fe_name, fe_layers=fe_layers)
@@ -718,7 +724,7 @@ class ConvpaintModel:
         new_param : Param
             Convpaint model defaults adjusted to the feature extractor defaults
         """
-        cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
+        cpm_defaults = ConvpaintModel.get_default_params() # Get Convpaint defaults
         new_param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
         return new_param
 
@@ -914,6 +920,174 @@ class ConvpaintModel:
 
         return features
     
+### FEATURE REUSE: CACHE (RAM) AND STORE (DISK)
+# Both are off unless enabled (the widget enables the cache by default); see feature_cache.py and feature_store.py
+
+    def enable_feature_cache(self, max_bytes=None):
+        """Turn on feature caching (in RAM). When on, the native (pre-rescale) features
+        of an extracted plane are cached and reused the next time the *same* plane is
+        processed with the same FE settings — e.g. re-segmenting while refining
+        scribbles, or the train->predict of one image — instead of recomputing them.
+        Entries are content-addressed (a hash of the prepared plane), so the cache is
+        self-invalidating: a changed image simply misses. Bounded by a RAM budget
+        (``max_bytes``, default 2 GB; least recently used entries are dropped).
+        Off by default in the API; the widget enables it by default."""
+        from .feature_cache import FeatureCache
+        self._feature_cache = FeatureCache(max_bytes=max_bytes)
+        return self._feature_cache
+
+    def disable_feature_cache(self):
+        """Turn off feature caching and free the cached features."""
+        self._feature_cache = None
+
+    def clear_feature_cache(self):
+        """Drop the cached features, keeping the cache itself (and its budget) in place."""
+        if self._feature_cache is not None:
+            self._feature_cache.clear()
+
+    def enable_feature_store(self, folder, max_bytes=None):
+        """Turn on the feature store: the native features of every extracted plane are
+        kept as files in ``folder`` (no eviction, also across sessions) and reused like
+        cached ones — e.g. extract the features of a stack or movie once (see
+        store_features), then train and predict from them. Same keys as the cache.
+        The folder must be empty, not yet existing, or a feature store. ``max_bytes``
+        optionally caps the size of the store (default: no cap, only a disk headroom)."""
+        from .feature_store import FeatureStore
+        self._feature_store = FeatureStore(folder, max_bytes=max_bytes)
+        return self._feature_store
+
+    def disable_feature_store(self):
+        """Turn off the feature store (the stored files are kept; see clear_feature_store)."""
+        self._feature_store = None
+
+    def clear_feature_store(self):
+        """Delete the stored features from disk, keeping the store itself enabled."""
+        if self._feature_store is not None:
+            self._feature_store.clear()
+
+    def store_features(self, image, in_channels=None, skip_norm=False, fe_use_device=None):
+        """
+        Extracts the features of an image (stack) plane by plane and keeps them in the feature
+        store (and in the cache, if enabled), without training or predicting: prepare a stack or
+        movie once (e.g. before annotating), so that train and predict reuse the features afterwards.
+        Requires the feature store to be enabled (see enable_feature_store).
+
+        The image is prepared exactly as for prediction (same handling of in_channels and skip_norm),
+        so the stored planes match later predictions of the same image (except with tile_image,
+        where prediction extracts tiles instead of whole planes).
+
+        Parameters
+        ----------
+        image : np.ndarray or list[np.ndarray]
+            Image (stack) to store the features of, or list of images
+        in_channels : list[int], optional
+            List of channels to use
+        skip_norm : bool, optional
+            Whether to skip normalization of the image (e.g. if already normalized)
+        fe_use_device : str, optional
+            Device policy for feature extractor ("auto", "gpu", "cpu")
+        """
+        if self._feature_store is None:
+            raise ValueError('No feature store enabled (see enable_feature_store).')
+        # Prepare the data as in _predict (dimensions, channels, normalization of the whole image)
+        # not inside _get_features, since planes are split below but norm needs the whole stack
+        data, _ = self._prep_dims(image)
+        data = self._prep_whole_images(data, in_channels, skip_norm)
+        # Extract plane by plane (bounded memory); FEs with 3D context need the whole stack
+        for d in data:
+            units = [d] if self.fe_model.get_has_3d_context() else [d[:, z:z+1] for z in range(d.shape[1])]
+            for unit in units:
+                self._get_features(unit, restore_input_form=False, in_channels=None, skip_norm=True,
+                                   use_device=fe_use_device)
+
+    def _extraction_signature(self):
+        """The settings part of the cache/store key: the parameters whose change
+        invalidates extracted features (the model's own train-reset set), taken
+        from the user's params (before FE enforcement, which e.g. moves the
+        JAFAR scalings out of the Param)."""
+        def _hashable(v):
+            # fe_scalings / fe_layers are lists -> tuples (same order and nesting) to be hashable.
+            if isinstance(v, (list, tuple)):
+                return tuple(_hashable(x) for x in v)
+            return v
+        return tuple((k, _hashable(getattr(self._param, k, None))) for k in self._params_to_reset_training)
+
+    @staticmethod
+    def _data_signature(d):
+        """Content hash of a prepared plane (or tile), so train/predict of the same
+        pixels share a cache/store entry without threading an id through the pipeline."""
+        import hashlib
+        arr = np.ascontiguousarray(d)
+        h = hashlib.blake2b(arr.view(np.uint8), digest_size=16)
+        h.update(str(arr.shape).encode())
+        h.update(str(arr.dtype).encode())
+        return h.hexdigest()
+
+    def _reuse_enabled(self):
+        """Whether extracted features are reused (cache or store enabled)."""
+        return self._feature_cache is not None or self._feature_store is not None
+
+    def _reuse_native(self, key):
+        """Get the native features of a plane from the cache or the store, or None.
+        A store hit is also put into the cache (as a copy in RAM, not the memory-mapped files),
+        so that repeated use of the same plane does not read from disk every time."""
+        native = self._feature_cache.get(key) if self._feature_cache is not None else None
+        if native is None and self._feature_store is not None:
+            native = self._feature_store.get(key)
+            # Promote the store hit: np.array() copies the memory-mapped arrays into RAM,
+            # so the cached entry does not keep reading from (or depend on) the files
+            if native is not None and self._feature_cache is not None:
+                in_ram = {"levels": [([np.array(a) for a in arrays], scaled_shape, cropped_shape)
+                                     for arrays, scaled_shape, cropped_shape in native["levels"]],
+                          "was_torch": native["was_torch"]}
+                self._feature_cache.put(key, in_ram)
+        return native
+
+    def _keep_native(self, key, native):
+        """Keep the native features of a plane in the cache and/or the store."""
+        if self._feature_cache is not None:
+            self._feature_cache.put(key, native)
+        if self._feature_store is not None:
+            self._feature_store.put(key, native)
+
+    def _extract_or_reuse_pyramid(self, d, param, patched=True, device=None, skip_reuse=False):
+        """Extract the feature pyramid for one prepared image [C, Z, H, W], reusing the
+        native features of planes that are already in the feature cache or store. Without
+        them (the default) this is exactly extract_features_pyramid; with them, the
+        output is bit-identical (the pyramid split is exact). Planes are the unit of
+        reuse, so stacks, single planes and (flattened) training planes share entries
+        (except for FEs with 3D context, whose features are reused per stack as given)."""
+        fe = self.fe_model
+        if skip_reuse or not self._reuse_enabled() or not fe.supports_feature_reuse(param):
+            return fe.extract_features_pyramid(d, param, patched=patched, device=device)
+        extraction_sig = self._extraction_signature()
+        if fe.get_has_3d_context():
+            planes = [d] # Planes are not independent -> the whole stack is the unit of reuse
+        else:
+            planes = [d[:, z:z+1] for z in range(d.shape[1])]
+        keys = [(self._data_signature(plane), extraction_sig) for plane in planes]
+        natives = [self._reuse_native(key) for key in keys]
+        missing = [z for z, native in enumerate(natives) if native is None]
+        if len(missing) == len(keys):
+            # Nothing reusable: extract everything in one pass, keep the numpy form and
+            # reconstruct from the on-device native features (no detour over the numpy copy)
+            fresh = fe.extract_native(d, param, device)
+            in_numpy = fe.native_to_numpy(fresh)
+            per_key = [in_numpy] if len(keys) == 1 else fe.split_native_planes(in_numpy)
+            for key, plane_native in zip(keys, per_key):
+                self._keep_native(key, plane_native)
+            return fe.reconstruct_from_native(fresh, d.shape, param, patched)
+        if missing:
+            # Some planes reusable: extract the others in one (batched) pass, keep them plane by plane
+            fresh = fe.native_to_numpy(fe.extract_native(d[:, missing], param, device))
+            for z, plane_native in zip(missing, fe.split_native_planes(fresh)):
+                natives[z] = plane_native
+                self._keep_native(keys[z], plane_native)
+        # Reconstruct on `device` (the native features are lifted back to torch if that is the
+        # FE's native form), i.e. with the same backend as a fresh extraction
+        native = natives[0] if len(natives) == 1 else fe.join_native_planes(natives)
+        return fe.reconstruct_from_native(fe.native_from_numpy(native, device), d.shape, param, patched)
+
 ### BACKEND METHOD FOR FEATURE EXTRACTION
 
     def _get_features(self, data, annotations=None, restore_input_form=True,
@@ -996,16 +1170,9 @@ class ConvpaintModel:
         # Make sure data is a list of images with [C, Z, H, W] shape
         data, annotations = self._prep_dims(data, annotations, get_coords=False)
 
-        # --- Channel subset ------------------------------------------------------
-        if in_channels is not None:
-            self._check_in_channels(data, in_channels)
-            data = [d[in_channels] for d in data]
-
-        # --- Normalization -------------------------------------------------------
-        if not skip_norm:
-            data = [self._norm_single_image(d) for d in data]
-        # if self.fe_model.norm_mode == "imagenet":
-        #     data = [utils.normalize_image_imagenet(d) for d in data]
+        # --- Channel subset and normalization ------------------------------------
+        # (skipped by the callers that prepared the whole image before cutting planes or tiles)
+        data = self._prep_whole_images(data, in_channels, skip_norm)
 
         # Record originals BEFORE any padding / resampling for reshaping and rescaling later
         self.original_shapes = [d.shape for d in data]  # list of (C,Z,H,W)
@@ -1123,11 +1290,15 @@ class ConvpaintModel:
             supported_devices=self.fe_model.supported_devices(),
             warn=True,
         )
-        features = [self.fe_model.extract_features_pyramid(
+        # Annotation tiles are cut around the (new) annotations, so they never repeat and
+        # cannot serve a prediction -> do not cache them (only whole planes / prediction tiles)
+        skip_reuse = use_annots and params_for_extract.tile_annotations
+        features = [self._extract_or_reuse_pyramid(
                 d,
                 params_for_extract,
                 patched=keep_patched,
-                device=fe_runtime_device)
+                device=fe_runtime_device,
+                skip_reuse=skip_reuse)
                     for d in data]
         
         if pca_components:
@@ -1526,14 +1697,8 @@ class ConvpaintModel:
         # Make sure data is a list of images with [C, Z, H, W] shape
         data, _ = self._prep_dims(data)
 
-        # If in_channels is given, extract the channels selected by in_channels from the data
-        if in_channels is not None:
-            self._check_in_channels(data, in_channels)
-            data = [d[in_channels] for d in data]
-
-        # If not done previously, normalize the images (separately and according to the parameter)
-        if not skip_norm:
-            data = [self._norm_single_image(d) for d in data]
+        # Channels and normalization on the whole images, before they are cut into tiles
+        data = self._prep_whole_images(data, in_channels, skip_norm)
 
         # Get class probabilities, using tiling if enabled
         if self._param.tile_image:
@@ -1974,7 +2139,19 @@ class ConvpaintModel:
             raise ValueError(f'Image and annotations have different (non-channel) dimensions: {img.shape[1:]} vs {annotations.shape}')
 
         return img, annotations
-    
+
+    def _prep_whole_images(self, data, in_channels=None, skip_norm=False):
+        """
+        Takes the channel subset and normalizes the images (list of [C, Z, H, W], see _prep_dims),
+        before any planes or tiles are cut from them (the normalization uses the whole image).
+        """
+        if in_channels is not None:
+            self._check_in_channels(data, in_channels)
+            data = [d[in_channels] for d in data]
+        if not skip_norm:
+            data = [self._norm_single_image(d) for d in data]
+        return data
+
     def _check_in_channels(self, data, in_channels=None):
         """
         Checks if the conditions for using the given in_channels are met, and raise an error if not.
