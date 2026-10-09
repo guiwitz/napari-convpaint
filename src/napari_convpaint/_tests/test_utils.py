@@ -159,3 +159,26 @@ def test_create_instances_from_semantic_3d_and_list():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         create_instances_from_semantic(seg + 1, min_size=100, warn=False)
+
+def test_instance_size_filter_keywords():
+    """The scikit-image < 0.26 fallback must ask for the same sizes as the current API."""
+    from napari_convpaint import utils
+
+    calls = []
+    def fake(mask, **kwargs):
+        calls.append(kwargs)
+        return mask
+    installed = utils._SKIMAGE_MAX_SIZE
+    try:
+        for use_max_size, expected in ((True, [{'max_size': 24}, {'max_size': 99}]),
+                                       (False, [{'area_threshold': 25}, {'min_size': 100}])):
+            calls.clear()
+            utils._SKIMAGE_MAX_SIZE = use_max_size
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(utils.morph, 'remove_small_holes', fake)
+                mp.setattr(utils.morph, 'remove_small_objects', fake)
+                utils._fill_holes_up_to(np.zeros((4, 4), dtype=bool), 24) # Holes of at most 24 px
+                utils._remove_objects_below(np.zeros((4, 4), dtype=bool), 100) # Objects below 100 px
+            assert calls == expected
+    finally:
+        utils._SKIMAGE_MAX_SIZE = installed

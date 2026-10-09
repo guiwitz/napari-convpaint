@@ -1,3 +1,4 @@
+import inspect
 import warnings
 import torch
 import numpy as np
@@ -111,7 +112,6 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
                               f"This might be intentional. But typically class 1 is the background class, and classes > 1 are the objects of interest.\n" +
                               f"You can turn this warning off by setting `warn=False`.")
 
-    from skimage.morphology import remove_small_holes, remove_small_objects
     from skimage.measure import label
 
     split = split_touching and min_size > 0 # Without a size, there is no distance to separate the objects by
@@ -132,9 +132,9 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
             semantic_class_mask = segmentation == c
             per_plane_3d = per_plane and semantic_class_mask.ndim == 3
 
-            if min_size > 0 and not per_plane_3d: # Remove small objects and fill small holes (skimage removes sizes <= max_size)
-                semantic_class_mask = remove_small_holes(semantic_class_mask, max_size=max_hole_size)
-                semantic_class_mask = remove_small_objects(semantic_class_mask, max_size=min_size-1)
+            if min_size > 0 and not per_plane_3d: # Remove small objects and fill small holes
+                semantic_class_mask = _fill_holes_up_to(semantic_class_mask, max_hole_size)
+                semantic_class_mask = _remove_objects_below(semantic_class_mask, min_size)
 
             if per_plane_3d: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
                 for z in range(semantic_class_mask.shape[0]):
@@ -142,8 +142,8 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
                     instance_mask_plane = instance_mask[z]
 
                     if min_size > 0: # Filter per plane as well, since the plane is the unit here
-                        semantic_mask_plane = remove_small_holes(semantic_mask_plane, max_size=max_hole_size)
-                        semantic_mask_plane = remove_small_objects(semantic_mask_plane, max_size=min_size-1)
+                        semantic_mask_plane = _fill_holes_up_to(semantic_mask_plane, max_hole_size)
+                        semantic_mask_plane = _remove_objects_below(semantic_mask_plane, min_size)
 
                     # from skimage.morphology import binary_erosion, disk
                     # semantic_mask_plane = binary_erosion(semantic_mask_plane, disk(1)) # Separate touching objects
@@ -192,6 +192,26 @@ def distance_watershed(mask, min_distance):
     labels = watershed(-distance, markers, mask=mask)
 
     return labels
+
+# scikit-image 0.26 replaced the size keywords of remove_small_objects (min_size) and
+# remove_small_holes (area_threshold) with max_size, and changed the limit from "smaller
+# than" to "smaller than or equal to". The old keywords still work there, but emit a
+# FutureWarning AND are mapped onto max_size, so they mean one pixel more than they used
+# to - they are therefore only safe to use on older versions. We check once which keyword
+# the installed version offers and translate the size accordingly.
+_SKIMAGE_MAX_SIZE = 'max_size' in inspect.signature(morph.remove_small_objects).parameters
+
+def _remove_objects_below(mask, min_size):
+    """Remove the objects of a boolean mask that are smaller than min_size pixels."""
+    if _SKIMAGE_MAX_SIZE:
+        return morph.remove_small_objects(mask, max_size=min_size-1)
+    return morph.remove_small_objects(mask, min_size=min_size)
+
+def _fill_holes_up_to(mask, max_hole_size):
+    """Fill the holes of a boolean mask that are at most max_hole_size pixels."""
+    if _SKIMAGE_MAX_SIZE:
+        return morph.remove_small_holes(mask, max_size=max_hole_size)
+    return morph.remove_small_holes(mask, area_threshold=max_hole_size+1)
 
 
 ### MODEL DOWNLOAD
