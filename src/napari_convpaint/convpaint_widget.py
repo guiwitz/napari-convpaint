@@ -1103,6 +1103,7 @@ class ConvpaintWidget(QWidget):
                 self, 'inst_min_size', self.text_inst_min_size.text()))
             self.check_split_touching.stateChanged.connect(lambda: setattr(
                 self, 'split_touching', self.check_split_touching.isChecked()))
+            self.check_add_instances.stateChanged.connect(self._reset_instance_options) # After the line above, which sets add_instances
 
             # Textboxes for PCA and Kmeans
             self.text_features_pca.textChanged.connect(lambda: setattr(
@@ -2332,6 +2333,7 @@ class ConvpaintWidget(QWidget):
         self._reset_radio_channel_mode_choices()
         self._reset_radio_norm_choices()
         self._reset_predict_buttons()
+        self._reset_instance_options()
         selected_img = self._get_selected_img()
         self._compute_image_stats(selected_img)
         # Reset the features for continuous training
@@ -3066,6 +3068,11 @@ class ConvpaintWidget(QWidget):
             self.segment_btn.setEnabled(False)
             self.segment_all_btn.setEnabled(False)
             self.btn_add_features_stack.setEnabled(False)
+
+    def _reset_instance_options(self):
+        """Enable or disable the instance options, which only apply to the instances output."""
+        for w in [self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching]:
+            w.setEnabled(self.add_instances)
 
     def _on_change_device(self, event=None):
         """Update FE/CLF device policies when the dropdown selection changes."""
