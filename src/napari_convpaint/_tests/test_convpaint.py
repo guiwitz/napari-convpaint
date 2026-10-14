@@ -795,3 +795,66 @@ def test_all_models_train_predict(make_napari_viewer, fe_name, image_type):
     seg = viewer.layers['segmentation'].data
     assert seg.shape == annot.shape, f"Segmentation shape {seg.shape} != annotations shape {annot.shape}"
     assert np.unique(seg).size > 1, "Segmentation is uniform — model produced no meaningful output"
+
+def test_set_fe_syncs_channel_and_norm_options(make_napari_viewer):
+    """Regression test: setting an FE that adjusts channel_mode must refresh the
+    channel-mode and normalization radios against the NEW model, not the old one.
+
+    Repro without the fix: on a 3D grayscale stack, the user switches to 'multi'
+    (interpreted as one multi-channel 2D image, so 'Norm. over stack' is disabled);
+    setting an FE whose default channel_mode is 'single' then rebuilds the model as
+    'single' behind the radios' back. Clicking 'Single channel img' afterwards is
+    swallowed by the no-change guard in _on_channel_mode_changed (the model already
+    is 'single'), so stack normalization can never be re-enabled from the GUI."""
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+
+    viewer.add_image(np.random.random((10, 100, 100)), name='stack')
+    # (The changed-signal handler is QTimer-delayed, so call _on_select_layer directly)
+    my_widget.image_layer_selection_widget.value = viewer.layers['stack']
+    my_widget._on_select_layer()
+    assert my_widget.cp_model.get_param('channel_mode') == 'single'
+
+    # User explicitly switches to multi-channel -> no stack dim in that
+    # interpretation, so stack normalization is (correctly) disabled
+    my_widget.radio_multi_channel.setChecked(True)
+    assert my_widget.cp_model.get_param('channel_mode') == 'multi'
+    assert not my_widget.radio_normalize_over_stack.isEnabled()
+
+    # Set an FE whose default channel_mode is 'single' (the Param default,
+    # so any FE without an explicit override works)
+    my_widget.qcombo_fe_type.setCurrentText('gaussian_features')
+    my_widget._on_set_fe_model()
+
+    # The radios must reflect the NEW model: single-channel selected, and
+    # stack normalization available again for the 3D stack
+    assert my_widget.cp_model.get_param('channel_mode') == 'single'
+    assert my_widget.radio_single_channel.isChecked()
+    assert my_widget.radio_normalize_over_stack.isEnabled()
+
+def test_stack_after_rgb_uses_fresh_stack_defaults(make_napari_viewer):
+    """Regression test: after an RGB image, selecting a 3D grayscale stack must
+    fall back to the fresh-stack defaults ('single' channel mode, normalization
+    over stack available and selected) instead of carrying the stale 'rgb' mode
+    over as 'multi' (which also disables stack normalization)."""
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+
+    viewer.add_image((np.random.random((100, 100, 3)) * 255).astype(np.uint8),
+                     rgb=True, name='rgb_img')
+    viewer.add_image(np.random.random((10, 100, 100)), name='stack')
+
+    # RGB image -> widget goes to 'rgb' mode
+    my_widget.image_layer_selection_widget.value = viewer.layers['rgb_img']
+    my_widget._on_select_layer()
+    assert my_widget.cp_model.get_param('channel_mode') == 'rgb'
+
+    # 3D grayscale stack -> same defaults as for a freshly opened stack
+    my_widget.image_layer_selection_widget.value = viewer.layers['stack']
+    my_widget._on_select_layer()
+    assert my_widget.cp_model.get_param('channel_mode') == 'single'
+    assert my_widget.radio_single_channel.isChecked()
+    assert my_widget.radio_normalize_over_stack.isEnabled()
+    assert my_widget.radio_normalize_over_stack.isChecked()
