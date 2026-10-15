@@ -149,11 +149,14 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
                     # semantic_mask_plane = binary_erosion(semantic_mask_plane, disk(1)) # Separate touching objects
                     if split:
                         l = distance_watershed(semantic_mask_plane, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+                        if min_size > 0:
+                            l = _merge_instances_below(l, min_size) # The split can cut an object into pieces below min_size
                     else:
                         l = label(semantic_mask_plane)
 
+                    keep = l > 0
                     new_slice = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across planes
-                    instance_mask_plane[semantic_mask_plane] = new_slice[semantic_mask_plane]
+                    instance_mask_plane[keep] = new_slice[keep]
 
                     global_max = max(global_max, int(instance_mask.max()))
 
@@ -162,11 +165,14 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
                 # semantic_class_mask = binary_erosion(semantic_class_mask, disk(1)) # Separate touching objects
                 if split:
                     l = distance_watershed(semantic_class_mask, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+                    if min_size > 0:
+                        l = _merge_instances_below(l, min_size) # The split can cut an object into pieces below min_size
                 else:
                     l = label(semantic_class_mask)
 
+                keep = l > 0
                 new_mask = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across segmentations
-                instance_mask[semantic_class_mask] = new_mask[semantic_class_mask]
+                instance_mask[keep] = new_mask[keep]
 
             global_max = max(global_max, int(instance_mask.max()))
 
@@ -176,6 +182,45 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
     if single_input:
         return instance_masks[0]
     return instance_masks
+
+def _merge_instances_below(instances, min_size):
+    """Give the pixels of instances smaller than min_size to the neighbouring instance.
+
+    The size filter runs on the semantic mask, before the objects are separated, so a split
+    can still cut an object that is large enough into pieces that are not. Those pieces are
+    not dropped but merged into the instance next to them, which keeps the object itself and
+    its area intact. If all instances of one object are too small, the largest one is kept and
+    absorbs the others. The result is relabelled consecutively.
+    """
+    from scipy import ndimage as ndi
+
+    sizes = np.bincount(instances.ravel())
+    too_small = sizes < min_size
+    too_small[0] = False
+    if not too_small.any():
+        return instances
+
+    # Never let an object disappear completely: keep the largest instance of each object
+    objects, n_objects = ndi.label(instances > 0)
+    labelled = instances > 0
+    object_of = np.zeros(len(sizes), dtype=np.int32)
+    object_of[instances[labelled]] = objects[labelled] # All pixels of an instance share one object
+    for obj in range(1, n_objects + 1):
+        here = np.flatnonzero(object_of == obj)
+        if len(here) and too_small[here].all():
+            too_small[here[np.argmax(sizes[here])]] = False
+
+    # Flood the freed pixels from the kept instances, restricted to the objects themselves, so
+    # that a piece always joins an instance of its own object and never one lying close by
+    from skimage.segmentation import watershed
+    kept = np.where(too_small[instances], 0, instances)
+    merged = watershed(np.zeros_like(kept, dtype=np.uint8), kept, mask=labelled)
+
+    remaining = np.unique(merged)
+    remaining = remaining[remaining > 0]
+    lookup = np.zeros(int(merged.max()) + 1, dtype=np.int32)
+    lookup[remaining] = np.arange(1, len(remaining) + 1)
+    return lookup[merged]
 
 def distance_watershed(mask, min_distance):
 

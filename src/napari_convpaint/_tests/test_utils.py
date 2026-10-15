@@ -160,6 +160,34 @@ def test_create_instances_from_semantic_3d_and_list():
         warnings.simplefilter("error")
         create_instances_from_semantic(seg + 1, min_size=100, warn=False)
 
+def test_instances_below_min_size_are_merged():
+    """Splitting can cut an object into pieces smaller than min_size. They must join the
+    neighbouring instance instead of being dropped, so no object and no pixel is lost."""
+    from skimage.draw import disk
+
+    seg = np.ones((60, 60), dtype=np.uint8)
+    for cx in (24, 34): # Two touching discs of ~133 px, 267 px together
+        rr, cc = disk((30, cx), 7, shape=seg.shape); seg[rr, cc] = 2
+    area = int((seg == 2).sum())
+
+    inst = create_instances_from_semantic(seg, min_size=100, warn=False)
+    assert inst.max() == 2, "Both halves are above min_size and stay separate"
+    assert (inst > 0).sum() == area
+
+    inst = create_instances_from_semantic(seg, min_size=150, warn=False)
+    assert inst.max() == 1, "Halves below min_size must be merged, not dropped"
+    assert (inst > 0).sum() == area, "Merging must not lose pixels"
+
+    # A piece must join its own object, even when another object lies closer
+    from napari_convpaint.utils import _merge_instances_below
+    labelled = np.zeros((40, 80), dtype=np.int32)
+    labelled[10:30, 5:20] = 1   # object A, 300 px, kept
+    labelled[10:30, 20:24] = 2  # object A, 80 px, too small
+    labelled[10:30, 24:27] = 3  # object A, 60 px, too small and closer to B than to A's instance 1
+    labelled[10:30, 29:60] = 4  # object B, 620 px, two background pixels away
+    sizes = np.bincount(_merge_instances_below(labelled, 100).ravel())[1:]
+    assert sorted(sizes) == [440, 620], f"Pieces must stay in their object, got {sorted(sizes)}"
+
 def test_instance_size_filter_keywords():
     """The scikit-image < 0.26 fallback must ask for the same sizes as the current API."""
     from napari_convpaint import utils
