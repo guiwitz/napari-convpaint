@@ -188,6 +188,21 @@ def test_instances_below_min_size_are_merged():
     sizes = np.bincount(_merge_instances_below(labelled, 100).ravel())[1:]
     assert sorted(sizes) == [440, 620], f"Pieces must stay in their object, got {sorted(sizes)}"
 
+def test_instance_splitting_in_3d_uses_the_volume():
+    """min_size counts voxels in a 3D stack, so the distance between two seeds must follow from
+    the volume of a sphere. The 2D formula gives a distance several times too large, which merges
+    objects that touch."""
+    from napari_convpaint.utils import _min_distance
+    assert _min_distance(1000, 2) == 34, "diameter of a disc of 1000 px"
+    assert _min_distance(1000, 3) == 12, "diameter of a sphere of 1000 voxels"
+
+    P, r = 60, 10
+    zz, yy, xx = np.mgrid[:P, :P, :P]
+    seg = np.ones((P, P, P), dtype=np.uint8)
+    for dx in (0, int(2 * r * 0.8)): # Two touching spheres, 8047 voxels together
+        seg[((zz - 30)**2 + (yy - 30)**2 + (xx - 20 - dx)**2) < r**2] = 2
+    assert create_instances_from_semantic(seg, min_size=1000, warn=False).max() == 2
+
 def test_instance_size_filter_keywords():
     """The scikit-image < 0.26 fallback must ask for the same sizes as the current API."""
     from napari_convpaint import utils

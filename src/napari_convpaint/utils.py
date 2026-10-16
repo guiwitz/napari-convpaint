@@ -116,7 +116,6 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
 
     split = split_touching and min_size > 0 # Without a size, there is no distance to separate the objects by
     max_hole_size = max(0, min_size // 4 - 1) # Only small holes are noise; a large one is part of the object (e.g. a ring)
-    min_distance = max(2, 2*int((min_size / np.pi)**0.5)) # Approximate min distance for ~circular objects of area min_size, to separate touching objects with watershed
 
     instance_masks = [np.zeros_like(segmentation, dtype=np.int32) for segmentation in segmentations]
     global_max = 0
@@ -148,7 +147,7 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
                     # from skimage.morphology import binary_erosion, disk
                     # semantic_mask_plane = binary_erosion(semantic_mask_plane, disk(1)) # Separate touching objects
                     if split:
-                        l = distance_watershed(semantic_mask_plane, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+                        l = distance_watershed(semantic_mask_plane, min_distance=_min_distance(min_size, 2)) # Use distance transform and watershed to separate touching objects
                         if min_size > 0:
                             l = _merge_instances_below(l, min_size) # The split can cut an object into pieces below min_size
                     else:
@@ -164,7 +163,7 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
                 # from skimage.morphology import binary_erosion, disk
                 # semantic_class_mask = binary_erosion(semantic_class_mask, disk(1)) # Separate touching objects
                 if split:
-                    l = distance_watershed(semantic_class_mask, min_distance=min_distance) # Use distance transform and watershed to separate touching objects
+                    l = distance_watershed(semantic_class_mask, min_distance=_min_distance(min_size, semantic_class_mask.ndim)) # Use distance transform and watershed to separate touching objects
                     if min_size > 0:
                         l = _merge_instances_below(l, min_size) # The split can cut an object into pieces below min_size
                 else:
@@ -182,6 +181,19 @@ def create_instances_from_semantic(segmentations, min_size=100, split_touching=T
     if single_input:
         return instance_masks[0]
     return instance_masks
+
+def _min_distance(min_size, ndim):
+    """Minimum distance between two watershed seeds: the diameter of a round object of min_size.
+
+    min_size counts pixels in 2D and voxels in 3D, so the diameter follows from the area of a disc
+    or the volume of a sphere accordingly. Taking the 2D formula for a stack would overestimate the
+    distance several times over (1000 voxels: 34 px instead of 12) and merge objects that touch.
+    """
+    if ndim == 3:
+        radius = (3 * min_size / (4 * np.pi))**(1/3)
+    else:
+        radius = (min_size / np.pi)**0.5
+    return max(2, 2*int(radius))
 
 def _merge_instances_below(instances, min_size):
     """Give the pixels of instances smaller than min_size to the neighbouring instance.
