@@ -65,7 +65,7 @@ ilastik = [
     # conda install -c ilastik-forge fastfilters
 ]
 qt = [
-    "pyqt5",
+    "pyqt6",
 ]
 
 [project.entry-points."napari.manifest"]
