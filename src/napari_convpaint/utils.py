@@ -1,3 +1,4 @@
+import inspect
 import warnings
 import torch
 import numpy as np
@@ -64,6 +65,210 @@ def apply_kmeans_to_f_image(feature_img, n_clusters, random_state=None):
     kmeans_labels = kmeans_labels.astype(np.uint8) + 1 # Make sure labels start at 1
 
     return kmeans_labels
+
+
+### Instance creation from semantic segmentaiton
+
+def create_instances_from_semantic(segmentations, min_size=100, split_touching=True, classes=None, per_plane=False, warn=True):
+    """
+    Create instance masks from semantic segmentation masks.
+
+    Parameters:
+    ----------
+    segmentations : list of np.ndarray or a single np.ndarray
+        List of semantic segmentation masks. Each mask should have shape (H, W) or (Z, H, W).
+    min_size : int
+        Minimum size (in pixels) of objects to keep. Smaller objects are removed, and holes smaller than a quarter of
+        it are filled (a hole as large as an object is a feature, not noise, e.g. in ring-shaped objects).
+        Use 0 to keep everything. With split_touching, it also sets the minimum distance between two objects.
+    split_touching : bool
+        If True, objects that touch are separated with a distance watershed (seeds for roughly circular objects of
+        area min_size, so it needs min_size > 0). If False, every connected region is one instance, and min_size
+        only removes and fills.
+    classes : list of int, optional
+        List of classes to create instances for. If None, all classes in the segmentations will be used. Always skips 0 (unlabelled) and 1 (background).
+    per_plane : bool
+        If True, and the segmentation masks are 3D, each plane will be labeled and filtered separately. If False, the 3D mask is treated as a whole.
+    warn : bool
+        If True, a warning will be issued if no class 1 is found in the segmentations.
+    
+    """
+    if min_size < 0:
+        raise ValueError(f'min_size must be >= 0 (0 = no filtering), got {min_size}.')
+
+    # Assure list input for segmentations
+    single_input = hasattr(segmentations, 'ndim') and segmentations.ndim >= 2 and not isinstance(segmentations, (list, tuple))
+    if single_input:
+        segmentations = [segmentations]
+    if len(segmentations) == 0:
+        return []
+
+    # Check for classes across segmentations
+    if classes is None:
+        classes = np.unique(np.concatenate([s.ravel() for s in segmentations]))
+        if not 1 in classes:
+            if warn:
+                warnings.warn(f"No class 1 found in segmentations. Found classes: {classes}.\n" +
+                              f"This might be intentional. But typically class 1 is the background class, and classes > 1 are the objects of interest.\n" +
+                              f"You can turn this warning off by setting `warn=False`.")
+
+    from skimage.measure import label
+
+    split = split_touching and min_size > 0 # Without a size, there is no distance to separate the objects by
+    max_hole_size = max(0, min_size // 4 - 1) # Only small holes are noise; a large one is part of the object (e.g. a ring)
+
+    instance_masks = [np.zeros_like(segmentation, dtype=np.int32) for segmentation in segmentations]
+    global_max = 0
+
+    for c in classes:
+        if c in (0, 1):
+            continue # Skip the unlabelled (0) and background (1) classes
+
+        class_start = global_max + 1
+
+        for segmentation, instance_mask in zip(segmentations, instance_masks):
+            
+            semantic_class_mask = segmentation == c
+            per_plane_3d = per_plane and semantic_class_mask.ndim == 3
+
+            if min_size > 0 and not per_plane_3d: # Remove small objects and fill small holes
+                semantic_class_mask = _fill_holes_up_to(semantic_class_mask, max_hole_size)
+                semantic_class_mask = _remove_objects_below(semantic_class_mask, min_size)
+
+            if per_plane_3d: # If we do NOT want true 3D interpretation, but have 3D masks, we loop over the planes and label them separately
+                for z in range(semantic_class_mask.shape[0]):
+                    semantic_mask_plane = semantic_class_mask[z]
+                    instance_mask_plane = instance_mask[z]
+
+                    if min_size > 0: # Filter per plane as well, since the plane is the unit here
+                        semantic_mask_plane = _fill_holes_up_to(semantic_mask_plane, max_hole_size)
+                        semantic_mask_plane = _remove_objects_below(semantic_mask_plane, min_size)
+
+                    # from skimage.morphology import binary_erosion, disk
+                    # semantic_mask_plane = binary_erosion(semantic_mask_plane, disk(1)) # Separate touching objects
+                    if split:
+                        l = distance_watershed(semantic_mask_plane, min_distance=_min_distance(min_size, 2)) # Use distance transform and watershed to separate touching objects
+                        if min_size > 0:
+                            l = _merge_instances_below(l, min_size) # The split can cut an object into pieces below min_size
+                    else:
+                        l = label(semantic_mask_plane)
+
+                    keep = l > 0
+                    new_slice = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across planes
+                    instance_mask_plane[keep] = new_slice[keep]
+
+                    global_max = max(global_max, int(instance_mask.max()))
+
+            else: # For true 3D and 2D, we can label the mask directly
+                # from skimage.morphology import binary_erosion, disk
+                # semantic_class_mask = binary_erosion(semantic_class_mask, disk(1)) # Separate touching objects
+                if split:
+                    l = distance_watershed(semantic_class_mask, min_distance=_min_distance(min_size, semantic_class_mask.ndim)) # Use distance transform and watershed to separate touching objects
+                    if min_size > 0:
+                        l = _merge_instances_below(l, min_size) # The split can cut an object into pieces below min_size
+                else:
+                    l = label(semantic_class_mask)
+
+                keep = l > 0
+                new_mask = l + global_max # Offset the labels by the current global max to ensure unique instance IDs across segmentations
+                instance_mask[keep] = new_mask[keep]
+
+            global_max = max(global_max, int(instance_mask.max()))
+
+        if global_max >= class_start: # Nothing to report for classes without objects
+            print(f"Turned class {c} into instances {class_start}-{global_max}.")
+
+    if single_input:
+        return instance_masks[0]
+    return instance_masks
+
+def _min_distance(min_size, ndim):
+    """Minimum distance between two watershed seeds: the diameter of a round object of min_size.
+
+    min_size counts pixels in 2D and voxels in 3D, so the diameter follows from the area of a disc
+    or the volume of a sphere accordingly. Taking the 2D formula for a stack would overestimate the
+    distance several times over (1000 voxels: 34 px instead of 12) and merge objects that touch.
+    """
+    if ndim == 3:
+        radius = (3 * min_size / (4 * np.pi))**(1/3)
+    else:
+        radius = (min_size / np.pi)**0.5
+    return max(2, 2*int(radius))
+
+def _merge_instances_below(instances, min_size):
+    """Give the pixels of instances smaller than min_size to the neighbouring instance.
+
+    The size filter runs on the semantic mask, before the objects are separated, so a split
+    can still cut an object that is large enough into pieces that are not. Those pieces are
+    not dropped but merged into the instance next to them, which keeps the object itself and
+    its area intact. If all instances of one object are too small, the largest one is kept and
+    absorbs the others. The result is relabelled consecutively.
+    """
+    from scipy import ndimage as ndi
+
+    sizes = np.bincount(instances.ravel())
+    too_small = sizes < min_size
+    too_small[0] = False
+    if not too_small.any():
+        return instances
+
+    # Never let an object disappear completely: keep the largest instance of each object
+    objects, n_objects = ndi.label(instances > 0)
+    labelled = instances > 0
+    object_of = np.zeros(len(sizes), dtype=np.int32)
+    object_of[instances[labelled]] = objects[labelled] # All pixels of an instance share one object
+    for obj in range(1, n_objects + 1):
+        here = np.flatnonzero(object_of == obj)
+        if len(here) and too_small[here].all():
+            too_small[here[np.argmax(sizes[here])]] = False
+
+    # Flood the freed pixels from the kept instances, restricted to the objects themselves, so
+    # that a piece always joins an instance of its own object and never one lying close by
+    from skimage.segmentation import watershed
+    kept = np.where(too_small[instances], 0, instances)
+    merged = watershed(np.zeros_like(kept, dtype=np.uint8), kept, mask=labelled)
+
+    remaining = np.unique(merged)
+    remaining = remaining[remaining > 0]
+    lookup = np.zeros(int(merged.max()) + 1, dtype=np.int32)
+    lookup[remaining] = np.arange(1, len(remaining) + 1)
+    return lookup[merged]
+
+def distance_watershed(mask, min_distance):
+
+    from scipy import ndimage as ndi
+    from skimage.feature import peak_local_max
+    from skimage.segmentation import watershed
+
+    distance = ndi.distance_transform_edt(mask)
+
+    coords = peak_local_max(distance, min_distance=min_distance, labels=mask, exclude_border=False)
+    markers = np.zeros_like(mask, dtype=np.int32)
+    markers[tuple(coords.T)] = np.arange(1, len(coords)+1)
+
+    labels = watershed(-distance, markers, mask=mask)
+
+    return labels
+
+# scikit-image 0.26 replaced the size keywords of remove_small_objects (min_size) and
+# remove_small_holes (area_threshold) with max_size, and changed the limit from "smaller
+# than" to "smaller than or equal to". The old keywords still work there, but emit a
+# FutureWarning AND are mapped onto max_size, so they mean one pixel more than they used
+# to - they are therefore only safe to use on older versions. We check once which keyword
+# the installed version offers and translate the size accordingly.
+_SKIMAGE_MAX_SIZE = 'max_size' in inspect.signature(morph.remove_small_objects).parameters
+
+def _remove_objects_below(mask, min_size):
+    """Remove the objects of a boolean mask that are smaller than min_size pixels."""
+    if _SKIMAGE_MAX_SIZE:
+        return morph.remove_small_objects(mask, max_size=min_size-1)
+    return morph.remove_small_objects(mask, min_size=min_size)
+
+def _fill_holes_up_to(mask, max_hole_size):
+    """Fill the holes of a boolean mask that are at most max_hole_size pixels."""
+    if _SKIMAGE_MAX_SIZE:
+        return morph.remove_small_holes(mask, max_size=max_hole_size)
+    return morph.remove_small_holes(mask, area_threshold=max_hole_size+1)
 
 
 ### MODEL DOWNLOAD
