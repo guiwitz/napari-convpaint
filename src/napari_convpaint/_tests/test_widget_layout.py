@@ -28,7 +28,7 @@ def test_widget_opens_on_home_tab_and_tabs_scroll(make_napari_viewer, qtbot):
 
 
 def test_output_layers_do_not_steal_selection(make_napari_viewer):
-    """Creating segmentation/probabilities/features layers must leave the
+    """Creating segmentation/probabilities/instances/features layers must leave the
     active layer untouched — napari selects new layers by default, which
     would steer the user's brush into the output layer instead of the
     annotations layer they were painting on."""
@@ -46,6 +46,8 @@ def test_output_layers_do_not_steal_selection(make_napari_viewer):
     w._check_create_segmentation_layer()
     assert viewer.layers.selection.active is annot
     w._check_create_probas_layer(2)
+    assert viewer.layers.selection.active is annot
+    w._check_create_instances_layer()
     assert viewer.layers.selection.active is annot
     w._check_create_features_layer(4)
     assert viewer.layers.selection.active is annot

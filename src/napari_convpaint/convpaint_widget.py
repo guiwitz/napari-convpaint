@@ -3123,6 +3123,7 @@ class ConvpaintWidget(QWidget):
             warnings.warn('No image selected. No layers added.')
             return
 
+        prev_active = self.viewer.layers.selection.active
         layer_shape = self._get_annot_shape(img)
         num_spatial = len(layer_shape)
         transform_kwargs = self._get_layer_transform_kwargs(img, num_spatial_dims=num_spatial, num_leading_dims=0)
@@ -3148,6 +3149,7 @@ class ConvpaintWidget(QWidget):
                 )
             # Save information about the instances layer to be able to rename it later
             self._set_old_instances_tag()
+        self._restore_active_layer(prev_active)
 
     def _check_create_features_layer(self, num_features):
         """Check if feature image layer exists and create it if not."""
