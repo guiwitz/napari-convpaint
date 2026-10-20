@@ -306,6 +306,38 @@ def test_3d_stack_training_with_memory_mode(make_napari_viewer, capsys):
 
     assert model.classifier is not None, "Classifier should be trained"
 
+def test_memory_mode_accumulates_over_rounds():
+    """Memory mode keeps the features of earlier rounds in the table, so training on a second
+    image must add to them instead of replacing them, and training again on an image that is
+    already registered must not add anything."""
+    from napari_convpaint.convpaint_model import ConvpaintModel
+
+    np.random.seed(0)
+    def img_and_annot():
+        img = np.random.randint(0, 255, (50, 50)).astype(np.float32)
+        annot = np.zeros((50, 50), dtype=np.uint8)
+        annot[10:20, 10:20] = 1
+        annot[30:40, 30:40] = 2
+        return img, annot
+
+    model = ConvpaintModel(alias="gaussian")
+    model.set_params(channel_mode='single')
+    img1, annot1 = img_and_annot()
+    img2, annot2 = img_and_annot()
+
+    model.train(img1, annot1, memory_mode=True, img_ids='img1')
+    after_first = len(model.table)
+    assert after_first == np.sum(annot1 > 0), "one row per annotated pixel"
+
+    model.train(img2, annot2, memory_mode=True, img_ids='img2')
+    assert len(model.table) == after_first + np.sum(annot2 > 0), "the second image is added"
+    assert set(model.table['img_id']) == {'img1', 'img2'}
+
+    model.train(img1, annot1, memory_mode=True, img_ids='img1')
+    assert len(model.table) == after_first + np.sum(annot2 > 0), "known pixels are not added twice"
+    assert model.classifier is not None
+
+
 def test_3d_stack_training_with_dask_input(make_napari_viewer, capsys):
     """Test that training with a dask array input (as happens in the widget
     for large 3D stacks) works correctly with memory_mode and single img_id.
