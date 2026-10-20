@@ -979,9 +979,7 @@ class ConvpaintWidget(QWidget):
         # === MODEL DEFAULTS & WIDGET POPULATION ===
         self._import_convpaint_model_class()
         self.cp_model = self._cpm_class()
-        # Clamp the default feature cache size to a quarter of the currently available RAM (for small machines)
-        import psutil
-        self.cache_max_ram_spinbox.setValue(min(self.cache_max_mb, int(psutil.virtual_memory().available / 4e6)))
+        self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
         self._apply_feature_cache(recreate=True)
         # Get default parameters to set in widget
         self.default_cp_param = self._cpm_class.get_default_params()
@@ -2383,6 +2381,12 @@ class ConvpaintWidget(QWidget):
          "Global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
+        # Setting one of the two controls mirrors both of them back into the attributes, so the
+        # defaults are read out first; applied explicitly, as an unchanged control emits no signal
+        cache_enabled, cache_max_mb = self.cache_enabled, self.cache_max_mb
+        self.check_use_cache.setChecked(cache_enabled)
+        self.cache_max_ram_spinbox.setValue(cache_max_mb)
+        self._apply_feature_cache(recreate=True)
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
@@ -2447,6 +2451,7 @@ class ConvpaintWidget(QWidget):
 
     def _reset_attributes(self):
         """Reset all attributes of the widget."""
+        import psutil # For the available RAM the feature cache limit is clamped to
         # Set widget-specific attributes
         self.image_mean = None
         self.image_std = None
@@ -2475,7 +2480,7 @@ class ConvpaintWidget(QWidget):
         self.cont_training = "Image" # Update features for subsequent training ("Image" or "Off" or "Global")
         self.use_dask = False # Use Dask for parallel processing
         self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
-        self.cache_max_mb = 2048 # Max RAM (MB) the feature cache may use (2 GB default, clamped at startup to a quarter of the available RAM)
+        self.cache_max_mb = min(2048, int(psutil.virtual_memory().available / 4e6)) # Max RAM (MB) the feature cache may use (2 GB default, clamped to a quarter of the available RAM for small machines)
         self.fe_device = 'auto' # Device to use for the FE (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.clf_device = 'auto' # Device to use for the classifier (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)

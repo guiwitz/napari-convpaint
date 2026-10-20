@@ -833,6 +833,25 @@ def test_set_fe_syncs_channel_and_norm_options(make_napari_viewer):
     assert my_widget.radio_single_channel.isChecked()
     assert my_widget.radio_normalize_over_stack.isEnabled()
 
+def test_reset_restores_cache_settings(make_napari_viewer):
+    """Resetting Convpaint puts the feature cache settings back to their defaults, controls,
+    attributes and the model's cache alike (as it does for the other options)."""
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+
+    # Move both settings away from their defaults
+    my_widget.check_use_cache.setChecked(False)
+    my_widget.cache_max_ram_spinbox.setValue(512)
+    assert my_widget.cp_model._feature_cache.enabled is False
+
+    my_widget._on_reset_convpaint()
+
+    assert my_widget.check_use_cache.isChecked() and my_widget.cache_enabled
+    assert my_widget.cache_max_ram_spinbox.value() == my_widget.cache_max_mb > 512
+    fc = my_widget.cp_model._feature_cache
+    assert fc.enabled and fc.stats()['max_bytes'] == my_widget.cache_max_mb * 10**6
+
 def test_stack_after_rgb_uses_fresh_stack_defaults(make_napari_viewer):
     """Regression test: after an RGB image, selecting a 3D grayscale stack must
     fall back to the fresh-stack defaults ('single' channel mode, normalization
