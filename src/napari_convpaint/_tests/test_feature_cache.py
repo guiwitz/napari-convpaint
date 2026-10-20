@@ -51,6 +51,37 @@ def test_scan_larger_than_cache_keeps_first_planes():
     assert all(("plane", z) in c._entries for z in range(29))
 
 
+def test_new_scope_evicts_the_previous_image_first():
+    """Image A fills the cache and all its planes are read; without scopes they would be
+    protected for good and image B would keep evicting itself in the one remaining slot."""
+    c = FeatureCache(max_bytes=int(5.5 * 10**6))  # room for 5 planes of 1 MB
+    for z in range(5):                            # image A: stored and used
+        c.put(("A", z), _arr(1))
+        c.get(("A", z))
+    c.new_scope()                                 # the work moves on to image B
+    for z in range(5):
+        if c.get(("B", z)) is None:
+            c.put(("B", z), _arr(1))
+    assert all(("B", z) in c._entries for z in range(5))  # B replaced A, not itself
+    hits = c.stats()["hits"]
+    for z in range(5):                            # so a second pass over B reuses all of it
+        c.get(("B", z))
+    assert c.stats()["hits"] == hits + 5
+
+
+def test_new_scope_is_ignored_while_the_image_is_still_being_read():
+    """A stack is processed plane by plane, so every plane announces another image; as long as
+    the current one has never-used entries, this is ignored and the planes keep competing by
+    the usual rule (newest never-used first) instead of evicting each other oldest-first."""
+    c = FeatureCache(max_bytes=int(3.5 * 10**6))  # room for 3 planes of 1 MB
+    for z in range(3):
+        c.new_scope()
+        c.put(("p", z), _arr(1))
+    c.new_scope()
+    c.put(("p", 3), _arr(1))                      # evicts the newest ("p", 2), not the oldest
+    assert ("p", 0) in c._entries and ("p", 2) not in c._entries
+
+
 def test_lru_touch_on_get_protects_entry():
     c = FeatureCache(max_bytes=int(2.5 * 10**6))
     c.put(("a",), _arr(1))
@@ -242,6 +273,29 @@ def test_annotation_tiles_are_not_cached():
         cp.train(img, annot)
         assert fc.stats()['hits'] > hits_before  # untiled training hits the plane entry
         assert len(fc) == 1
+
+
+def test_scope_follows_the_image_not_the_call():
+    """Training and predicting the same image share one scope; another image starts a new
+    one (so that the previous image's entries are the first to go)."""
+    import warnings as _w
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    rng = np.random.default_rng(0)
+    img = rng.random((32, 32), dtype=np.float32)
+    annot = np.zeros((32, 32), dtype=np.uint8)
+    annot[:8, :8] = 1
+    annot[-8:, -8:] = 2
+    cp = ConvpaintModel('gaussian')
+    fc = cp.enable_feature_cache(max_bytes=10**7)
+    with _w.catch_warnings():
+        _w.simplefilter('ignore')
+        cp.train(img, annot)
+        scope = fc._scope
+        cp.segment(img)
+        cp.segment(img)  # as in the interactive loop: the entry of the first round is reused
+        assert fc._scope == scope
+        cp.segment(rng.random((32, 32), dtype=np.float32))
+        assert fc._scope == scope + 1
 
 
 def test_clear_feature_cache_keeps_the_cache():

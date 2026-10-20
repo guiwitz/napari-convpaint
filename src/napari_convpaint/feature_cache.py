@@ -46,10 +46,11 @@ def _nbytes(entry) -> int:
 class FeatureCache:
     """LRU feature cache bounded by a memory budget.
 
-    Eviction prefers entries that were never used over least-recently-used ones: when a
-    stack larger than the cache is processed plane by plane, the first planes stay resident
-    instead of being pushed out one by one, so a second pass over the stack reuses them
-    (with plain LRU, every plane would evict the next one it needs -> no reuse at all).
+    Entries of images worked on earlier are evicted first (see new_scope), then, within the
+    current image, the ones that were never used, then the least recently used: when a stack
+    larger than the cache is processed plane by plane, the first planes stay resident instead
+    of being pushed out one by one, so a second pass over the stack reuses them (with plain
+    LRU, every plane would evict the next one it needs -> no reuse at all).
 
     Parameters
     ----------
@@ -60,12 +61,13 @@ class FeatureCache:
     """
 
     def __init__(self, max_bytes: int | None = None, enabled: bool = True):
-        self._entries: "OrderedDict[tuple, tuple]" = OrderedDict()  # key -> (entry, nbytes, used)
+        self._entries: "OrderedDict[tuple, tuple]" = OrderedDict()  # key -> (entry, nbytes, used, scope)
         self._total_bytes = 0
         self.enabled = bool(enabled)
         if max_bytes is None:
             max_bytes = _DEFAULT_MAX_BYTES
         self._max_bytes = int(max_bytes)
+        self._scope = 0
         self.hits = 0
         self.misses = 0
 
@@ -83,7 +85,7 @@ class FeatureCache:
             return None
         item = self._entries.get(key)
         if item is not None:
-            self._entries[key] = (item[0], item[1], True) # Mark as used
+            self._entries[key] = (item[0], item[1], True, self._scope) # Used, and part of the current image
             self._entries.move_to_end(key)  # most-recently-used
             self.hits += 1
             return item[0]
@@ -107,17 +109,30 @@ class FeatureCache:
             self._evict_one()
         # The key is absent at this point (popped above if present), so
         # assignment appends at the MRU end.
-        self._entries[key] = (entry, nbytes, False) # (entry, size, used since stored)
+        self._entries[key] = (entry, nbytes, False, self._scope) # (entry, size, used since stored, image)
         self._total_bytes += nbytes
 
     def _evict_one(self):
-        """Evict the newest never-used entry if there is one, else the least recently used
-        (plain LRU would cycle through a stack larger than the cache: every plane evicts
-        the one needed next, so nothing is ever reused; see the class docstring)."""
-        key = next((k for k in reversed(self._entries) if not self._entries[k][2]), next(iter(self._entries)))
+        """Evict the oldest entry of an image worked on earlier; failing that, the newest
+        never-used entry of the current one, else its least recently used (plain LRU would
+        cycle through a stack larger than the cache: every plane evicts the one needed next,
+        so nothing is ever reused; see the class docstring)."""
+        key = next((k for k in self._entries if self._entries[k][3] < self._scope), None)
+        if key is None:
+            key = next((k for k in reversed(self._entries) if not self._entries[k][2]), next(iter(self._entries)))
         self._total_bytes -= self._entries.pop(key)[1]
 
     # -- invalidation / limits --------------------------------------------
+
+    def new_scope(self):
+        """Note that the work moved on to another image, whose entries are then kept over the
+        earlier ones (which would otherwise stay resident for good once they have been used).
+        Ignored while the current image still has entries that were never used: a stack is
+        processed plane by plane, i.e. announced as one image after another, and has to stay
+        one scope (its planes would otherwise evict each other instead of the earlier image)."""
+        if any(not e[2] and e[3] == self._scope for e in self._entries.values()):
+            return
+        self._scope += 1
 
     def clear(self):
         """Drop all entries. Entries are content-addressed and never go stale;
