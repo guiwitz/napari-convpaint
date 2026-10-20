@@ -1160,7 +1160,7 @@ class ConvpaintModel:
             num_new = sum(np.sum(ann > 0) for ann in annotations)
             if num_new == 0:
                 warnings.warn("No new annotations. Train with existing features.")
-                return [], [], [], [], params_for_extract.image_downsample
+                return self._get_all_features_annots()
             # Filter out the data where annots are totally empty
             else:
                 data = [d for d, ann in zip(data, annotations) if np.sum(ann > 0) > 0]
@@ -1255,9 +1255,10 @@ class ConvpaintModel:
         # Annotation tiles are cut around the (new) annotations, so they never repeat and
         # cannot serve a prediction -> do not cache them (only whole planes / prediction tiles)
         skip_reuse = use_annots and params_for_extract.tile_annotations
-        # Training (without memory mode) only needs the annotated pixels, so each plane/tile is
-        # reduced to them right after it is extracted and the feature image is dropped again
-        reduce_to_annotated = use_annots and not memory_mode and not restore_input_form
+        # Training only needs the annotated pixels, so each plane/tile is reduced to them right
+        # after it is extracted and the feature image is dropped again (in memory mode they go
+        # into the table instead, which keeps them across training rounds)
+        reduce_to_annotated = use_annots and not restore_input_form
 
         def extract(d):
             return self._extract_pyramid_cached(
@@ -1270,6 +1271,11 @@ class ConvpaintModel:
         # Return the annotated pixels and their classes, keeping only one feature image alive at
         # a time (a full-size one costs about 800 MB per 1024x1024 plane with the default VGG)
         if reduce_to_annotated:
+            if memory_mode:
+                for d, a, c, img_id in zip(data, annotations, coords, img_ids):
+                    self._register_features_annots(extract(d), a, c, img_id,
+                                                   params_for_extract.image_downsample)
+                return self._get_all_features_annots()
             f_t_tuples = [utils.get_features_targets(extract(d), a) # f and t are linearized
                           for d, a in zip(data, annotations)]
             features = np.concatenate([ft[0] for ft in f_t_tuples], axis=0)
@@ -1450,20 +1456,12 @@ class ConvpaintModel:
             warnings.warn('No annotations provided for training.')
             return self.classifier
 
-        if not memory_mode:
-            # Use _get_features to get the features of the annotated pixels and their classes
-            # (it reduces each plane/tile right after extracting it, see there)
-            features, targets = self._get_features(
-                data, annotations, restore_input_form=False, memory_mode=memory_mode,
-                in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
-
-        else: # memory mode
-            # Use _get_features to extract features and the suiting annotations parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts, coords, img_ids, scale = self._get_features(
-                data, annotations, restore_input_form=False, memory_mode=memory_mode,
-                img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
-            # Get all annotations and features from the table
-            features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
+        # Use _get_features to get the features of the annotated pixels and their classes
+        # (it reduces each plane/tile right after extracting it, see there). In memory mode
+        # these are all the features of the table, including the ones of earlier rounds.
+        features, targets = self._get_features(
+            data, annotations, restore_input_form=False, memory_mode=memory_mode,
+            img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
 
         # Sort (features, targets) into a canonical order so the classifier's
         # seeded bootstrap sampling is invariant to the ordering produced by
@@ -1566,9 +1564,9 @@ class ConvpaintModel:
 
         return all_new_annots
     
-    def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids, scale=1):
+    def _register_features_annots(self, features, annotations, coords, img_ids, scale=1):
         """
-        Registers new features in the table and returns all features and annotations.
+        Registers new features in the table (one row per annotated pixel).
 
         IMPORTANT: This assumes that double entries have been removed from the annotations and old entries from the table.
 
@@ -1585,14 +1583,6 @@ class ConvpaintModel:
         scale : int
             Scale factor, used for creating the unique table entries
         
-        Returns
-        ----------
-        features : list[np.ndarray]
-            List of all features with the same shape as the input features,
-            where existing features were kept and new features were added.
-        annotations : list[np.ndarray]
-            List of all annotations with the same shape as the input annotations,
-            where existing annotations were kept and new annotations were added.
         """
         # Allow for single inputs and in that case make both inputs lists
         if isinstance(features, np.ndarray):
@@ -1633,7 +1623,17 @@ class ConvpaintModel:
             new_entries_df.set_index("row_key", inplace=True)
             self.table = pd.concat([self.table, new_entries_df])
 
-        # Now extract all features and annotations from the table
+    def _get_all_features_annots(self):
+        """
+        Returns all features and their classes registered in the table.
+
+        Returns
+        ----------
+        features : np.ndarray
+            All registered features, shape [num_entries, num_features]
+        annotations : np.ndarray
+            The class of each of them, shape [num_entries]
+        """
         features_list = list(self.table['features_array'].values)
         annotations_list = list(self.table['label'].values)
 
