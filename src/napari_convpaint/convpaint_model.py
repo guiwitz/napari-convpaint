@@ -1082,13 +1082,15 @@ class ConvpaintModel:
         native = self._feature_cache.get(key) if self._feature_cache is not None else None
         if native is None and self._feature_store is not None:
             native = self._feature_store.get(key)
-            # Promote the store hit: np.array() copies the memory-mapped arrays into RAM,
-            # so the cached entry does not keep reading from (or depend on) the files
+            # Promote the store hit: np.array() copies the memory-mapped arrays into RAM, so the
+            # cached entry does not keep reading from (or depend on) the files. The copy is also
+            # what is returned - reconstructing from the memory maps would read it all a second time
             if native is not None and self._feature_cache is not None:
                 in_ram = {"levels": [([np.array(a) for a in arrays], scaled_shape, cropped_shape)
                                      for arrays, scaled_shape, cropped_shape in native["levels"]],
                           "was_torch": native["was_torch"]}
                 self._feature_cache.put(key, in_ram)
+                native = in_ram
         return native
 
     def _keep_native(self, key, native):

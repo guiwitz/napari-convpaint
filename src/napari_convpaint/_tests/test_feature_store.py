@@ -146,9 +146,10 @@ def test_store_survives_a_deleted_folder(tmp_path):
     store = FeatureStore(folder)
     store.put(("a", ("s",)), _entry(rng))
     shutil.rmtree(folder)
-    assert store.stats()["entries"] == 0 and store.nbytes == 0   # reporting does not fail either
+    assert store.stats()["entries"] == 0                          # reporting does not fail either
     store.put(("b", ("s",)), _entry(rng))
-    assert ("b", ("s",)) in store
+    assert ("b", ("s",)) in store and len(store) == 1
+    assert store.nbytes == store._scan_bytes()                    # size corrected with the recovery
     assert os.path.isfile(folder / _MARKER)
     FeatureStore(folder)                                          # opens again, not seen as foreign
 
@@ -367,6 +368,20 @@ def test_widget_store_features_of_stack(make_napari_viewer, tmp_path):
     assert len(fs) == 3 and fs.stats()['misses'] == 3, fs.stats()   # training reused the stored plane
     w._on_predict_all()
     assert len(fs) == 3 and fs.stats()['misses'] == 3, fs.stats()   # nothing extracted anymore
+
+
+def test_store_hit_is_served_from_the_cached_copy(tmp_path):
+    """A store hit is copied into the cache, and that copy is also what is returned: reconstructing
+    from the memory-mapped files instead would read all of it a second time."""
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    cp = ConvpaintModel('gaussian')
+    store = cp.enable_feature_store(tmp_path / "store")
+    cp.enable_feature_cache()
+    key = ("data", ("sig",))
+    store.put(key, _entry(np.random.default_rng(9)))
+    native = cp._reuse_native(key)
+    assert all(not isinstance(a, np.memmap) for arrays, _, _ in native["levels"] for a in arrays)
+    assert native is cp._feature_cache.get(key) # The very copy that was cached, not the memory maps
 
 
 def test_clear_feature_store_keeps_the_store(tmp_path):
