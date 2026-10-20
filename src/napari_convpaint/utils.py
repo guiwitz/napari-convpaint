@@ -1010,9 +1010,11 @@ def get_coordinates_image(img):
     #         for w in range(W):
     #             coords[z, h, w] = (z, h, w)
 
-    # Generate the coordinate grid
+    # Generate the coordinate grid (int32 is plenty for pixel indices and halves the memory,
+    # these grids are as large as the image and are built for every plane)
     z_coords, h_coords, w_coords = np.meshgrid(
-        np.arange(Z), np.arange(H), np.arange(W), indexing='ij'
+        np.arange(Z, dtype=np.int32), np.arange(H, dtype=np.int32), np.arange(W, dtype=np.int32),
+        indexing='ij'
     )
     # Stack them into a coordinate array of shape (3, Z, H, W)
     coords = np.stack((z_coords, h_coords, w_coords), axis=0)
