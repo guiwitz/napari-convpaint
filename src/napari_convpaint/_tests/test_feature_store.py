@@ -1,5 +1,6 @@
 """Tests for the persistent feature store (storage logic; model integration is tested below)."""
 import os
+import shutil
 
 import numpy as np
 import pytest
@@ -114,6 +115,78 @@ def test_store_write_failure_degrades_to_not_storing(tmp_path, monkeypatch):
     assert len(store) == 1 and ("b", ("s",)) not in store
     assert not any(d.name.endswith(".tmp") for d in (tmp_path / "store").iterdir())   # no leftovers
     assert store.get(("a", ("s",))) is not None
+
+
+def test_damaged_entry_is_dropped_and_stored_again(tmp_path):
+    """A damaged entry (write cut off, files removed) must not fail every later read of its plane:
+    it is deleted on the next get, which simply misses, so the plane is extracted and stored again."""
+    rng = np.random.default_rng(5)
+    store = FeatureStore(tmp_path / "store")
+    key = ("a", ("s",))
+    entry = _entry(rng)
+    store.put(key, entry)
+    npy = os.path.join(store._entry_dir(key), "l0_0.npy")
+    with open(npy, "r+b") as f:
+        f.truncate(os.path.getsize(npy) // 2)   # as an interrupted write leaves it
+    assert store.get(key) is None and key not in store
+    assert len(store) == 0 and store.nbytes == 0
+    store.put(key, entry)                        # extracted again -> stored again
+    assert _equal(store.get(key), entry)
+    # A truncated meta file is dropped just the same
+    with open(os.path.join(store._entry_dir(key), "meta.json"), "w") as f:
+        f.write('{"was_torch": fal')
+    assert store.get(key) is None and len(store) == 0
+
+
+def test_store_survives_a_deleted_folder(tmp_path):
+    """Deleting the folder while the store is on must not raise out of training: it is recreated,
+    with its marker, so that the next session still recognizes it as a feature store."""
+    rng = np.random.default_rng(6)
+    folder = tmp_path / "store"
+    store = FeatureStore(folder)
+    store.put(("a", ("s",)), _entry(rng))
+    shutil.rmtree(folder)
+    assert store.stats()["entries"] == 0 and store.nbytes == 0   # reporting does not fail either
+    store.put(("b", ("s",)), _entry(rng))
+    assert ("b", ("s",)) in store
+    assert os.path.isfile(folder / _MARKER)
+    FeatureStore(folder)                                          # opens again, not seen as foreign
+
+
+def test_two_writers_do_not_delete_each_others_files(tmp_path, monkeypatch):
+    """Every write uses a temporary folder of its own, so a second instance storing the same plane
+    cannot remove the files of the first one; whoever renames first wins, the other drops its copy."""
+    rng = np.random.default_rng(7)
+    store = FeatureStore(tmp_path / "store")
+    key = ("a", ("s",))
+    # A write of another instance in progress (its own .tmp folder) must be left alone
+    other_tmp = store._entry_dir(key) + ".999-abcdef12.tmp"
+    os.makedirs(other_tmp)
+    open(os.path.join(other_tmp, "l0_0.npy"), "w").close()
+    store.put(key, _entry(rng))
+    assert os.path.isfile(os.path.join(other_tmp, "l0_0.npy")) and key in store
+    # And if the other instance renames first, this write is dropped without a warning
+    monkeypatch.setattr(os, "rename", lambda *a: (_ for _ in ()).throw(FileExistsError(17, "Exists")))
+    store.put(("b", ("s",)), _entry(rng))
+    assert ("b", ("s",)) not in store and not store._warned_no_write
+    assert not any(n.endswith(".tmp") for n in os.listdir(store.folder) if n != os.path.basename(other_tmp))
+
+
+def test_store_of_another_format_or_version(tmp_path):
+    """The marker is checked when opening: another entry format is refused, features of another
+    convpaint version are pointed out but kept (extraction usually did not change)."""
+    rng = np.random.default_rng(8)
+    folder = tmp_path / "store"
+    store = FeatureStore(folder)
+    store.put(("a", ("s",)), _entry(rng))
+    marker = folder / _MARKER
+    marker.write_text('{"format": 2, "convpaint": "9.9.9"}')
+    with pytest.raises(ValueError, match="another format"):
+        FeatureStore(folder)
+    marker.write_text('{"format": 1, "convpaint": "0.0.1"}')
+    with pytest.warns(UserWarning, match="written by convpaint"):
+        reopened = FeatureStore(folder)
+    assert ("a", ("s",)) in reopened   # kept and reusable
 
 
 # --- integration with the model --------------------------------------------
