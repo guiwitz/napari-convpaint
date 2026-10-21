@@ -340,6 +340,29 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     assert w.cp_model._feature_store is not None and w.cp_model._feature_store.folder == str(tmp_path / 'store')
 
 
+def test_widget_bad_folder_keeps_the_running_store(make_napari_viewer, tmp_path):
+    """Choosing an unusable folder while the store runs must not switch it off: the model keeps the
+    store it has (the new folder is only taken once it works), so the widget keeps showing it."""
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    w.store_folder = str(tmp_path / 'good')
+    w.check_use_store.setChecked(True)
+    running = w.cp_model._feature_store
+    assert running is not None
+
+    (tmp_path / 'dogs').mkdir()
+    (tmp_path / 'dogs' / 'dog1.png').write_bytes(b'x')
+    w.store_folder = str(tmp_path / 'dogs')
+    w._apply_feature_store(recreate=True) # As _on_choose_store_folder does
+
+    assert w.cp_model._feature_store is running # Same store, still on the folder that works
+    assert w.check_use_store.isChecked() and w.store_enabled
+    assert w.store_folder == str(tmp_path / 'good')
+    assert w.btn_store_delete.isEnabled() and w.btn_store_features.isEnabled()
+
+
 def test_widget_reset_restores_store_settings(make_napari_viewer, tmp_path):
     """Resetting Convpaint puts the store settings back to their defaults: the checkbox, the folder
     and the model's store, which would otherwise keep running on the old folder."""

@@ -1003,12 +1003,16 @@ class ConvpaintWidget(QWidget):
                 self.cp_model.enable_feature_store(self.store_folder)
                 self._store_folder_ok = self.store_folder
             except ValueError as e: # Folder not usable (not empty and not a feature store, no write access, ...)
-                show_info(f'Feature store not enabled: {e}')
+                # enable_feature_store only replaces the store once the new folder works, so a store
+                # that was already running is still there: follow the model and keep it connected
+                keep = self.cp_model._feature_store is not None
+                show_info(f'Feature store folder not changed: {e}' if keep else
+                          f'Feature store not enabled: {e}')
                 self.store_folder = self._store_folder_ok # Back to the last usable folder
                 self.check_use_store.blockSignals(True)
-                self.check_use_store.setChecked(False)
+                self.check_use_store.setChecked(keep)
                 self.check_use_store.blockSignals(False)
-                self.store_enabled = False
+                self.store_enabled = keep
         self.btn_store_delete.setEnabled(self.cp_model._feature_store is not None)
         self.btn_store_features.setEnabled(self.cp_model._feature_store is not None)
         self._refresh_reuse_labels()
