@@ -85,7 +85,8 @@ jobs:
     runs-on: ubuntu-latest
     if: contains(github.ref, 'tags')
     permissions:
-      id-token: write
+      id-token: write # Publish to PyPI without a token
+      contents: write # Create the GitHub release (a permissions block drops every scope it omits)
     steps:
       - name: Download built artifact to dist/
         uses: actions/download-artifact@v7
