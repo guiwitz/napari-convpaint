@@ -27,6 +27,37 @@ def test_widget_opens_on_home_tab_and_tabs_scroll(make_napari_viewer, qtbot):
         assert widget.minimumWidth() >= page_min + QTabWidget.widget(widget.tabs, i).verticalScrollBar().sizeHint().width()
 
 
+def test_class_count_is_capped(make_napari_viewer, tmp_path, monkeypatch):
+    """The annotation and segmentation layers are uint8, so the number of classes is capped:
+    adding beyond the limit is refused, and a CSV holding too many classes is rejected before the
+    current classes are replaced (it would otherwise wipe them and then fail)."""
+    import pytest
+    import napari_convpaint.convpaint_widget as cw
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    names = lambda: [n.text() for n in w.class_names]
+    assert len(names()) == 2
+
+    # Lowered here, so that the test does not have to create 255 class rows
+    monkeypatch.setattr(cw, 'MAX_CLASSES', 3)
+    w._on_add_class(text='third')
+    assert len(names()) == 3
+    w._on_add_class(text='fourth')
+    assert len(names()) == 3 # Refused at the limit
+
+    # A file with more classes than that leaves the current ones untouched
+    before = names()
+    csv_path = tmp_path / 'many.csv'
+    rows = ['index,name'] + [f'{i},c{i}' for i in range(1, 6)]
+    csv_path.write_text(chr(10).join(rows))
+    with pytest.raises(ValueError, match='at most 3'):
+        w.import_class_names_csv(str(csv_path))
+    assert names() == before
+
+
 def test_output_layers_do_not_steal_selection(make_napari_viewer):
     """Creating segmentation/probabilities/instances/features layers must leave the
     active layer untouched — napari selects new layers by default, which

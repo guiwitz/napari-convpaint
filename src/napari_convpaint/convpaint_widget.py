@@ -17,6 +17,9 @@ import tifffile
 import imageio.v2 as imageio
 from collections import defaultdict
 
+
+MAX_CLASSES = 255 # Annotations and segmentation are uint8, so higher class values would wrap around
+
 # Imported inline to avoid heavy memory usage when the functions are not used:
 # import torch
 # from .utils import normalize_image, compute_image_stats, normalize_image_percentile, normalize_image_imagenet, get_fe_device
@@ -1508,6 +1511,11 @@ class ConvpaintWidget(QWidget):
     def _on_add_class(self, text=None):
         """Add a new class name and icon to the layout and update all annotations and segmentation layers."""
 
+        if len(self.class_names) >= MAX_CLASSES:
+            show_info(f'At most {MAX_CLASSES} classes are supported (the annotation and segmentation '
+                      'layers are uint8).')
+            return
+
         # Create a new class name
         new_name = QtWidgets.QLineEdit()
         new_name.setStyleSheet("font-size: 12px;")
@@ -1801,6 +1809,11 @@ class ConvpaintWidget(QWidget):
                 if val != "":
                     parsed.append(val)
                     num_appended += 1
+
+        # Too many classes: stop before the current ones are reset below
+        if len(parsed) > MAX_CLASSES:
+            raise ValueError(f"The file holds {len(parsed)} classes, at most {MAX_CLASSES} are "
+                             "supported (the annotation and segmentation layers are uint8).")
 
         # Reset to defaults (this will create 2 labels)
         self._on_reset_class_names()
