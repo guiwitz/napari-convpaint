@@ -18,13 +18,20 @@ def test_widget_opens_on_home_tab_and_tabs_scroll(make_napari_viewer, qtbot):
     for i in range(widget.tabs.count()):
         assert isinstance(QTabWidget.widget(widget.tabs, i), QScrollArea), widget.tabs.tab_names[i]
         assert widget.tabs.widget(i).layout() is not None
-    # The widget has a width floor (set once shown), so the dock does not open too narrow and no
-    # tab's content is wider than the scroll area's viewport
+    # The widget has a width floor (set once shown), so the dock does not open too narrow: at that
+    # width every tab's content fits the viewport that is left for it. Checked on the viewport
+    # itself rather than by adding the scrollbar's sizeHint, which overlay scrollbars (macOS) do
+    # not take up - _set_width_floor measures the space actually taken, and adding it regardless
+    # would only make the standalone widget wider than it needs to be
     qtbot.waitUntil(lambda: widget.minimumWidth() >= 300)
-    from qtpy.QtWidgets import QTabWidget
+    widget.resize(widget.minimumWidth(), 250) # Short enough that every tab scrolls vertically
     for i in range(widget.tabs.count()):
+        widget.tabs.setCurrentIndex(i)
+        qtbot.wait(20)
+        scroll_area = QTabWidget.widget(widget.tabs, i)
         page_min = widget.tabs.widget(i).minimumSizeHint().width()
-        assert widget.minimumWidth() >= page_min + QTabWidget.widget(widget.tabs, i).verticalScrollBar().sizeHint().width()
+        assert scroll_area.viewport().width() >= page_min, widget.tabs.tab_names[i]
+        assert not scroll_area.horizontalScrollBar().isVisible(), widget.tabs.tab_names[i]
 
 
 def test_class_count_is_capped(make_napari_viewer, tmp_path, monkeypatch):
