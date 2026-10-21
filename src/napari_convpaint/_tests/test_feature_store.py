@@ -340,6 +340,26 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     assert w.cp_model._feature_store is not None and w.cp_model._feature_store.folder == str(tmp_path / 'store')
 
 
+def test_widget_reset_restores_store_settings(make_napari_viewer, tmp_path):
+    """Resetting Convpaint puts the store settings back to their defaults: the checkbox, the folder
+    and the model's store, which would otherwise keep running on the old folder."""
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    default_folder = w.store_folder
+
+    w.store_folder = str(tmp_path / 'store')
+    w.check_use_store.setChecked(True)
+    assert w.cp_model._feature_store is not None
+
+    w._on_reset_convpaint()
+
+    assert not w.check_use_store.isChecked() and not w.store_enabled
+    assert w.store_folder == default_folder and w.cp_model._feature_store is None
+    assert '(store off)' in w.store_size_label.text()
+
+
 def test_widget_store_features_of_stack(make_napari_viewer, tmp_path):
     """The 'Store features' action stores every plane of the selected stack; a following
     stack prediction only reuses."""

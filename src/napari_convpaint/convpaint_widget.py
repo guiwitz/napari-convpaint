@@ -2433,6 +2433,10 @@ class ConvpaintWidget(QWidget):
          "Global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
+        # The checkbox holds whether the store is on, and the model keeps the old folder until the
+        # settings are applied again (setChecked stays silent if the checkbox is off already)
+        self.check_use_store.setChecked(self.store_enabled)
+        self._apply_feature_store(recreate=True)
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
