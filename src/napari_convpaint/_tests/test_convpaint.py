@@ -866,14 +866,14 @@ def test_reset_restores_cache_settings(make_napari_viewer, monkeypatch):
     # Move both settings away from their defaults
     my_widget.check_use_cache.setChecked(False)
     my_widget.cache_max_ram_spinbox.setValue(512)
-    assert my_widget.cp_model._feature_cache.enabled is False
+    assert my_widget.cp_model._feature_cache is None # Off = no cache on the model
 
     my_widget._on_reset_convpaint()
 
     assert my_widget.check_use_cache.isChecked() and my_widget.cache_enabled
     assert my_widget.cache_max_ram_spinbox.value() == my_widget.cache_max_mb == 2048
     fc = my_widget.cp_model._feature_cache
-    assert fc.enabled and fc.stats()['max_bytes'] == my_widget.cache_max_mb * 10**6
+    assert fc is not None and fc.stats()['max_bytes'] == my_widget.cache_max_mb * 10**6
 
 def test_stack_after_rgb_uses_fresh_stack_defaults(make_napari_viewer):
     """Regression test: after an RGB image, selecting a 3D grayscale stack must
