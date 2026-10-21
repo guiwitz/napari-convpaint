@@ -340,6 +340,44 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     assert w.cp_model._feature_store is not None and w.cp_model._feature_store.folder == str(tmp_path / 'store')
 
 
+def test_widget_choosing_a_folder_uses_it(make_napari_viewer, tmp_path, monkeypatch):
+    """Choosing a folder enables the store on it, as in the API where the folder comes with
+    enabling - and an unusable folder is reported right away instead of only when the box is
+    ticked, leaving the settings as they were."""
+    import napari_convpaint.convpaint_widget as cw
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    messages = []
+    monkeypatch.setattr(cw, 'show_info', messages.append)
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    assert not w.check_use_store.isChecked()
+
+    # Store off: choosing a usable folder switches it on
+    good = tmp_path / 'good'
+    monkeypatch.setattr(cw.QFileDialog, 'getExistingDirectory', staticmethod(lambda *a, **k: str(good)))
+    w._on_choose_store_folder()
+    assert w.check_use_store.isChecked() and w.store_enabled
+    assert w.cp_model._feature_store is not None and w.store_folder == str(good)
+
+    # Store off again: an unusable folder is refused when it is chosen, nothing changes
+    w.check_use_store.setChecked(False)
+    bad = tmp_path / 'dogs'
+    bad.mkdir()
+    (bad / 'dog1.png').write_bytes(b'x')
+    messages.clear()
+    monkeypatch.setattr(cw.QFileDialog, 'getExistingDirectory', staticmethod(lambda *a, **k: str(bad)))
+    w._on_choose_store_folder()
+    assert any('not enabled' in m for m in messages)
+    assert not w.check_use_store.isChecked() and not w.store_enabled
+    assert w.cp_model._feature_store is None and w.store_folder == str(good)
+
+    # Cancelling the dialog leaves everything alone
+    monkeypatch.setattr(cw.QFileDialog, 'getExistingDirectory', staticmethod(lambda *a, **k: ''))
+    w._on_choose_store_folder()
+    assert w.store_folder == str(good) and not w.check_use_store.isChecked()
+
+
 def test_widget_bad_folder_keeps_the_running_store(make_napari_viewer, tmp_path):
     """Choosing an unusable folder while the store runs must not switch it off: the model keeps the
     store it has (the new folder is only taken once it works), so the widget keeps showing it."""

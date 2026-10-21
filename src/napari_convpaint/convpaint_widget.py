@@ -3963,10 +3963,15 @@ class ConvpaintWidget(QWidget):
 ### ADVANCED TAB
 
     def _on_choose_store_folder(self):
-        """Let the user choose the folder of the feature store."""
+        """Let the user choose the folder of the feature store, and use it right away: as in the API,
+        where a folder comes with enabling the store, the folder is checked when it is chosen (an
+        unusable one is reported and nothing changes) instead of only when the box is ticked."""
         folder = QFileDialog.getExistingDirectory(self, 'Choose a folder for the feature store', self.store_folder)
         if folder:
             self.store_folder = folder
+            self.check_use_store.blockSignals(True) # Applied once below, not per signal
+            self.check_use_store.setChecked(True)
+            self.check_use_store.blockSignals(False)
             self._apply_feature_store(recreate=True)
 
     def _on_delete_stored_features(self):
