@@ -851,9 +851,14 @@ def test_cache_ram_limit_is_applied_once_typed(make_napari_viewer, qtbot):
     qtbot.keyClick(my_widget.cache_max_ram_spinbox, Qt.Key_Return)
     assert fc.stats()['max_bytes'] == 4096 * 10**6 # Applied once the number is complete
 
-def test_reset_restores_cache_settings(make_napari_viewer):
+def test_reset_restores_cache_settings(make_napari_viewer, monkeypatch):
     """Resetting Convpaint puts the feature cache settings back to their defaults, controls,
     attributes and the model's cache alike (as it does for the other options)."""
+    import psutil
+    # Report plenty of RAM, so that the default limit is not clamped to a quarter of it (it is on
+    # small machines and CI runners, where the default would then depend on the free memory)
+    plenty = psutil.virtual_memory()._replace(available=32 * 10**9)
+    monkeypatch.setattr(psutil, 'virtual_memory', lambda: plenty)
     viewer = make_napari_viewer()
     my_widget = ConvpaintWidget(viewer)
     my_widget.ensure_init()
@@ -866,7 +871,7 @@ def test_reset_restores_cache_settings(make_napari_viewer):
     my_widget._on_reset_convpaint()
 
     assert my_widget.check_use_cache.isChecked() and my_widget.cache_enabled
-    assert my_widget.cache_max_ram_spinbox.value() == my_widget.cache_max_mb > 512
+    assert my_widget.cache_max_ram_spinbox.value() == my_widget.cache_max_mb == 2048
     fc = my_widget.cp_model._feature_cache
     assert fc.enabled and fc.stats()['max_bytes'] == my_widget.cache_max_mb * 10**6
 
