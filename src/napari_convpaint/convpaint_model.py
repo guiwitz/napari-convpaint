@@ -1039,6 +1039,7 @@ class ConvpaintModel:
         """
         if self._feature_store is None:
             raise ValueError('No feature store enabled (see enable_feature_store).')
+        self._update_image_scope(image) # Once for the image, not per plane below
         # Prepare the data as in _predict (dimensions, channels, normalization of the whole image)
         # not inside _get_features, since planes are split below but norm needs the whole stack
         data, _ = self._prep_dims(image)
