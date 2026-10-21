@@ -332,8 +332,9 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     assert w.cp_model._feature_store is None and not w.btn_store_delete.isEnabled()
     assert (tmp_path / 'store' / 'convpaint_feature_store.json').is_file()
 
-    # A folder that cannot be used: reported, store off (checkbox, buttons, label agree), the previous
-    # folder is kept, and the store can be enabled again right away (nothing sticky)
+    # A folder that cannot be used: reported, the previous folder is kept, and a store that is
+    # running stays connected; with none running the store stays off (checkbox, buttons and label
+    # agree either way) and can be enabled again right away (nothing sticky)
     (tmp_path / 'dogs').mkdir(); (tmp_path / 'dogs' / 'dog1.png').write_bytes(b'x')
     def choose(folder):   # what 'Choose folder' does after the dialog
         w.store_folder = str(folder)
@@ -351,9 +352,10 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     assert store_off_with(tmp_path / 'store')
     w.check_use_store.setChecked(True)
     assert store_on_with(tmp_path / 'store')
-    choose(tmp_path / 'dogs')                       # while on
-    assert store_off_with(tmp_path / 'store')
-    choose(tmp_path / 'dogs')                       # again, while off
+    choose(tmp_path / 'dogs')                       # while on -> the running store is kept
+    assert store_on_with(tmp_path / 'store')
+    w.check_use_store.setChecked(False)
+    choose(tmp_path / 'dogs')                       # again, while off -> nothing to fall back to
     assert store_off_with(tmp_path / 'store')
     w.check_use_store.setChecked(True)
     assert store_on_with(tmp_path / 'store')

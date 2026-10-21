@@ -1076,9 +1076,11 @@ class ConvpaintWidget(QWidget):
         chosen folder; unchecking only disconnects it (the stored files are kept). The model's
         store is the single source of truth for the widget state (checkbox, buttons, labels).
         A folder that cannot be used is reported and not kept."""
-        if not self.check_use_store.isChecked() or recreate:
+        if not self.check_use_store.isChecked():
             self.cp_model.disable_feature_store()
-        if self.check_use_store.isChecked() and self.cp_model._feature_store is None:
+        elif recreate or self.cp_model._feature_store is None:
+            # Not disabled first: enable_feature_store replaces the store only once the new folder
+            # works, so a store that is running survives an unusable one (see the except branch)
             try:
                 self.cp_model.enable_feature_store(self.store_folder)
                 self._store_folder_ok = self.store_folder
