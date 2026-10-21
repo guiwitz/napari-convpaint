@@ -637,6 +637,9 @@ class ConvpaintWidget(QWidget):
             self.cache_max_ram_spinbox = QSpinBox()
             self.cache_max_ram_spinbox.setRange(64, 1024 * 1024)  # 64 MB .. 1 TB
             self.cache_max_ram_spinbox.setSingleStep(256)
+            # Apply a typed limit only once it is complete: typing 4096 passes through 409 MB,
+            # which would evict most of the cache on the way (the arrows still apply immediately)
+            self.cache_max_ram_spinbox.setKeyboardTracking(False)
             self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
             self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_spinbox, 2, 2, 1, 1)
 
@@ -1080,7 +1083,11 @@ class ConvpaintWidget(QWidget):
                 self.cp_model.enable_feature_store(self.store_folder)
                 self._store_folder_ok = self.store_folder
             except ValueError as e: # Folder not usable (not empty and not a feature store, no write access, ...)
-                show_info(f'Feature store not enabled: {e}')
+                # enable_feature_store only replaces the store once the new folder works, so a store
+                # that was already running is still there: follow the model and keep it connected
+                keep = self.cp_model._feature_store is not None
+                show_info(f'Feature store folder not changed: {e}' if keep else
+                          f'Feature store not enabled: {e}')
                 self.store_folder = self._store_folder_ok # Back to the last usable folder
         self.store_enabled = self.cp_model._feature_store is not None
         self.check_use_store.blockSignals(True)
@@ -1097,9 +1104,7 @@ class ConvpaintWidget(QWidget):
         # === MODEL DEFAULTS & WIDGET POPULATION ===
         self._import_convpaint_model_class()
         self.cp_model = self._cpm_class()
-        # Clamp the default feature cache size to a quarter of the currently available RAM (for small machines)
-        import psutil
-        self.cache_max_ram_spinbox.setValue(min(self.cache_max_mb, int(psutil.virtual_memory().available / 4e6)))
+        self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
         self._apply_feature_cache(recreate=True)
         self._apply_feature_store(recreate=True)
         # Get default parameters to set in widget
@@ -2571,6 +2576,16 @@ class ConvpaintWidget(QWidget):
          "Global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
+        # Setting one of the two controls mirrors both of them back into the attributes, so the
+        # defaults are read out first; applied explicitly, as an unchanged control emits no signal
+        cache_enabled, cache_max_mb = self.cache_enabled, self.cache_max_mb
+        self.check_use_cache.setChecked(cache_enabled)
+        self.cache_max_ram_spinbox.setValue(cache_max_mb)
+        self._apply_feature_cache(recreate=True)
+        # The checkbox holds whether the store is on, and the model keeps the old folder until the
+        # settings are applied again (setChecked stays silent if the checkbox is off already)
+        self.check_use_store.setChecked(self.store_enabled)
+        self._apply_feature_store(recreate=True)
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
@@ -2630,6 +2645,7 @@ class ConvpaintWidget(QWidget):
 
     def _reset_attributes(self):
         """Reset all attributes of the widget."""
+        import psutil # For the available RAM the feature cache limit is clamped to
         # Set widget-specific attributes
         self.image_mean = None
         self.image_std = None
@@ -2658,7 +2674,7 @@ class ConvpaintWidget(QWidget):
         self.cont_training = "Image" # Update features for subsequent training ("Image" or "Off" or "Global")
         self.use_dask = False # Use Dask for parallel processing
         self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
-        self.cache_max_mb = 2048 # Max RAM (MB) the feature cache may use (2 GB default, clamped at startup to a quarter of the available RAM)
+        self.cache_max_mb = min(2048, int(psutil.virtual_memory().available / 4e6)) # Max RAM (MB) the feature cache may use (2 GB default, clamped to a quarter of the available RAM for small machines)
         self.untile_info_shown = False # Whether the user was informed that auto-segment with caching skips annotation tiles
         self.store_enabled = False # Feature store off by default (on = keep the features of all processed planes on disk)
         import platformdirs # (napari dependency)
@@ -4110,11 +4126,13 @@ class ConvpaintWidget(QWidget):
         self._refresh_reuse_labels()
 
     def _on_choose_store_folder(self):
-        """Let the user choose the folder of the feature store (and use it right away)."""
+        """Let the user choose the folder of the feature store, and use it right away: as in the API,
+        where a folder comes with enabling the store, the folder is checked when it is chosen (an
+        unusable one is reported and nothing changes) instead of only when the box is ticked."""
         folder = QFileDialog.getExistingDirectory(self, 'Choose a folder for the feature store', self.store_folder)
         if folder:
             self.store_folder = folder
-            self.check_use_store.blockSignals(True)
+            self.check_use_store.blockSignals(True) # Applied once below, not per signal
             self.check_use_store.setChecked(True)
             self.check_use_store.blockSignals(False)
             self._apply_feature_store(recreate=True)

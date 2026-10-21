@@ -112,6 +112,7 @@ class ConvpaintModel:
         self._clf_locked_device = None
         self._feature_cache = None  # created by enable_feature_cache
         self._feature_store = None  # created by enable_feature_store
+        self._image_scope = None  # identity of the image worked on (see _update_image_scope)
         self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
@@ -951,6 +952,7 @@ class ConvpaintModel:
             Reshaped to the input imges' shapes. Features dimension is added first (FHW or FZHW).    
         """
         # Extract features
+        self._update_image_scope(data)
         features = self._get_features(
                 data,
                 annotations=None,
@@ -1035,6 +1037,7 @@ class ConvpaintModel:
         """
         if self._feature_store is None:
             raise ValueError('No feature store enabled (see enable_feature_store).')
+        self._update_image_scope(image) # Once for the image, not per plane below
         # Prepare the data as in _predict (dimensions, channels, normalization of the whole image)
         # not inside _get_features, since planes are split below but norm needs the whole stack
         data, _ = self._prep_dims(image)
@@ -1045,6 +1048,21 @@ class ConvpaintModel:
             for unit in units:
                 self._get_features(unit, restore_input_form=False, in_channels=None, skip_norm=True,
                                    use_device=fe_use_device)
+
+    def _update_image_scope(self, data):
+        """Note when the work moves on to another image, identified by its shape and its
+        middle plane (a first plane is often black). Tracked only while the feature cache is
+        on - its only consumer so far - which evicts the previous image's entries first
+        (see FeatureCache.new_scope)."""
+        cache = self._feature_cache
+        if cache is None:
+            return
+        img = data[0] if isinstance(data, (list, tuple)) else data
+        plane = img[..., (img.shape[-3] - 1) // 2, :, :] if img.ndim > 2 else img
+        scope = (img.shape, self._data_signature(plane))
+        if scope != self._image_scope:
+            self._image_scope = scope
+            cache.new_scope()
 
     def _extraction_signature(self):
         """The settings part of the cache/store key: the parameters whose change
@@ -1080,13 +1098,15 @@ class ConvpaintModel:
         native = self._feature_cache.get(key) if self._feature_cache is not None else None
         if native is None and self._feature_store is not None:
             native = self._feature_store.get(key)
-            # Promote the store hit: np.array() copies the memory-mapped arrays into RAM,
-            # so the cached entry does not keep reading from (or depend on) the files
+            # Promote the store hit: np.array() copies the memory-mapped arrays into RAM, so the
+            # cached entry does not keep reading from (or depend on) the files. The copy is also
+            # what is returned - reconstructing from the memory maps would read it all a second time
             if native is not None and self._feature_cache is not None:
                 in_ram = {"levels": [([np.array(a) for a in arrays], scaled_shape, cropped_shape)
                                      for arrays, scaled_shape, cropped_shape in native["levels"]],
                           "was_torch": native["was_torch"]}
                 self._feature_cache.put(key, in_ram)
+                native = in_ram
         return native
 
     def _keep_native(self, key, native):
@@ -1552,6 +1572,8 @@ class ConvpaintModel:
             warnings.warn('No annotations provided for training.')
             return self.classifier
 
+        self._update_image_scope(data)
+
         # Use _get_features to get the features of the annotated pixels and their classes
         # (it reduces each plane/tile right after extracting it, see there). In memory mode
         # these are all the features of the table, including the ones of earlier rounds.
@@ -1754,6 +1776,8 @@ class ConvpaintModel:
         # Check if there is a trained classifier
         if self.classifier is None:
             raise ValueError('No trained classifier found.')
+
+        self._update_image_scope(data)
 
         # Check if we have only a single image input
         single_input = hasattr(data, 'ndim') and data.ndim >= 2 and not isinstance(data, list)

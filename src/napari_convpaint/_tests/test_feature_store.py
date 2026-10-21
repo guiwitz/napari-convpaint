@@ -1,5 +1,6 @@
 """Tests for the persistent feature store (storage logic; model integration is tested below)."""
 import os
+import shutil
 
 import numpy as np
 import pytest
@@ -114,6 +115,79 @@ def test_store_write_failure_degrades_to_not_storing(tmp_path, monkeypatch):
     assert len(store) == 1 and ("b", ("s",)) not in store
     assert not any(d.name.endswith(".tmp") for d in (tmp_path / "store").iterdir())   # no leftovers
     assert store.get(("a", ("s",))) is not None
+
+
+def test_damaged_entry_is_dropped_and_stored_again(tmp_path):
+    """A damaged entry (write cut off, files removed) must not fail every later read of its plane:
+    it is deleted on the next get, which simply misses, so the plane is extracted and stored again."""
+    rng = np.random.default_rng(5)
+    store = FeatureStore(tmp_path / "store")
+    key = ("a", ("s",))
+    entry = _entry(rng)
+    store.put(key, entry)
+    npy = os.path.join(store._entry_dir(key), "l0_0.npy")
+    with open(npy, "r+b") as f:
+        f.truncate(os.path.getsize(npy) // 2)   # as an interrupted write leaves it
+    assert store.get(key) is None and key not in store
+    assert len(store) == 0 and store.nbytes == 0
+    store.put(key, entry)                        # extracted again -> stored again
+    assert _equal(store.get(key), entry)
+    # A truncated meta file is dropped just the same
+    with open(os.path.join(store._entry_dir(key), "meta.json"), "w") as f:
+        f.write('{"was_torch": fal')
+    assert store.get(key) is None and len(store) == 0
+
+
+def test_store_survives_a_deleted_folder(tmp_path):
+    """Deleting the folder while the store is on must not raise out of training: it is recreated,
+    with its marker, so that the next session still recognizes it as a feature store."""
+    rng = np.random.default_rng(6)
+    folder = tmp_path / "store"
+    store = FeatureStore(folder)
+    store.put(("a", ("s",)), _entry(rng))
+    shutil.rmtree(folder)
+    assert store.stats()["entries"] == 0                          # reporting does not fail either
+    store.put(("b", ("s",)), _entry(rng))
+    assert ("b", ("s",)) in store and len(store) == 1
+    assert store.nbytes == store._scan_bytes()                    # size corrected with the recovery
+    assert os.path.isfile(folder / _MARKER)
+    FeatureStore(folder)                                          # opens again, not seen as foreign
+
+
+def test_two_writers_do_not_delete_each_others_files(tmp_path, monkeypatch):
+    """Every write uses a temporary folder of its own, so a second instance storing the same plane
+    cannot remove the files of the first one; whoever renames first wins, the other drops its copy."""
+    rng = np.random.default_rng(7)
+    store = FeatureStore(tmp_path / "store")
+    key = ("a", ("s",))
+    # A write of another instance in progress (its own .tmp folder) must be left alone
+    other_tmp = store._entry_dir(key) + ".999-abcdef12.tmp"
+    os.makedirs(other_tmp)
+    open(os.path.join(other_tmp, "l0_0.npy"), "w").close()
+    store.put(key, _entry(rng))
+    assert os.path.isfile(os.path.join(other_tmp, "l0_0.npy")) and key in store
+    # And if the other instance renames first, this write is dropped without a warning
+    monkeypatch.setattr(os, "rename", lambda *a: (_ for _ in ()).throw(FileExistsError(17, "Exists")))
+    store.put(("b", ("s",)), _entry(rng))
+    assert ("b", ("s",)) not in store and not store._warned_no_write
+    assert not any(n.endswith(".tmp") for n in os.listdir(store.folder) if n != os.path.basename(other_tmp))
+
+
+def test_store_of_another_format_or_version(tmp_path):
+    """The marker is checked when opening: another entry format is refused, features of another
+    convpaint version are pointed out but kept (extraction usually did not change)."""
+    rng = np.random.default_rng(8)
+    folder = tmp_path / "store"
+    store = FeatureStore(folder)
+    store.put(("a", ("s",)), _entry(rng))
+    marker = folder / _MARKER
+    marker.write_text('{"format": 2, "convpaint": "9.9.9"}')
+    with pytest.raises(ValueError, match="another format"):
+        FeatureStore(folder)
+    marker.write_text('{"format": 1, "convpaint": "0.0.1"}')
+    with pytest.warns(UserWarning, match="written by convpaint"):
+        reopened = FeatureStore(folder)
+    assert ("a", ("s",)) in reopened   # kept and reusable
 
 
 # --- integration with the model --------------------------------------------
@@ -290,6 +364,87 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     assert store_on_with(tmp_path / 'third')
 
 
+def test_widget_choosing_a_folder_uses_it(make_napari_viewer, tmp_path, monkeypatch):
+    """Choosing a folder enables the store on it, as in the API where the folder comes with
+    enabling - and an unusable folder is reported right away instead of only when the box is
+    ticked, leaving the settings as they were."""
+    import napari_convpaint.convpaint_widget as cw
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    messages = []
+    monkeypatch.setattr(cw, 'show_info', messages.append)
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    assert not w.check_use_store.isChecked()
+
+    # Store off: choosing a usable folder switches it on
+    good = tmp_path / 'good'
+    monkeypatch.setattr(cw.QFileDialog, 'getExistingDirectory', staticmethod(lambda *a, **k: str(good)))
+    w._on_choose_store_folder()
+    assert w.check_use_store.isChecked() and w.store_enabled
+    assert w.cp_model._feature_store is not None and w.store_folder == str(good)
+
+    # Store off again: an unusable folder is refused when it is chosen, nothing changes
+    w.check_use_store.setChecked(False)
+    bad = tmp_path / 'dogs'
+    bad.mkdir()
+    (bad / 'dog1.png').write_bytes(b'x')
+    messages.clear()
+    monkeypatch.setattr(cw.QFileDialog, 'getExistingDirectory', staticmethod(lambda *a, **k: str(bad)))
+    w._on_choose_store_folder()
+    assert any('not enabled' in m for m in messages)
+    assert not w.check_use_store.isChecked() and not w.store_enabled
+    assert w.cp_model._feature_store is None and w.store_folder == str(good)
+
+    # Cancelling the dialog leaves everything alone
+    monkeypatch.setattr(cw.QFileDialog, 'getExistingDirectory', staticmethod(lambda *a, **k: ''))
+    w._on_choose_store_folder()
+    assert w.store_folder == str(good) and not w.check_use_store.isChecked()
+
+
+def test_widget_bad_folder_keeps_the_running_store(make_napari_viewer, tmp_path):
+    """Choosing an unusable folder while the store runs must not switch it off: the model keeps the
+    store it has (the new folder is only taken once it works), so the widget keeps showing it."""
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    w.store_folder = str(tmp_path / 'good')
+    w.check_use_store.setChecked(True)
+    running = w.cp_model._feature_store
+    assert running is not None
+
+    (tmp_path / 'dogs').mkdir()
+    (tmp_path / 'dogs' / 'dog1.png').write_bytes(b'x')
+    w.store_folder = str(tmp_path / 'dogs')
+    w._apply_feature_store(recreate=True) # As _on_choose_store_folder does
+
+    assert w.cp_model._feature_store is running # Same store, still on the folder that works
+    assert w.check_use_store.isChecked() and w.store_enabled
+    assert w.store_folder == str(tmp_path / 'good')
+    assert w.btn_store_delete.isEnabled() and w.btn_store_features.isEnabled()
+
+
+def test_widget_reset_restores_store_settings(make_napari_viewer, tmp_path):
+    """Resetting Convpaint puts the store settings back to their defaults: the checkbox, the folder
+    and the model's store, which would otherwise keep running on the old folder."""
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    default_folder = w.store_folder
+
+    w.store_folder = str(tmp_path / 'store')
+    w.check_use_store.setChecked(True)
+    assert w.cp_model._feature_store is not None
+
+    w._on_reset_convpaint()
+
+    assert not w.check_use_store.isChecked() and not w.store_enabled
+    assert w.store_folder == default_folder and w.cp_model._feature_store is None
+    assert '(store off)' in w.store_size_label.text()
+
+
 def test_widget_store_features_of_stack(make_napari_viewer, tmp_path):
     """The 'Store features' action stores every plane of the selected stack; a following
     stack prediction only reuses."""
@@ -318,6 +473,40 @@ def test_widget_store_features_of_stack(make_napari_viewer, tmp_path):
     assert len(fs) == 3 and fs.stats()['misses'] == 3, fs.stats()   # training reused the stored plane
     w._on_predict_all()
     assert len(fs) == 3 and fs.stats()['misses'] == 3, fs.stats()   # nothing extracted anymore
+
+
+def test_store_hit_is_served_from_the_cached_copy(tmp_path):
+    """A store hit is copied into the cache, and that copy is also what is returned: reconstructing
+    from the memory-mapped files instead would read all of it a second time."""
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    cp = ConvpaintModel('gaussian')
+    store = cp.enable_feature_store(tmp_path / "store")
+    cp.enable_feature_cache()
+    key = ("data", ("sig",))
+    store.put(key, _entry(np.random.default_rng(9)))
+    native = cp._reuse_native(key)
+    assert all(not isinstance(a, np.memmap) for arrays, _, _ in native["levels"] for a in arrays)
+    assert native is cp._feature_cache.get(key) # The very copy that was cached, not the memory maps
+
+
+def test_store_features_announces_the_image(tmp_path):
+    """store_features takes a whole image, so it announces it like train and predict do - once for
+    the image, not once per plane, which would make every plane count as another image."""
+    import warnings as _w
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    rng = np.random.default_rng(11)
+    stack_a = rng.random((3, 32, 32), dtype=np.float32)
+    stack_b = rng.random((3, 32, 32), dtype=np.float32)
+    cp = ConvpaintModel('gaussian')
+    cp.enable_feature_store(tmp_path / "store")
+    cp.enable_feature_cache()
+    with _w.catch_warnings():
+        _w.simplefilter('ignore')
+        cp.store_features(stack_a)
+        first = cp._image_scope
+        assert first is not None
+        cp.store_features(stack_b)
+    assert cp._image_scope is not None and cp._image_scope != first
 
 
 def test_clear_feature_store_keeps_the_store(tmp_path):
