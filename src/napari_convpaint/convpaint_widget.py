@@ -593,6 +593,9 @@ class ConvpaintWidget(QWidget):
             self.cache_max_ram_spinbox = QSpinBox()
             self.cache_max_ram_spinbox.setRange(64, 1024 * 1024)  # 64 MB .. 1 TB
             self.cache_max_ram_spinbox.setSingleStep(256)
+            # Apply a typed limit only once it is complete: typing 4096 passes through 409 MB,
+            # which would evict most of the cache on the way (the arrows still apply immediately)
+            self.cache_max_ram_spinbox.setKeyboardTracking(False)
             self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
             self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_spinbox, 2, 2, 1, 1)
 
