@@ -1096,8 +1096,11 @@ class ConvpaintModel:
     def _reuse_native(self, key):
         """Get the native features of a plane from the cache or the store, or None.
         A store hit is also put into the cache (as a copy in RAM, not the memory-mapped files),
-        so that repeated use of the same plane does not read from disk every time."""
+        so that repeated use of the same plane does not read from disk every time; a cache hit is
+        put into the store, so that enabling the store keeps what is already in RAM as well."""
         native = self._feature_cache.get(key) if self._feature_cache is not None else None
+        if native is not None and self._feature_store is not None:
+            self._feature_store.put(key, native) # No-op if the plane is stored already
         if native is None and self._feature_store is not None:
             native = self._feature_store.get(key)
             # Promote the store hit: np.array() copies the memory-mapped arrays into RAM, so the

@@ -491,6 +491,25 @@ def test_store_hit_is_served_from_the_cached_copy(tmp_path):
     assert native is cp._feature_cache.get(key) # The very copy that was cached, not the memory maps
 
 
+def test_cached_features_are_stored_when_the_store_is_on(tmp_path):
+    """Features extracted before the store was enabled are only in RAM; using them afterwards (here
+    through store_features) keeps them on disk as well, instead of silently storing nothing."""
+    import warnings as _w
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    rng = np.random.default_rng(12)
+    stack = rng.random((3, 32, 32), dtype=np.float32)
+    cp = ConvpaintModel('gaussian')
+    cp.enable_feature_cache()
+    with _w.catch_warnings():
+        _w.simplefilter('ignore')
+        cp.get_feature_image(stack)                      # cache only, no store yet
+        assert len(cp._feature_cache) == 3
+        store = cp.enable_feature_store(tmp_path / "store")
+        assert len(store) == 0
+        cp.store_features(stack)                         # served from the cache, kept on disk
+    assert len(store) == 3
+
+
 def test_store_features_announces_the_image(tmp_path):
     """store_features takes a whole image, so it announces it like train and predict do - once for
     the image, not once per plane, which would make every plane count as another image."""
