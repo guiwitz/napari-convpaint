@@ -27,6 +27,7 @@ class GaussianFeatures(FeatureExtractor):
         # self.padding = 0 # If the model needs a certain padding around the extracted pixel, set it here. This is used to calculate the necessary padding for tiling.
         # self.patch_size = 1 # If the model produces features at a lower resolution than the input image, e.g. because of pooling or ViT patching, set the patch size here. This is used to calculate the necessary padding and alignment for tiling.
         # self.has_global_context = False # True if the model's features at a pixel depend on the whole image (e.g. ViT-style global attention) rather than just a local neighborhood (e.g. CNN with small kernels and little pooling)
+        # self.has_3d_context = False # True if the features of a plane depend on neighbouring planes (true 3D feature extractor, e.g. 3x3x3 kernels)
         # self.num_input_channels = [1]
         # self.norm_mode = "default" # or "imagenet" or "percentile"
         # self.rgb_input = False # True if the model takes RGB input
@@ -115,3 +116,19 @@ class GaussianFeatures(FeatureExtractor):
 #
 #    Define the full feature extraction process, including the feature pyramid. Input = [C, Z, H ,W]
 #    Important: Output needs to be 4D: [nb_features, Z, H, W]
+#
+#    Note: extract_features_pyramid = extract_native (scale, crop and extract per scaling, giving the
+#    "native" features) + reconstruct_from_native (rescale, concatenate). These two halves can also be
+#    overridden separately, e.g. for a custom multi-scale scheme.
+
+
+# 5) FEATURE REUSE (CACHE / STORE): NOTHING TO IMPLEMENT
+
+# ConvpaintModel can reuse extracted features (RAM cache, disk store) instead of recomputing them.
+# This works automatically for any feature extractor implementing a), b) or c): what is kept is the
+# native output of your method (before rescaling), and the rescaling is done by the base class.
+# Also works if you override the two halves of d) separately, as long as extract_native returns one
+# (features, scaled_shape, cropped_shape) per scaling ("level") with arrays [nb_features, Z, h, w],
+# and reconstruct_from_native only depends on that, the parameters and the shapes.
+# Overriding extract_features_pyramid as a whole excludes the extractor from feature reuse
+# (see supports_feature_reuse() in the base class).
