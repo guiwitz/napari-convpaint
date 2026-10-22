@@ -1001,6 +1001,8 @@ class ConvpaintModel:
         The folder must be empty, not yet existing, or a feature store. ``max_bytes``
         optionally caps the size of the store (default: no cap, only a disk headroom)."""
         from .feature_store import FeatureStore
+        # Only replaced once the folder works: a failing constructor leaves a running store
+        # connected (the widget relies on that when a chosen folder turns out to be unusable)
         self._feature_store = FeatureStore(folder, max_bytes=max_bytes)
         return self._feature_store
 

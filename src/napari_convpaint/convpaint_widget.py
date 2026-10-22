@@ -1083,7 +1083,7 @@ class ConvpaintWidget(QWidget):
             # works, so a store that is running survives an unusable one (see the except branch)
             try:
                 self.cp_model.enable_feature_store(self.store_folder)
-                self._store_folder_ok = self.store_folder
+                self._store_folder_ok = self.store_folder # Keep as the fall-back for the next call
             except ValueError as e: # Folder not usable (not empty and not a feature store, no write access, ...)
                 # enable_feature_store only replaces the store once the new folder works, so a store
                 # that was already running is still there: follow the model and keep it connected
