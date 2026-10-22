@@ -17,9 +17,6 @@ import tifffile
 import imageio.v2 as imageio
 from collections import defaultdict
 
-
-MAX_CLASSES = 255 # Annotations and segmentation are uint8, so higher class values would wrap around
-
 # Imported inline to avoid heavy memory usage when the functions are not used:
 # import torch
 # from .utils import normalize_image, compute_image_stats, normalize_image_percentile, normalize_image_imagenet, get_fe_device
@@ -95,6 +92,7 @@ class ConvpaintWidget(QWidget):
         self.selected_channel = None
         self.spatial_dim_info_thresh = 1000000
         self.default_brush_size = 3
+        self.max_classes = 255 # Annotations and segmentation are uint8, so higher values would wrap around
         # suffixes for opening images in multifile, to exclude potential annotation/segmentation files
         self.multifile_annot_suffixes = ["annot", "annotation", "annotations", "scribble", "scribbles", "scrib"]
         self.multifile_seg_suffixes = ["seg", "segmentation", "segmentations", "prediction", "predictions", "pred", "preds", "mask", "masks"]
@@ -1092,7 +1090,7 @@ class ConvpaintWidget(QWidget):
                           f'Feature store not enabled: {e}')
                 self.store_folder = self._store_folder_ok # Back to the last usable folder
         self.store_enabled = self.cp_model._feature_store is not None
-        self.check_use_store.blockSignals(True)
+        self.check_use_store.blockSignals(True) # setChecked would call this method again
         self.check_use_store.setChecked(self.store_enabled)
         self.check_use_store.blockSignals(False)
         self.btn_store_delete.setEnabled(self.store_enabled)
@@ -1518,8 +1516,8 @@ class ConvpaintWidget(QWidget):
     def _on_add_class(self, text=None):
         """Add a new class name and icon to the layout and update all annotations and segmentation layers."""
 
-        if len(self.class_names) >= MAX_CLASSES:
-            show_info(f'At most {MAX_CLASSES} classes are supported (the annotation and segmentation '
+        if len(self.class_names) >= self.max_classes:
+            show_info(f'At most {self.max_classes} classes are supported (the annotation and segmentation '
                       'layers are uint8).')
             return
 
@@ -1818,8 +1816,8 @@ class ConvpaintWidget(QWidget):
                     num_appended += 1
 
         # Too many classes: stop before the current ones are reset below
-        if len(parsed) > MAX_CLASSES:
-            raise ValueError(f"The file holds {len(parsed)} classes, at most {MAX_CLASSES} are "
+        if len(parsed) > self.max_classes:
+            raise ValueError(f"The file holds {len(parsed)} classes, at most {self.max_classes} are "
                              "supported (the annotation and segmentation layers are uint8).")
 
         # Reset to defaults (this will create 2 labels)
@@ -4137,7 +4135,7 @@ class ConvpaintWidget(QWidget):
             self.check_use_store.blockSignals(True) # Applied once below, not per signal
             self.check_use_store.setChecked(True)
             self.check_use_store.blockSignals(False)
-            self._apply_feature_store(recreate=True)
+            self._apply_feature_store(recreate=True) # Reverts store_folder if it cannot be used
 
     def _on_delete_stored_features(self):
         """Delete all entries of the feature store (after confirmation); the store stays active."""
