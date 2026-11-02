@@ -63,6 +63,7 @@ jobs:
         run: uvx --with tox-gh-actions tox -- ${{ matrix.group.files }}
         env:
           PLATFORM: ${{ matrix.platform }}
+          CONVPAINT_SKIP_MPS_CLEANUP: "1"
 
       - name: Coverage
         uses: codecov/codecov-action@v5
