@@ -110,6 +110,8 @@ class ConvpaintModel:
         self.num_features = 0
         self._fe_locked_device = None
         self._clf_locked_device = None
+        self._feature_cache = None  # created by enable_feature_cache
+        self._image_scope = None  # identity of the image worked on (see _update_image_scope)
         self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
@@ -618,6 +620,10 @@ class ConvpaintModel:
                 name=fe_name,
                 layers=fe_layers
             )
+            if self._feature_cache is not None:
+                # The cache key holds the FE signature, so entries of the old FE could never be
+                # returned anyway; clearing frees the RAM they would occupy until evicted
+                self._feature_cache.clear()
         
         # Set the parameters
         self._param.set(fe_name=fe_name, fe_layers=fe_layers)
@@ -804,7 +810,7 @@ class ConvpaintModel:
             clf : CatBoostClassifier or RandomForestClassifier
                 Trained classifier (also saved inside the model instance)
         """
-        clf, _, _ = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
+        clf = self._train(image, annotations, memory_mode=memory_mode, img_ids=img_ids, use_rf=use_rf,
                           allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm,
                           fe_use_device=fe_use_device, clf_use_device=clf_use_device)
         return clf
@@ -945,6 +951,7 @@ class ConvpaintModel:
             Reshaped to the input imges' shapes. Features dimension is added first (FHW or FZHW).    
         """
         # Extract features
+        self._update_image_scope(data)
         features = self._get_features(
                 data,
                 annotations=None,
@@ -960,6 +967,87 @@ class ConvpaintModel:
 
         return features
     
+### FEATURE CACHE (off unless enable_feature_cache() is called; the widget enables it by default; see feature_cache.py)
+
+    def enable_feature_cache(self, enabled=True, max_bytes=None):
+        """Turn on whole-image feature caching. When on, the (resolution-
+        independent) native features of an extracted image are cached and reused
+        the next time the *same* image is processed with the same FE settings —
+        e.g. re-segmenting while refining scribbles, or the train->predict of one
+        image — instead of recomputing them. Cache entries are content-addressed
+        (a hash of the prepared image), so it is self-invalidating: a changed
+        image simply misses. Bounded by a RAM budget (``max_bytes``, default 2 GB).
+        Off by default in the API (call this method to enable it); the widget
+        enables it by default."""
+        from .feature_cache import FeatureCache
+        self._feature_cache = FeatureCache(max_bytes=max_bytes, enabled=enabled)
+        return self._feature_cache
+
+    def clear_feature_cache(self):
+        """Drop the cached features, keeping the cache itself (and its budget) in place."""
+        if self._feature_cache is not None:
+            self._feature_cache.clear()
+
+    def _update_image_scope(self, data):
+        """Note when the work moves on to another image, identified by its shape and its
+        middle plane (a first plane is often black). Tracked only while the feature cache is
+        on - its only consumer so far - which evicts the previous image's entries first
+        (see FeatureCache.new_scope)."""
+        cache = self._feature_cache
+        if cache is None or not cache.enabled:
+            return
+        img = data[0] if isinstance(data, (list, tuple)) else data
+        plane = img[..., (img.shape[-3] - 1) // 2, :, :] if img.ndim > 2 else img
+        scope = (img.shape, self._data_hash(plane))
+        if scope != self._image_scope:
+            self._image_scope = scope
+            cache.new_scope()
+
+    def _fe_cache_signature(self):
+        """The FE-relevant part of the cache key: the parameters whose change
+        invalidates extracted features (the model's own train-reset set), taken
+        from the user's params (before FE enforcement, which e.g. moves the
+        JAFAR scalings out of the Param)."""
+        def _hashable(v):
+            # fe_scalings / fe_layers are lists -> make them hashable for the key.
+            if isinstance(v, (list, tuple)):
+                return tuple(_hashable(x) for x in v)
+            return v
+        return tuple((k, _hashable(getattr(self._param, k, None))) for k in self._params_to_reset_training)
+
+    @staticmethod
+    def _data_hash(d):
+        """Content hash of a prepared image tile, so train/predict of the same
+        pixels share a cache entry without threading an id through the pipeline."""
+        import hashlib
+        arr = np.ascontiguousarray(d)
+        h = hashlib.blake2b(arr.view(np.uint8), digest_size=16)
+        h.update(str(arr.shape).encode())
+        h.update(str(arr.dtype).encode())
+        return h.hexdigest()
+
+    def _extract_pyramid_cached(self, d, param, patched=True, device=None, skip_reuse=False):
+        """Extract the feature pyramid for one image, consulting the feature
+        cache. Behaviour with the cache disabled (the default) is exactly
+        extract_features_pyramid; enabled, it caches/reuses the native features
+        (bit-identical output, since the pyramid split is exact)."""
+        cache = self._feature_cache
+        fe = self.fe_model
+        if skip_reuse or cache is None or not cache.enabled or not fe.supports_feature_reuse(param):
+            return fe.extract_features_pyramid(d, param, patched=patched, device=device)
+        key = (self._data_hash(d), self._fe_cache_signature())
+        entry = cache.get(key)
+        if entry is not None:
+            # Hit: lift the native features back onto `device` (if that is the FE's native
+            # form) and reconstruct there — same backend as a fresh extraction, so hits are
+            # as fast as (and identical to) misses.
+            native = fe.native_from_numpy(entry, device)
+        else:
+            # Miss: extract once; the features and the cache entry both come from these natives
+            native = fe.extract_native(d, param, device)
+            cache.put(key, fe.native_to_numpy(native))
+        return fe.reconstruct_from_native(native, d.shape, param, patched)
+
 ### BACKEND METHOD FOR FEATURE EXTRACTION
 
     def _get_features(self, data, annotations=None, restore_input_form=True,
@@ -981,8 +1069,9 @@ class ConvpaintModel:
         6. Padding (if needed)
         7. (If annotations) extract planes / optionally tile
         8. FE extraction
-        9. Optional reshaping: If restore_input_form & not annotations
-        10. Restore original dimension semantics (drop singleton Z when appropriate)
+        9. (Training) Reduce each plane / tile to its annotated pixels
+        10. Optional reshaping: If restore_input_form & not annotations
+        11. Restore original dimension semantics (drop singleton Z when appropriate)
 
         Returns either a single feature array or lists (and optionally annotations / coords when
         restore_input_form=False).
@@ -1012,10 +1101,12 @@ class ConvpaintModel:
         use_device : str, optional
             Device policy for feature extraction ("auto", "gpu", "cpu").
         pca_components : int, optional
-            Number of PCA components to reduce the features to (0 for no PCA)
+            Number of PCA components to reduce the features to (0 for no PCA).
+            Not available together with annotations (see Returns).
         kmeans_clusters : int, optional
             Number of KMeans clusters to reduce the features to (0 for no KMeans); applied after PCA reduction if both are used.
             Only applied if input form is restored, intended as a sort of unsupervised segmentation.
+            Not available together with annotations (see Returns).
 
         Returns
         ----------
@@ -1024,10 +1115,19 @@ class ConvpaintModel:
             Features dimension is added first.
         annotations : np.ndarray or list[np.ndarray], optional
             Processed annotations of the image(s) or list of images, if annotations are given.
+        targets : np.ndarray
+            Returned instead of the features and annotations when annotations are given without
+            memory mode (training): the features of the annotated pixels and their classes, both
+            concatenated over all planes/tiles.
         """
         # --- Basic bookkeeping ---------------------------------------------------
         # Check if we are processing any annotations
         use_annots   = annotations is not None
+        # PCA and Kmeans are fitted per feature image, so each plane would get its own components
+        # and cluster ids - usable to look at one image, but not to train or predict a model
+        if use_annots and (pca_components or kmeans_clusters):
+            raise ValueError('PCA and Kmeans are not available when annotations are given: '
+                             'they are fitted per image, so the result cannot be used for training.')
         # Check for single input
         single_input = hasattr(data, 'ndim') and data.ndim >= 2 and not isinstance(data, (list, tuple))
         # Record original input shapes for reshaping and rescaling later
@@ -1077,7 +1177,7 @@ class ConvpaintModel:
             num_new = sum(np.sum(ann > 0) for ann in annotations)
             if num_new == 0:
                 warnings.warn("No new annotations. Train with existing features.")
-                return [], [], [], [], params_for_extract.image_downsample
+                return self._get_all_features_annots()
             # Filter out the data where annots are totally empty
             else:
                 data = [d for d, ann in zip(data, annotations) if np.sum(ann > 0) > 0]
@@ -1169,25 +1269,48 @@ class ConvpaintModel:
             supported_devices=self.fe_model.supported_devices(),
             warn=True,
         )
-        features = [self.fe_model.extract_features_pyramid(
+        # Annotation tiles are cut around the (new) annotations, so they never repeat and
+        # cannot serve a prediction -> do not cache them (only whole planes / prediction tiles)
+        skip_reuse = use_annots and params_for_extract.tile_annotations
+        # Training only needs the annotated pixels, so each plane/tile is reduced to them right
+        # after it is extracted and the feature image is dropped again (in memory mode they go
+        # into the table instead, which keeps them across training rounds)
+        reduce_to_annotated = use_annots and not restore_input_form
+
+        def extract(d):
+            return self._extract_pyramid_cached(
                 d,
                 params_for_extract,
                 patched=keep_patched,
-                device=fe_runtime_device)
-                    for d in data]
-        
-        if pca_components:
-            features = [utils.apply_pca_to_f_image(f, n_components=pca_components)
-                        for f in features]
+                device=fe_runtime_device,
+                skip_reuse=skip_reuse)
 
-        # --- Raw early return ----------------------------------------------------
+        # Return the annotated pixels and their classes, keeping only one feature image alive at
+        # a time (a full-size one costs about 800 MB per 1024x1024 plane with the default VGG)
+        if reduce_to_annotated:
+            if memory_mode:
+                for d, a, c, img_id in zip(data, annotations, coords, img_ids):
+                    self._register_features_annots(extract(d), a, c, img_id,
+                                                   params_for_extract.image_downsample)
+                return self._get_all_features_annots()
+            f_t_tuples = [utils.get_features_targets(extract(d), a) # f and t are linearized
+                          for d, a in zip(data, annotations)]
+            features = np.concatenate([ft[0] for ft in f_t_tuples], axis=0)
+            targets  = np.concatenate([ft[1] for ft in f_t_tuples], axis=0)
+            return features, targets
+
+        features = [extract(d) for d in data]
+
+        # Return the feature images as they are, without reshaping them back
         if not restore_input_form:
             if memory_mode:
                 return features, annotations, coords, img_ids, params_for_extract.image_downsample
-            if use_annots:
-                return features, annotations
             return features
 
+        # --- PCA and Kmeans (one image at a time, hence never with annotations) ---
+        if pca_components:
+            features = [utils.apply_pca_to_f_image(f, n_components=pca_components)
+                        for f in features]
         # Apply Kmeans clustering if requested (afterwards treat just like a segmentation)
         class_output = False # Whether the output is a class prediction (change if we do Kmeans)
         if kmeans_clusters: # NOTE: random_state -> fix for reproducibility; OR None for random
@@ -1348,28 +1471,16 @@ class ConvpaintModel:
         # Sanity check if we even got any annotations
         if annotations is None or all(a is None for a in annotations) or all(np.sum(a) == 0 for a in annotations):
             warnings.warn('No annotations provided for training.')
-            return self.classifier, None, None
+            return self.classifier
 
-        if not memory_mode:
-            # Use _get_features to extract features and the suiting annotations parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts = self._get_features(
-                data, annotations, restore_input_form=False, memory_mode=memory_mode,
-                in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
-            # Get the annotated pixels and targets, and concatenate each
-            f_t_tuples = [utils.get_features_targets(f, a)
-                        for f, a in zip(feature_parts, annot_parts)] # f and t are linearized
-            features = [ft[0] for ft in f_t_tuples] # Create a list of features
-            targets = [ft[1] for ft in f_t_tuples] # Create a list of targets
-            features = np.concatenate(features, axis=0) # Concatenate the features into a single array
-            targets = np.concatenate(targets, axis=0) # Concatenate the targets into a single array
+        self._update_image_scope(data)
 
-        else: # memory mode
-            # Use _get_features to extract features and the suiting annotations parts (returns lists if restore_input_form=False)
-            feature_parts, annot_parts, coords, img_ids, scale = self._get_features(
-                data, annotations, restore_input_form=False, memory_mode=memory_mode,
-                img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
-            # Get all annotations and features from the table
-            features, targets = self._register_and_get_all_features_annots(feature_parts, annot_parts, coords, img_ids, scale)
+        # Use _get_features to get the features of the annotated pixels and their classes
+        # (it reduces each plane/tile right after extracting it, see there). In memory mode
+        # these are all the features of the table, including the ones of earlier rounds.
+        features, targets = self._get_features(
+            data, annotations, restore_input_form=False, memory_mode=memory_mode,
+            img_ids=img_ids, in_channels=in_channels, skip_norm=skip_norm, use_device=fe_use_device)
 
         # Sort (features, targets) into a canonical order so the classifier's
         # seeded bootstrap sampling is invariant to the ordering produced by
@@ -1396,7 +1507,7 @@ class ConvpaintModel:
                 allow_writing_files=allow_writing_files,
                 use_device=clf_use_device)
 
-        return self.classifier, feature_parts, annot_parts
+        return self.classifier
 
     def reset_training(self):
         """
@@ -1472,9 +1583,9 @@ class ConvpaintModel:
 
         return all_new_annots
     
-    def _register_and_get_all_features_annots(self, features, annotations, coords, img_ids, scale=1):
+    def _register_features_annots(self, features, annotations, coords, img_ids, scale=1):
         """
-        Registers new features in the table and returns all features and annotations.
+        Registers new features in the table (one row per annotated pixel).
 
         IMPORTANT: This assumes that double entries have been removed from the annotations and old entries from the table.
 
@@ -1491,14 +1602,6 @@ class ConvpaintModel:
         scale : int
             Scale factor, used for creating the unique table entries
         
-        Returns
-        ----------
-        features : list[np.ndarray]
-            List of all features with the same shape as the input features,
-            where existing features were kept and new features were added.
-        annotations : list[np.ndarray]
-            List of all annotations with the same shape as the input annotations,
-            where existing annotations were kept and new annotations were added.
         """
         # Allow for single inputs and in that case make both inputs lists
         if isinstance(features, np.ndarray):
@@ -1539,7 +1642,17 @@ class ConvpaintModel:
             new_entries_df.set_index("row_key", inplace=True)
             self.table = pd.concat([self.table, new_entries_df])
 
-        # Now extract all features and annotations from the table
+    def _get_all_features_annots(self):
+        """
+        Returns all features and their classes registered in the table.
+
+        Returns
+        ----------
+        features : np.ndarray
+            All registered features, shape [num_entries, num_features]
+        annotations : np.ndarray
+            The class of each of them, shape [num_entries]
+        """
         features_list = list(self.table['features_array'].values)
         annotations_list = list(self.table['label'].values)
 
@@ -1564,6 +1677,8 @@ class ConvpaintModel:
         # Check if there is a trained classifier
         if self.classifier is None:
             raise ValueError('No trained classifier found.')
+
+        self._update_image_scope(data)
 
         # Check if we have only a single image input
         single_input = hasattr(data, 'ndim') and data.ndim >= 2 and not isinstance(data, list)
@@ -1814,73 +1929,6 @@ class ConvpaintModel:
             plt.show()
 
         return predicted_image_complete
-
-    def _train_predict_image(self, image, annotations, use_rf=False, allow_writing_files=False,
-                             in_channels=None, skip_norm=False, add_seg=False,
-                             fe_use_device=None, clf_use_device=None):
-        """
-        Extracts features from the image and uses them to both train and predict the image.
-
-        If multiple planes are given, only the annotated planes will be processed and predicted.
-
-        Currently does not support image tiling and memory mode.
-        """
-
-        # Find lanes/slices containing annotations
-        annot_slice_mask = np.any(annotations > 0, axis=(-2, -1))
-        # Extract the annotated image slices
-        if annotations.ndim > 2:
-            annot_img = image[..., annot_slice_mask, :, :]
-            annot_annot = annotations[..., annot_slice_mask, :, :]
-            assert annot_img.shape[-3:] == annot_annot.shape, "Annotated image and annotations must have the same (spatial) shape."
-        else:
-            annot_img = image
-            annot_annot = annotations
-
-        # Save the old parameters, so we can change it specifically for this method
-        old_params = self._param.copy()
-        # Turn off the tiling of annotations, since we want to extract the entire image to be re-used for prediction
-        self._param.set_single('tile_annotations', False)
-
-        # Train, and get the features at the same time
-        # Note: This is a hack to use the training method for prediction, but it works
-        _, feature_parts, _ = self._train( # feature_parts corresponds to the annotated feature image slices (since no tiling)
-            data=annot_img, annotations=annot_annot, memory_mode=False,
-            use_rf=use_rf, allow_writing_files=allow_writing_files, in_channels=in_channels, skip_norm=skip_norm,
-            fe_use_device=fe_use_device, clf_use_device=clf_use_device
-        )
-        feature_img = np.concatenate(feature_parts, axis=1)
-
-        # Prediction expects a list of patched features, but training extracts per-pixel
-        if self.fe_model.gives_patched_features():
-            p = self.fe_model.get_patch_size()
-            feature_img = [feature_img[..., ::p, ::p]]
-        # Predict the image using the features extracted
-        # Note: This is a hack to use the prediction method for prediction, but it works
-        probas = self._predict_image(
-            image, return_proba=True, feature_img=feature_img, fe_use_device=fe_use_device)
-        
-        # Create a probability image with the original shape of the image and the results in the annotated slices
-        if annotations.ndim > 2:
-            probas_img = np.zeros((probas.shape[0],) + annotations.shape, dtype=probas.dtype)
-            probas_img[..., annot_slice_mask, :, :] = probas
-        else:
-            probas_img = probas
-
-        # Restore input dimensionality (especially see if we want to remove z dimension)
-        probas_img = self._restore_dims(probas_img, image.shape)
-
-        # Reset the parameters to the old ones
-        self._param = old_params
-
-        # Determine what to return
-        if add_seg:
-            seg = self._probas_to_classes(probas_img)
-            return probas_img, seg
-        else:
-            return probas_img
-
-### HELPER METHODS
 
     def _run_model_checks(self):
         """

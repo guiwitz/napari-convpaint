@@ -407,6 +407,7 @@ class ConvpaintWidget(QWidget):
             self.advanced_input_group = VHGroup('Input', orientation='G')
             self.advanced_output_group = VHGroup('Output', orientation='G')
             self.advanced_unsupervised_group = VHGroup('Unsupervised extraction (without annotations)', orientation='G')
+            self.advanced_cache_group = VHGroup('Feature caching', orientation='G')
 
             # Add groups to the tab
             self.tabs.add_named_tab('Advanced', self.advanced_note_group.gbox)
@@ -418,6 +419,7 @@ class ConvpaintWidget(QWidget):
             self.tabs.add_named_tab('Advanced', self.advanced_input_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_output_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_unsupervised_group.gbox)
+            self.tabs.add_named_tab('Advanced', self.advanced_cache_group.gbox)
 
             # Text to warn the user about their responsibility
             self.advanced_note = QLabel("Applying these options may lead to situations where the tool does not function as expected. " +
@@ -569,6 +571,37 @@ class ConvpaintWidget(QWidget):
             self.kmeans_label = QLabel('Kmeans clusters (0 = off)')
             self.advanced_unsupervised_group.glayout.addWidget(self.kmeans_label, 1, 0, 1, 2)
             self.advanced_unsupervised_group.glayout.addWidget(self.text_features_kmeans, 1, 2, 1, 2)
+
+            # Feature caching: explanatory note
+            cache_note = QLabel(
+                "Reuse extracted features when segmenting or training the same image "
+                "repeatedly (e.g. while refining annotations), instead of recomputing "
+                "them. Bounded by the memory limit below; features you have reused are "
+                "kept longest.")
+            cache_note.setStyleSheet(style_for_infos)
+            cache_note.setWordWrap(True)
+            self.advanced_cache_group.glayout.addWidget(cache_note, 0, 0, 1, 3)
+
+            # Enable/disable checkbox
+            self.check_use_cache = QCheckBox('Enable feature caching')
+            self.check_use_cache.setChecked(self.cache_enabled)
+            self.advanced_cache_group.glayout.addWidget(self.check_use_cache, 1, 0, 1, 3)
+
+            # Max RAM spinbox (MB)
+            self.cache_max_ram_label = QLabel('Max cache RAM (MB)')
+            self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_label, 2, 0, 1, 2)
+            self.cache_max_ram_spinbox = QSpinBox()
+            self.cache_max_ram_spinbox.setRange(64, 1024 * 1024)  # 64 MB .. 1 TB
+            self.cache_max_ram_spinbox.setSingleStep(256)
+            # Apply a typed limit only once it is complete: typing 4096 passes through 409 MB,
+            # which would evict most of the cache on the way (the arrows still apply immediately)
+            self.cache_max_ram_spinbox.setKeyboardTracking(False)
+            self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
+            self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_spinbox, 2, 2, 1, 1)
+
+            # Current cache size label
+            self.cache_size_label = QLabel('Current cache size: 0 MB')
+            self.advanced_cache_group.glayout.addWidget(self.cache_size_label, 3, 0, 1, 3)
 
         # === MULTIFILE TAB ===
 
@@ -792,6 +825,14 @@ class ConvpaintWidget(QWidget):
                  w.setToolTip('Number of PCA components to use for the features image.\nSet to 0 to disable PCA.')
             for w in [self.kmeans_label, self.text_features_kmeans]:
                 w.setToolTip('Number of Kmeans clusters to use for the features image.\nSet to 0 to disable Kmeans.')
+            self.check_use_cache.setToolTip('Keep the extracted features of recently processed images in memory,\n' +
+                                            'so that re-training or re-segmenting the same image does not extract them again.')
+            for w in [self.cache_max_ram_label, self.cache_max_ram_spinbox]:
+                w.setToolTip('Maximum memory (RAM) the feature cache may use.\n' +
+                             'When full, features you have reused are kept longest; among the never reused,\n' +
+                             'the most recently cached go first (so a stack larger than the cache keeps its\n' +
+                             'first slices instead of cycling through them).')
+            self.cache_size_label.setToolTip('Memory currently used by the feature cache (and number of cached images/planes).')
 
         if 'Multifile' in self.tab_names:
             self.multifile_select_btn.setToolTip('Select the folder containing the images to segment.\n' +
@@ -855,8 +896,9 @@ class ConvpaintWidget(QWidget):
                       self.check_auto_select_annot, # 	self.text_annot_prefix,
                       self.btn_train_on_selected, self.radio_img_training, self.radio_global_training, self.radio_single_training, # self.check_cont_training,
                       self.btn_class_distribution_trained, self.btn_reset_training, self.check_use_dask, self.channels_label,
-                    self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching, self.btn_add_features, self.btn_add_features_stack,
-                      self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans]:
+                      self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching, self.btn_add_features, self.btn_add_features_stack,
+                      self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans,
+                      self.check_use_cache, self.cache_max_ram_label, self.cache_max_ram_spinbox, self.cache_size_label]:
                 w.setToolTip('')
 
         if 'Multifile' in self.tab_names:
@@ -896,6 +938,43 @@ class ConvpaintWidget(QWidget):
             from .convpaint_model import ConvpaintModel
             self._cpm_class = ConvpaintModel
 
+    def _apply_feature_cache(self, *args, recreate=False):
+        """Apply the caching settings from the GUI controls to the active model
+        (connected directly to the controls' change signals). The cache_*
+        attributes hold the pre-GUI defaults and simply mirror the controls
+        afterwards. Pass recreate=True right after the model is (re)created;
+        otherwise the existing cache is updated in place so its entries survive
+        a settings change (disabling clears it, freeing RAM)."""
+        self.cache_enabled = self.check_use_cache.isChecked()
+        self.cache_max_mb = self.cache_max_ram_spinbox.value()
+        # Use decimal MB (1e6) here to match the size shown in the label (also
+        # /1e6), so the number the user types is exactly the max size displayed.
+        max_bytes = int(self.cache_max_mb) * 1_000_000
+        fc = self.cp_model._feature_cache
+        if fc is None or recreate:
+            self.cp_model.enable_feature_cache(enabled=self.cache_enabled, max_bytes=max_bytes)
+        else:
+            fc.set_max_bytes(max_bytes)
+            fc.set_enabled(self.cache_enabled)
+        self._refresh_cache_size_label()
+
+    def _refresh_cache_size_label(self):
+        """Show the current size of the feature cache (called after ops that change it)."""
+        fc = self.cp_model._feature_cache
+        if fc is None:
+            self.cache_size_label.setText('Current cache size: 0 MB')
+            return
+        s = fc.stats()
+        self.cache_size_label.setText(f'Current cache size: {s["bytes"] / 1e6:.0f} MB ({s["entries"]} entries)')
+
+    def _warn_cache_ram(self):
+        """Warn if the feature cache limit exceeds half of the currently available RAM."""
+        import psutil
+        available_mb = psutil.virtual_memory().available / 1e6
+        if self.cache_max_ram_spinbox.value() > available_mb / 2:
+            show_info(f'The feature cache limit ({self.cache_max_ram_spinbox.value()} MB) exceeds half of the '
+                      f'currently available RAM ({available_mb:.0f} MB).')
+
     def _late_init(self):
         """Populate UI widgets with defaults from ConvpaintModel, set up connections, and reset model.
         This is called after the GUI is shown to ensure that all components are properly initialized."""
@@ -903,6 +982,8 @@ class ConvpaintWidget(QWidget):
         # === MODEL DEFAULTS & WIDGET POPULATION ===
         self._import_convpaint_model_class()
         self.cp_model = self._cpm_class()
+        self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
+        self._apply_feature_cache(recreate=True)
         # Get default parameters to set in widget
         self.default_cp_param = self._cpm_class.get_default_params()
         # Use variables of main model as temp variables for the Models tab, as it is the one model used at that time
@@ -1087,6 +1168,11 @@ class ConvpaintWidget(QWidget):
             self.check_use_dask.stateChanged.connect(lambda: setattr(
                 self, 'use_dask', self.check_use_dask.isChecked()))
 
+            # Both cache controls apply the full settings set in one go.
+            self.check_use_cache.stateChanged.connect(self._apply_feature_cache)
+            self.cache_max_ram_spinbox.valueChanged.connect(self._apply_feature_cache)
+            self.cache_max_ram_spinbox.editingFinished.connect(self._warn_cache_ram)
+
             self.text_input_channels.textChanged.connect(lambda: setattr(
                 self, 'input_channels', self.text_input_channels.text()))
             
@@ -1116,6 +1202,7 @@ class ConvpaintWidget(QWidget):
             self.btn_add_features_stack.clicked.connect(self._on_get_feature_image_all)
 
         # === Multifile tab ===
+
         if 'Multifile' in self.tab_names:
             self.multifile_select_btn.clicked.connect(self._select_multifile_img_folder)
             self.multifile_list.cellDoubleClicked.connect(self._on_multifile_open_file)
@@ -1790,10 +1877,23 @@ class ConvpaintWidget(QWidget):
             pbr.set_description(f"Training")
             img_name = self._get_selected_img().name
             in_channels = self._parse_in_channels(self.input_channels)
+            # With auto-segment and the feature cache on, train on the whole plane(s) instead of annotation
+            # tiles (unless the image is tiled for prediction): the prediction needs the whole plane anyway,
+            # so one extraction serves both (annotation tiles are never cached)
+            fc = self.cp_model._feature_cache
+            untile = (self.auto_seg and fc is not None and fc.enabled
+                      and self.cp_model.get_param('tile_annotations') and not self.cp_model.get_param('tile_image'))
+            if untile:
+                self.cp_model.set_param('tile_annotations', False, ignore_warnings=True)
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
-            _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
-                                    in_channels=in_channels, skip_norm=False,
-                                    fe_use_device=self.fe_device, clf_use_device=self.clf_device)
+            # (as in prediction, so train and predict hash identical data and share feature-cache entries)
+            try:
+                _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
+                                        in_channels=in_channels, skip_norm=True,
+                                        fe_use_device=self.fe_device, clf_use_device=self.clf_device)
+            finally:
+                if untile:
+                    self.cp_model.set_param('tile_annotations', True, ignore_warnings=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1805,6 +1905,7 @@ class ConvpaintWidget(QWidget):
         self.trained = True
         self._reset_predict_buttons()
         self._set_model_description()
+        self._refresh_cache_size_label()
 
         # Automatically segment the image if the option is activated
         if self.auto_seg:
@@ -1904,6 +2005,8 @@ class ConvpaintWidget(QWidget):
             # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
             self.viewer.layers[self.instances_prefix].refresh()
 
+        self._refresh_cache_size_label()
+
     def _on_get_feature_image(self, event=None):
         """Get the feature image for the currently viewed frame based
         on the current feature extractor and show it in a new layer."""
@@ -1952,6 +2055,7 @@ class ConvpaintWidget(QWidget):
             self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
         # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
         self.viewer.layers[self.features_prefix].refresh()
+        self._refresh_cache_size_label()
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
@@ -2029,6 +2133,7 @@ class ConvpaintWidget(QWidget):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
+        self._refresh_cache_size_label()
 
     def _on_get_feature_image_all(self):
         """Get the feature image for all frames based
@@ -2102,6 +2207,7 @@ class ConvpaintWidget(QWidget):
             with warnings.catch_warnings():
                 warnings.simplefilter(action="ignore", category=FutureWarning)
                 self.viewer.window._status_bar._toggle_activity_dock(False)
+        self._refresh_cache_size_label()
 
 
     # Load/Save
@@ -2188,6 +2294,7 @@ class ConvpaintWidget(QWidget):
 
         # Load the model (Note: done after updating GUI, since GUI updates might reset clf or change model)
         self.cp_model = new_model
+        self._apply_feature_cache(recreate=True)
         self.cp_model._param = new_param
         temp_fe_model = self._cpm_class.create_fe(new_param.fe_name)
         self.temp_fe_description = temp_fe_model.get_description()
@@ -2277,6 +2384,12 @@ class ConvpaintWidget(QWidget):
          "Global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
+        # Setting one of the two controls mirrors both of them back into the attributes, so the
+        # defaults are read out first; applied explicitly, as an unchanged control emits no signal
+        cache_enabled, cache_max_mb = self.cache_enabled, self.cache_max_mb
+        self.check_use_cache.setChecked(cache_enabled)
+        self.cache_max_ram_spinbox.setValue(cache_max_mb)
+        self._apply_feature_cache(recreate=True)
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
@@ -2341,6 +2454,7 @@ class ConvpaintWidget(QWidget):
 
     def _reset_attributes(self):
         """Reset all attributes of the widget."""
+        import psutil # For the available RAM the feature cache limit is clamped to
         # Set widget-specific attributes
         self.image_mean = None
         self.image_std = None
@@ -2368,6 +2482,8 @@ class ConvpaintWidget(QWidget):
         self.features_prefix = 'features' # Prefix for the feature image layer name
         self.cont_training = "Image" # Update features for subsequent training ("Image" or "Off" or "Global")
         self.use_dask = False # Use Dask for parallel processing
+        self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
+        self.cache_max_mb = min(2048, int(psutil.virtual_memory().available / 4e6)) # Max RAM (MB) the feature cache may use (2 GB default, clamped to a quarter of the available RAM for small machines)
         self.fe_device = 'auto' # Device to use for the FE (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.clf_device = 'auto' # Device to use for the classifier (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)
@@ -2566,6 +2682,7 @@ class ConvpaintWidget(QWidget):
         # Sync the channel-mode and normalization radios with the new model's params
         self._reset_radio_channel_mode_choices()
         self._reset_radio_norm_choices()
+        self._apply_feature_cache(recreate=True)
         self._reset_device_options()
         self._reset_clf() # Call to take all actions needed after resetting the clf
         # Reset the features for continuous training
@@ -3092,9 +3209,6 @@ class ConvpaintWidget(QWidget):
 
     def _reset_device_options(self):
         """Reset device dropdown availability and synchronize FE/CLF device policies."""
-        if not hasattr(self, "device_dropdown"):
-            return
-
         default_tooltip = 'Select device policy for feature extraction and classifier.'
         no_gpu_tooltip = 'No CUDA/MPS backend available. Device is fixed to CPU.'
         cuda_both_tooltip = 'CUDA is available and supported by this feature extractor. GPU can be used for both feature extraction and classifier.'
