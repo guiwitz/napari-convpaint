@@ -2,7 +2,7 @@ from qtpy.QtWidgets import (QWidget, QPushButton,QVBoxLayout,
                             QLabel, QComboBox,QFileDialog, QListWidget,
                             QCheckBox, QAbstractItemView, QGridLayout, QSpinBox, QButtonGroup,
                             QRadioButton,QDoubleSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-                            QMessageBox)
+                            QMessageBox, QSizePolicy)
 from qtpy import QtWidgets, QtGui
 from qtpy.QtCore import Qt, QTimer, QUrl
 from magicgui.widgets import create_widget
@@ -21,6 +21,44 @@ from collections import defaultdict
 # import torch
 # from .utils import normalize_image, compute_image_stats, normalize_image_percentile, normalize_image_imagenet, get_fe_device
 # from .convpaint_model import ConvpaintModel
+
+
+class NoteLabel(QLabel):
+    """Word-wrapped label that always gets the height its text needs at the current width
+    (in grid layouts, wrapped labels are otherwise cut off when the widget gets narrow)."""
+
+    def __init__(self, text=''):
+        super().__init__(text)
+        self.setWordWrap(True)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.setMinimumHeight(self.heightForWidth(self.width()))
+
+
+class PathLabel(QLabel):
+    """Label showing a path, elided in the middle when too long (full path as tooltip and in text())."""
+
+    def __init__(self, path=''):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred) # Takes the available width, never forces it
+        self.setText(path)
+
+    def setText(self, path):
+        self._path = path
+        self.setToolTip(path)
+        self._elide()
+
+    def text(self):
+        return getattr(self, '_path', '')
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        super().setText(self.fontMetrics().elidedText(self.text(), Qt.ElideMiddle, self.width()))
+
 
 class ConvpaintWidget(QWidget):
     """
@@ -54,6 +92,7 @@ class ConvpaintWidget(QWidget):
         self.selected_channel = None
         self.spatial_dim_info_thresh = 1000000
         self.default_brush_size = 3
+        self.max_classes = 255 # Annotations and segmentation are uint8, so higher values would wrap around
         # suffixes for opening images in multifile, to exclude potential annotation/segmentation files
         self.multifile_annot_suffixes = ["annot", "annotation", "annotations", "scribble", "scribbles", "scrib"]
         self.multifile_seg_suffixes = ["seg", "segmentation", "segmentations", "prediction", "predictions", "pred", "preds", "mask", "masks"]
@@ -74,30 +113,26 @@ class ConvpaintWidget(QWidget):
         self.tab_names += ['Advanced']
         self.tab_names += ['Multifile']
         tab_layouts = [None if name not in ['Models', 'Multifile'] else QGridLayout() for name in self.tab_names]
-        self.tabs = TabSet(self.tab_names, tab_layouts=tab_layouts) # [None, None, QGridLayout()])
+        self.tabs = TabSet(self.tab_names, tab_layouts=tab_layouts, scrollable=True) # Scrollable, so that nothing is cut off on small screens
+        # Left-aligned tabs; scroll buttons let the bar collapse gracefully
+        # when the dock is narrow.
         tab_bar = self.tabs.tabBar()
-        tab_bar.setSizePolicy(tab_bar.sizePolicy().horizontalPolicy(), tab_bar.sizePolicy().verticalPolicy())
-
-        # Create docs button
-        docs_button = QtWidgets.QToolButton()
-        docs_button.setText("Documentation")
-        docs_button.setStyleSheet("QToolButton {color: #999; text-decoration: underline; margin-left: 4px; margin-right: 8px}")
-        docs_button.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(QUrl("https://guiwitz.github.io/napari-convpaint/book/Landing.html")))
-        docs_button.setToolTip("Open the documentation in your default browser.")
-
-        # Create a widget to hold tab bar and button side by side
-        tab_header_widget = QWidget()
-        tab_header_layout = QtWidgets.QHBoxLayout(tab_header_widget)
-        tab_header_layout.setContentsMargins(0, 0, 0, 0)
-        tab_header_layout.setSpacing(0)
-
-        tab_header_layout.addWidget(tab_bar)
-        tab_header_layout.addWidget(docs_button)
+        tab_bar.setUsesScrollButtons(True)
 
         # Add to your main layout
-        self.main_layout.addWidget(tab_header_widget)
         self.main_layout.addWidget(self.tabs)
-        
+
+        # Spacing and margins like napari's own panels
+        self.main_layout.setSpacing(0)
+        self.main_layout.setContentsMargins(6, 4, 6, 6)
+        self._style_tabs()
+        self.viewer.events.theme.connect(self._style_tabs)
+        for i in range(self.tabs.count()):
+            page_layout = self.tabs.widget(i).layout()
+            if page_layout is not None:
+                # No left margin (group boxes align with the tab headers); right margin keeps a gap to the scrollbar
+                page_layout.setContentsMargins(0, 4, 6, 8)
+
         # Align rows in some tabs on top
         for tab_name in ['Home', 'Models', 'Advanced']:
             if tab_name in self.tabs.tab_names:
@@ -108,21 +143,33 @@ class ConvpaintWidget(QWidget):
         # Create groups and separate labels
         self.model_group = VHGroup('Model', orientation='G')
         self.layer_selection_group = VHGroup('Layer selection', orientation='G')
-        self.image_processing_group = VHGroup('Image type and normalization', orientation='G')
-        self.train_group = VHGroup('Train/Segment', orientation='G')
+        self.image_processing_group = VHGroup('Image type && Normalization', orientation='G')
+        self.train_group = VHGroup('Train / Segment', orientation='G')
         # self.segment_group = VHGroup('Segment', orientation='G')
         # self.load_save_group = VHGroup('Load/Save', orientation='G')
-        self.acceleration_group = VHGroup('Acceleration and post-processing', orientation='G')
+        self.acceleration_group = VHGroup('Acceleration && Post-processing', orientation='G')
         # Create the shortcuts info
-        shortcuts_text1 = 'Shift+a: Toggle annotations\nShift+s: Train\nShift+d: Predict\nShift+f: Toggle prediction'
-        shortcuts_text2 = 'Shift+q: Set annotations label 1\nShift+w: Set annotations label 2\nShift+e: Set annotations label 3\nShift+r: Set annotations label 4'
+        shortcuts_text1 = 'Shift+a: Toggle annot.\nShift+s: Train\nShift+d: Predict\nShift+f: Toggle prediction'
+        shortcuts_text2 = 'Shift+q: Set annot. label 1\nShift+w: Set annot. label 2\nShift+e: Set annot. label 3\nShift+r: Set annot. label 4'
         shortcuts_label1 = QLabel(shortcuts_text1)
         shortcuts_label2 = QLabel(shortcuts_text2)
         shortcuts_label1.setStyleSheet(style_for_shortcut_info)
         shortcuts_label2.setStyleSheet(style_for_shortcut_info)
+        # Docs link above the shortcut hints
+        docs_link = QLabel(
+            'Information and tutorials in '
+            '<a href="https://guiwitz.github.io/napari-convpaint/book/Landing.html" '
+            'style="color: #787878;">documentation</a>')  # same grey as the hint text
+        docs_link.setOpenExternalLinks(True)
+        docs_link.setToolTip("Open the documentation in your default browser.")
+        docs_link.setStyleSheet(style_for_shortcut_info)
         shortcuts_grid = QGridLayout()
-        shortcuts_grid.addWidget(shortcuts_label1, 0, 0)
-        shortcuts_grid.addWidget(shortcuts_label2, 0, 1)
+        # No grid margins: the hints are plain info text, so the usual widget
+        # margins just read as a large gap below the last group box.
+        shortcuts_grid.setContentsMargins(4, 0, 4, 0)
+        shortcuts_grid.addWidget(docs_link, 0, 0, 1, 2)
+        shortcuts_grid.addWidget(shortcuts_label1, 1, 0)
+        shortcuts_grid.addWidget(shortcuts_label2, 1, 1)
         shortcuts_widget = QWidget()
         shortcuts_widget.setLayout(shortcuts_grid)
 
@@ -144,6 +191,8 @@ class ConvpaintWidget(QWidget):
         # Add buttons for "Model" group
         # Current model description label
         self.model_description1 = QLabel('None')
+        # Word wrap so the summary never dictates the dock's minimum width
+        self.model_description1.setWordWrap(True)
         self.model_group.glayout.addWidget(self.model_description1, 0,0,1,2)
         # Save and load model buttons
         self.save_model_btn = QPushButton('Save model')
@@ -166,7 +215,7 @@ class ConvpaintWidget(QWidget):
         self.image_layer_label = QLabel('Image layer')
         self.layer_selection_group.glayout.addWidget(self.image_layer_label, 0,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.image_layer_selection_widget.native, 0,1,1,1)
-        self.annotations_layer_label = QLabel('annotations layer')
+        self.annotations_layer_label = QLabel('Annotations layer')
         self.layer_selection_group.glayout.addWidget(self.annotations_layer_label, 1,0,1,1)
         self.layer_selection_group.glayout.addWidget(self.annotations_layer_selection_widget.native, 1,1,1,1)
 
@@ -178,9 +227,9 @@ class ConvpaintWidget(QWidget):
         # Add buttons for "Image Processing" group
         # Radio buttons for "Data Dimensions"
         self.button_group_channels = QButtonGroup()
-        self.radio_single_channel = QRadioButton('Single channel image')
-        self.radio_multi_channel = QRadioButton('Multichannel image')
-        self.radio_rgb = QRadioButton('RGB image')
+        self.radio_single_channel = QRadioButton('Single channel img')
+        self.radio_multi_channel = QRadioButton('Multichannel img')
+        self.radio_rgb = QRadioButton('RGB img')
         self.radio_single_channel.setChecked(True)
         self.channel_buttons = [self.radio_single_channel, self.radio_multi_channel, self.radio_rgb]
         for x in self.channel_buttons: x.setEnabled(False)
@@ -198,16 +247,21 @@ class ConvpaintWidget(QWidget):
         # "Normalize" radio buttons
         self.button_group_normalize = QButtonGroup()
         self.radio_no_normalize = QRadioButton('No normalization')
-        self.radio_normalize_over_stack = QRadioButton('Normalize over stack')
-        self.radio_normalize_by_image = QRadioButton('Normalized by plane')
+        self.radio_normalize_over_stack = QRadioButton('Norm. over stack')
+        self.radio_normalize_by_image = QRadioButton('Norm. by plane')
         self.radio_normalize_over_stack.setChecked(True)
         self.norm_buttons = [self.radio_no_normalize, self.radio_normalize_over_stack, self.radio_normalize_by_image]
         self.button_group_normalize.addButton(self.radio_no_normalize, id=1)
         self.button_group_normalize.addButton(self.radio_normalize_over_stack, id=2)
         self.button_group_normalize.addButton(self.radio_normalize_by_image, id=3)
-        self.image_processing_group.glayout.addWidget(self.radio_no_normalize, 0,2,1,1)
-        self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,2,1,1)
-        self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,2,1,1)
+        # Left-align the right radio column within its cells
+        self.image_processing_group.glayout.addWidget(self.radio_no_normalize, 0,2,1,1, Qt.AlignLeft)
+        self.image_processing_group.glayout.addWidget(self.radio_normalize_over_stack, 1,2,1,1, Qt.AlignLeft)
+        self.image_processing_group.glayout.addWidget(self.radio_normalize_by_image, 2,2,1,1, Qt.AlignLeft)
+        # Extra width goes to the two radio columns, not to the divider column
+        self.image_processing_group.glayout.setColumnStretch(0, 1)
+        self.image_processing_group.glayout.setColumnStretch(1, 0)
+        self.image_processing_group.glayout.setColumnStretch(2, 1)
 
         # Add buttons for "Train/Segment" group
         self.train_classifier_btn = QPushButton('Train')
@@ -226,35 +280,35 @@ class ConvpaintWidget(QWidget):
         # "Tile annotations" checkbox
         self.check_tile_annotations = QCheckBox('Tile annotations for training')
         self.check_tile_annotations.setChecked(False)
-        self.acceleration_group.glayout.addWidget(self.check_tile_annotations, 0,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.check_tile_annotations, 0,0,1,2)
         # "Tile image" checkbox
         self.check_tile_image = QCheckBox('Tile image for segmentation')
         self.check_tile_image.setChecked(False)
-        self.acceleration_group.glayout.addWidget(self.check_tile_image, 0,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.check_tile_image, 1,0,1,2)
         # Use Device/GPU dropdown
         self.device_options_default = ['auto', 'gpu', 'cpu']
         self.device_options_gpu_only_clf = ['auto', 'gpu (only classifier)', 'cpu']
         self.device_dropdown = QComboBox()
         self.device_dropdown.addItems(self.device_options_default)
         self.device_label = QLabel('Device (GPU/CPU)')
-        self.acceleration_group.glayout.addWidget(self.device_label, 1,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.device_dropdown, 1,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.device_label, 2,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.device_dropdown, 2,1,1,1)
         # "Downsample" spinbox
         self.spin_downsample = QSpinBox()
         self.spin_downsample.setMinimum(-20)
         self.spin_downsample.setMaximum(20)
         self.spin_downsample.setValue(1)
         self.downsample_label = QLabel('Downsample input')
-        self.acceleration_group.glayout.addWidget(self.downsample_label, 2,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.spin_downsample, 2,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.downsample_label, 3,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.spin_downsample, 3,1,1,1)
         # "Smoothen output" spinbox
         self.spin_smoothen = QSpinBox()
         self.spin_smoothen.setMinimum(1)
         self.spin_smoothen.setMaximum(20)
         self.spin_smoothen.setValue(1)
         self.smoothen_label = QLabel('Smoothen output')
-        self.acceleration_group.glayout.addWidget(self.smoothen_label, 3,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.spin_smoothen, 3,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.smoothen_label, 4,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.spin_smoothen, 4,1,1,1)
 
         # === MODEL TAB ===
 
@@ -271,6 +325,8 @@ class ConvpaintWidget(QWidget):
         
         # Current model
         self.model_description2 = QLabel('None')
+        # Word wrap so the summary never dictates the dock's minimum width
+        self.model_description2.setWordWrap(True)
         self.current_model_group.glayout.addWidget(self.model_description2, 0, 0, 1, 2)
 
         # Add "FE architecture" combo box to FE group
@@ -280,6 +336,8 @@ class ConvpaintWidget(QWidget):
         # Add "FE description" label to FE group
         self.FE_description = QLabel('None')
         self.FE_description.setWordWrap(True)
+        # Info-text styling (italic, dimmed), like the notes on other tabs
+        self.FE_description.setStyleSheet(style_for_infos)
         self.fe_group.glayout.addWidget(self.FE_description, 2, 0, 1, 2)
 
         # Add "FE layers" list to FE group
@@ -358,79 +416,62 @@ class ConvpaintWidget(QWidget):
         # === CLASSES TAB ===
 
         if 'Classes' in self.tab_names:
-            # Create the main layout
-            self.classes_layout = QGridLayout()
+            # Create the group box and use its layout directly (as the other tabs do)
+            self.classes_group = VHGroup('Class names (optional)', orientation='G')
+            self.classes_layout = self.classes_group.glayout
             self.classes_layout.setAlignment(Qt.AlignTop)
-            self.classes_widget = QWidget()
-            self.classes_widget.setLayout(self.classes_layout)
              
-            # Add text to instruct the user (note that it is optional to use)
-            class_names_text = QLabel('Set the names of the classes (optional):')
-            class_names_text.setWordWrap(True)
-            # class_names_text.setStyleSheet("font-size: 11px; color: rgba(120, 120, 120, 70%)")#; font-style: italic")
-            self.classes_layout.addWidget(class_names_text, 0, 0, 1, 10)
-
-            # Add buttons ("add class", "remove class" and reset)
+            # Add buttons ("add class", "remove class", import/export and reset)
             self.add_class_btn = QPushButton('Add class')
-            self.classes_layout.addWidget(self.add_class_btn, len(self.initial_names)+1, 0, 1, 5)
             self.remove_class_btn = QPushButton('Remove class')
-            self.classes_layout.addWidget(self.remove_class_btn, len(self.initial_names)+1, 5, 1, 5)
-            # Minimal import/export buttons (CSV)
             self.export_class_names_btn = QPushButton('Export class names (csv)')
-            self.classes_layout.addWidget(self.export_class_names_btn, len(self.initial_names)+2, 0, 1, 5)
             self.import_class_names_btn = QPushButton('Import class names (csv/txt)')
-            self.classes_layout.addWidget(self.import_class_names_btn, len(self.initial_names)+2, 5, 1, 5)
-            # Reset to initial state
             self.reset_class_names_btn = QPushButton('Reset to default')
-            self.classes_layout.addWidget(self.reset_class_names_btn, len(self.initial_names)+3, 0, 1, 10)
             self.btn_class_distribution_annot = QPushButton('Show class distribution (in annotations layer)')
-            self.classes_layout.addWidget(self.btn_class_distribution_annot, len(self.initial_names)+4, 0, 1, 10)
+            self._place_class_buttons(len(self.initial_names))
 
             # Create the class names
             self._create_default_class_names()
 
-            # Add the widget to the tab
+            # Add the group box to the tab, like the other tabs
             self.classes_layout.setColumnStretch(1, 1)
             self.classes_layout.setColumnStretch(5, 1)
-            self.tabs.add_named_tab('Classes', self.classes_widget)
+            self.tabs.add_named_tab('Classes', self.classes_group.gbox)
 
         # === ADVANCED TAB ===
 
         if 'Advanced' in self.tab_names:
             # Create group boxes
             self.advanced_note_group = VHGroup('Important note', orientation='G')
-            self.advanced_appearance_group = VHGroup('Appearance', orientation='G')
-            self.advanced_labels_group = VHGroup('Layers handling', orientation='G')
-            self.advanced_training_group = VHGroup('Training', orientation='G')
+            self.advanced_labels_group = VHGroup('Layers handling && Appearance', orientation='G')
+            self.advanced_training_group = VHGroup('Training && Prediction', orientation='G')
             # self.advanced_multifile_group = VHGroup('Multifile Training', orientation='G')
-            self.advanced_prediction_group = VHGroup('Prediction', orientation='G')
             self.advanced_input_group = VHGroup('Input', orientation='G')
             self.advanced_output_group = VHGroup('Output', orientation='G')
             self.advanced_unsupervised_group = VHGroup('Unsupervised extraction (without annotations)', orientation='G')
+            self.advanced_cache_group = VHGroup('Feature reuse (cache && store)', orientation='G')
 
             # Add groups to the tab
             self.tabs.add_named_tab('Advanced', self.advanced_note_group.gbox)
-            self.tabs.add_named_tab('Advanced', self.advanced_appearance_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_labels_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_training_group.gbox)
             # self.tabs.add_named_tab('Advanced', self.advanced_multifile_group.gbox)$
-            self.tabs.add_named_tab('Advanced', self.advanced_prediction_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_input_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_output_group.gbox)
             self.tabs.add_named_tab('Advanced', self.advanced_unsupervised_group.gbox)
+            self.tabs.add_named_tab('Advanced', self.advanced_cache_group.gbox)
 
             # Text to warn the user about their responsibility
-            self.advanced_note = QLabel("Applying these options may lead to situations where the tool does not function as expected. " +
+            self.advanced_note = NoteLabel("Applying these options may lead to situations where the tool does not function as expected. " +
                                         "In particular, it is the user's responsibility that the dimensions of images and annotations are compatible. " +
                                         "Please refer to the documentation or contact the developers for assistance.")
             self.advanced_note.setStyleSheet(style_for_infos)
-            self.advanced_note.setWordWrap(True)
             self.advanced_note_group.glayout.addWidget(self.advanced_note, 0, 0, 1, 2)
 
-            # Appearance: show/hide tooltips
+            # Show/hide tooltips
             self.check_show_tooltips = QCheckBox('Show tooltips')
             self.check_show_tooltips.setChecked(True)
-            self.advanced_appearance_group.glayout.addWidget(self.check_show_tooltips, 0, 0, 1, 1)
+            self.advanced_labels_group.glayout.addWidget(self.check_show_tooltips, 5, 0, 1, 1)
             # Wire the checkbox to toggle the promoted widgets' tooltips
             self.check_show_tooltips.toggled.connect(lambda checked: self._setup_init_tooltips() if checked else self._remove_init_tooltips())
 
@@ -444,14 +485,17 @@ class ConvpaintWidget(QWidget):
             self.check_keep_layers.setChecked(self.keep_layers)
             self.advanced_labels_group.glayout.addWidget(self.check_keep_layers, 1, 1, 1, 1)
 
-            # Button for adding annotations layers for selected images
-            self.btn_add_all_annot_layers = QPushButton('Add for all selected')
-            self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 2, 0, 1, 1)
-
             # Checkbox for auto-selecting annotations layers
-            self.check_auto_select_annot = QCheckBox('Auto-select annotations layer')
+            self.check_auto_select_annot = QCheckBox('Auto select annot. layer')
             self.check_auto_select_annot.setChecked(self.auto_select_annot)
-            self.advanced_labels_group.glayout.addWidget(self.check_auto_select_annot, 2, 1, 1, 1)
+            self.advanced_labels_group.glayout.addWidget(self.check_auto_select_annot, 2, 0, 1, 2)
+
+            # Button for adding annotations layers for selected images
+            self.btn_add_all_annot_layers = QPushButton('Add annot. layers for all selected images')
+            self.advanced_labels_group.glayout.addWidget(self.btn_add_all_annot_layers, 3, 0, 1, 2)
+
+            # --- dashed divider between the layer settings and appearance ---
+            self.advanced_labels_group.glayout.addWidget(self._dashed_divider(), 4, 0, 1, 2)
 
             # Textbox to define the prefix for the annotations layers; NOTE: DISABLED FOR NOW
             # self.text_annot_prefix = QtWidgets.QLineEdit()
@@ -486,20 +530,21 @@ class ConvpaintWidget(QWidget):
 
             # Label for number of trainings performed
             self.label_training_count = QLabel('')
-            self.advanced_training_group.glayout.addWidget(self.label_training_count, 3, 0, 1, 2)
+            self.advanced_training_group.glayout.addWidget(self.label_training_count, 3, 0, 1, 4)
 
             # Button to display a diagram of class distribution
             self.btn_class_distribution_trained = QPushButton('Show class distr. (trained)')
-            self.advanced_training_group.glayout.addWidget(self.btn_class_distribution_trained, 3, 2, 1, 2)
+            self.advanced_training_group.glayout.addWidget(self.btn_class_distribution_trained, 4, 0, 1, 4)
 
             # Reset training button
             self.btn_reset_training = QPushButton('Reset continuous training')
-            self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 4, 0, 1, 4)
+            self.advanced_training_group.glayout.addWidget(self.btn_reset_training, 5, 0, 1, 4)
 
-            # Dask option
-            self.check_use_dask = QCheckBox('Use Dask when tiling image for segmentation')
+            # Prediction part of the group: the one option that is not on the Home tab
+            self.advanced_training_group.glayout.addWidget(self._dashed_divider(), 6, 0, 1, 4)
+            self.check_use_dask = QCheckBox('Put image tiles on Dask workers')
             self.check_use_dask.setChecked(self.use_dask)
-            self.advanced_prediction_group.glayout.addWidget(self.check_use_dask, 0, 0, 1, 1)
+            self.advanced_training_group.glayout.addWidget(self.check_use_dask, 7, 0, 1, 4)
 
             # Input channels option
             self.text_input_channels = QtWidgets.QLineEdit()
@@ -511,7 +556,7 @@ class ConvpaintWidget(QWidget):
 
             # Button to switch first to axes
             self.btn_switch_axes = QPushButton('Switch channels axis')
-            self.advanced_input_group.glayout.addWidget(self.btn_switch_axes, 1, 0, 1, 2)
+            self.advanced_input_group.glayout.addWidget(self.btn_switch_axes, 1, 0, 1, 4)
 
             # Checkbox for adding segmentation
             self.check_add_seg = QCheckBox('Segmentation')
@@ -570,14 +615,66 @@ class ConvpaintWidget(QWidget):
             self.advanced_unsupervised_group.glayout.addWidget(self.kmeans_label, 1, 0, 1, 2)
             self.advanced_unsupervised_group.glayout.addWidget(self.text_features_kmeans, 1, 2, 1, 2)
 
+            # Feature caching: explanatory note
+            self.cache_note = NoteLabel(
+                "Reuse extracted features when segmenting or training the same image "
+                "repeatedly (e.g. while refining annotations), instead of recomputing "
+                "them. Bounded by the memory limit below; features you have reused are "
+                "kept longest.")
+            self.cache_note.setStyleSheet(style_for_infos)
+            self.advanced_cache_group.glayout.addWidget(self.cache_note, 0, 0, 1, 3)
+
+            # Enable/disable checkbox
+            self.check_use_cache = QCheckBox('Enable feature caching')
+            self.check_use_cache.setChecked(self.cache_enabled)
+            self.advanced_cache_group.glayout.addWidget(self.check_use_cache, 1, 0, 1, 3)
+
+            # Max RAM spinbox (MB)
+            self.cache_max_ram_label = QLabel('Max cache RAM (MB)')
+            self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_label, 2, 0, 1, 2)
+            self.cache_max_ram_spinbox = QSpinBox()
+            self.cache_max_ram_spinbox.setRange(64, 1024 * 1024)  # 64 MB .. 1 TB
+            self.cache_max_ram_spinbox.setSingleStep(256)
+            # Apply a typed limit only once it is complete: typing 4096 passes through 409 MB,
+            # which would evict most of the cache on the way (the arrows still apply immediately)
+            self.cache_max_ram_spinbox.setKeyboardTracking(False)
+            self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
+            self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_spinbox, 2, 2, 1, 1)
+
+            # Cache size label and clear button
+            self.cache_size_label = QLabel('Cached: 0 MB')
+            self.advanced_cache_group.glayout.addWidget(self.cache_size_label, 3, 0, 1, 2)
+            self.btn_cache_clear = QPushButton('Clear cache')
+            self.advanced_cache_group.glayout.addWidget(self.btn_cache_clear, 3, 2, 1, 1)
+
+            # --- dashed divider between the cache and the store parts ---
+            self.advanced_cache_group.glayout.addWidget(self._dashed_divider(), 4, 0, 1, 3)
+
+            # Feature store: enable checkbox, folder (with button to choose), size label, delete button
+            self.check_use_store = QCheckBox('Store features on disk')
+            self.check_use_store.setChecked(self.store_enabled)
+            self.advanced_cache_group.glayout.addWidget(self.check_use_store, 5, 0, 1, 3)
+            self.store_folder_label = PathLabel(self.store_folder)
+            self.advanced_cache_group.glayout.addWidget(self.store_folder_label, 6, 0, 1, 2)
+            self.btn_store_folder = QPushButton('Choose folder')
+            self.advanced_cache_group.glayout.addWidget(self.btn_store_folder, 6, 2, 1, 1)
+            self.store_size_label = QLabel('Stored: (store off)')
+            self.advanced_cache_group.glayout.addWidget(self.store_size_label, 7, 0, 1, 2)
+            self.btn_store_delete = QPushButton('Delete stored features')
+            self.btn_store_delete.setEnabled(self.store_enabled)
+            self.advanced_cache_group.glayout.addWidget(self.btn_store_delete, 7, 2, 1, 1)
+            self.btn_store_features = QPushButton('Store features of this image/stack')
+            self.btn_store_features.setEnabled(self.store_enabled)
+            self.advanced_cache_group.glayout.addWidget(self.btn_store_features, 8, 0, 1, 3)
+
         # === MULTIFILE TAB ===
 
         if 'Multifile' in self.tab_names:
             # Create three groups for the Multifile tab to match other tabs' style
             self.multifile_files_group = VHGroup('Files', orientation='G')
-            self.multifile_train_group = VHGroup('Train/Segment', orientation='G')
-            self.multifile_reset_group = VHGroup('Clear/Close', orientation='G')
-            self.multifile_export_import_group = VHGroup('Export/Import', orientation='G')
+            self.multifile_train_group = VHGroup('Train / Segment', orientation='G')
+            self.multifile_reset_group = VHGroup('Clear / Close', orientation='G')
+            self.multifile_export_import_group = VHGroup('Export / Import', orientation='G')
             self.multifile_settings_group = VHGroup('Preferences', orientation='G')
 
             # Add groups to the Multifile tab
@@ -592,17 +689,24 @@ class ConvpaintWidget(QWidget):
 
             # --- Files group: folder selector + file list
             lbl_folder = QLabel('Folder:')
-            self.multifile_path_edit = QtWidgets.QLineEdit()
-            # Make path read-only; folder is selected via the button only
-            self.multifile_path_edit.setReadOnly(True)
+            self.multifile_path_edit = PathLabel('') # Folder is selected via the button only
             self.multifile_select_btn = QPushButton('Open image folder')
             self.multifile_files_group.glayout.addWidget(lbl_folder, 0, 0, 1, 1)
             self.multifile_files_group.glayout.addWidget(self.multifile_path_edit, 0, 1, 1, 1)
             self.multifile_files_group.glayout.addWidget(self.multifile_select_btn, 0, 2, 1, 1)
+            self.multifile_files_group.glayout.setColumnStretch(1, 1) # The path takes the spare width
 
             self.multifile_list = QTableWidget()
             self.multifile_list.setColumnCount(3)
             self.multifile_list.setHorizontalHeaderLabels(['Annot.', 'Image Filename', 'Segm.'])
+            # Flat header and list in the ACTIVE napari theme's colors; re-apply
+            # whenever the theme changes (dark <-> light).
+            self._style_multifile_list()
+            self.viewer.events.theme.connect(self._style_multifile_list)
+            # Same font as the rest of the plugin (tables default to the
+            # platform's smaller 'small-widget' font on some systems).
+            self.multifile_list.setFont(self.font())
+            self.multifile_list.horizontalHeader().setFont(self.font())
             # Align the 'Image Filename' header label to the left for readability
             try:
                 header_item = self.multifile_list.horizontalHeaderItem(1)
@@ -629,19 +733,19 @@ class ConvpaintWidget(QWidget):
 
             self.multifile_clear_annotations_btn = QPushButton('Clear selected annot.')
             self.multifile_reset_group.glayout.addWidget(self.multifile_clear_annotations_btn, 1, 0, 1, 1)
-            self.multifile_reset_folder_btn = QPushButton('Close folder')
-            self.multifile_reset_group.glayout.addWidget(self.multifile_reset_folder_btn, 1, 1, 1, 1)
             self.multifile_clear_segmentations_btn = QPushButton('Clear selected segm.')
-            self.multifile_reset_group.glayout.addWidget(self.multifile_clear_segmentations_btn, 1, 2, 1, 1)
+            self.multifile_reset_group.glayout.addWidget(self.multifile_clear_segmentations_btn, 1, 1, 1, 1)
+            self.multifile_reset_folder_btn = QPushButton('Close folder')
+            self.multifile_reset_group.glayout.addWidget(self.multifile_reset_folder_btn, 2, 0, 1, 2)
 
             # --- Train/Segment group: action buttons (placeholders for now)
-            self.multifile_train_all_annot_btn = QPushButton('Train on annotated')
+            self.multifile_train_all_annot_btn = QPushButton('Train on annot.')
             self.multifile_preview_btn = QPushButton('Preview segmentation')
             self.multifile_segment_selected_btn = QPushButton('Segment selected')
 
             self.multifile_train_group.glayout.addWidget(self.multifile_train_all_annot_btn, 0, 0, 1, 1)
             self.multifile_train_group.glayout.addWidget(self.multifile_preview_btn, 0, 1, 1, 1)
-            self.multifile_train_group.glayout.addWidget(self.multifile_segment_selected_btn, 0, 2, 1, 1)
+            self.multifile_train_group.glayout.addWidget(self.multifile_segment_selected_btn, 1, 0, 1, 2)
 
             # --- Import/Export group: action buttons (placeholders for now)
             self.multifile_export_annot_btn = QPushButton('Export annotations')
@@ -653,8 +757,8 @@ class ConvpaintWidget(QWidget):
             # --- Settings group: checkboxes
             self.lbl_import_open_labels = QLabel('Import and auto-open:')
             self.multifile_settings_group.glayout.addWidget(self.lbl_import_open_labels, 0, 0, 1, 1)
-            self.check_open_import_annotations = QCheckBox('Annotations')
-            self.check_open_import_segmentations = QCheckBox('Segmentation')
+            self.check_open_import_annotations = QCheckBox('Annot.') # (as in the table header)
+            self.check_open_import_segmentations = QCheckBox('Segm.')
             self.check_open_import_annotations.setChecked(True)
             self.check_open_import_segmentations.setChecked(True)
             self.multifile_settings_group.glayout.addWidget(self.check_open_import_annotations, 0, 1, 1, 1)
@@ -670,12 +774,21 @@ class ConvpaintWidget(QWidget):
             self.multifile_segmentation_suffix_txt.setText('segmentation')
             self.multifile_settings_group.glayout.addWidget(self.multifile_annotations_suffix_txt, 1, 1, 1, 1)
             self.multifile_settings_group.glayout.addWidget(self.multifile_segmentation_suffix_txt, 1, 2, 1, 1)
-        
+
+        # === Match napari's control density ===
+        # Qt's default grid spacing is looser than napari's own panels; tighten
+        # the spacing between the rows inside all group boxes.
+        for gbox in self.findChildren(QtWidgets.QGroupBox):
+            for gbox_layout in gbox.findChildren(QGridLayout):
+                gbox_layout.setVerticalSpacing(4)
+                gbox_layout.setHorizontalSpacing(4)
+
         # === Show tooltips by default ===
 
         self._setup_init_tooltips()
         # Set device dropdown tooltip separately, as we want to show these dynamically and permanently, even when the "Show tooltips" checkbox is unchecked
         self.device_dropdown.setToolTip('Select device policy for feature extraction and classifier.')
+
 
     def _setup_init_tooltips(self):
 
@@ -709,7 +822,9 @@ class ConvpaintWidget(QWidget):
         self.segment_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie.')
         self.segment_all_btn.setToolTip('Segment all slices/frames of 3D image/movie.')
         self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\n' +
-                                               'Disable for models that extract long range features (e.g. DINO).')
+                                               'Disable for models that extract long range features (e.g. DINO).\n' +
+                                               'Skipped when training with auto-segment and feature caching on\n' +
+                                               '(the whole plane is extracted, since the prediction needs it anyway).')
         self.check_tile_image.setToolTip('Tile image to reduce memory usage.\n' +
                                          'Use with care when using models that extract long range features (e.g. DINO).')
         # Do not toggle device dropdown, as we want to show tooltips dynamically and permanently
@@ -767,10 +882,11 @@ class ConvpaintWidget(QWidget):
             self.radio_img_training.setToolTip('Keep features in memory, updating them only for new annotations in each training, as long as the image is not changed.')
             self.radio_global_training.setToolTip('Keep features in memory, updating them only for new annotations in each training, until reset manually.')
             self.radio_single_training.setToolTip('Extract all features freshly for each training.')
+            self.check_use_dask.setToolTip('Distribute the tiles of a tiled segmentation to parallel Dask workers\n' +
+                                           '(only applies with "Tile image for segmentation").')
             # self.check_cont_training.setToolTip('Save and use combined features in memory for training')
             self.btn_class_distribution_trained.setToolTip('Show a diagram of the class distribution in the data saved in the model for training.')
             self.btn_reset_training.setToolTip('Clear training history and restart training counter.')
-            self.check_use_dask.setToolTip('Use Dask when using the option "Tile for segmentation".')
             for w in [self.channels_label, self.text_input_channels]:
                 w.setToolTip('Comma-separated list of channels to use for training and segmentation.\n' +
                              'Leave empty to use all channels.')
@@ -792,6 +908,25 @@ class ConvpaintWidget(QWidget):
                  w.setToolTip('Number of PCA components to use for the features image.\nSet to 0 to disable PCA.')
             for w in [self.kmeans_label, self.text_features_kmeans]:
                 w.setToolTip('Number of Kmeans clusters to use for the features image.\nSet to 0 to disable Kmeans.')
+            self.check_use_cache.setToolTip('Keep the extracted features of recently processed images in memory,\n' +
+                                            'so that re-training or re-segmenting the same image does not extract them again.\n' +
+                                            'Features of annotation tiles (see "Tile annotations") are not kept, since predictions cannot reuse them.')
+            for w in [self.cache_max_ram_label, self.cache_max_ram_spinbox]:
+                w.setToolTip('Maximum memory (RAM) the feature cache may use.\n' +
+                             'When full, features you have reused are kept longest; among the never reused,\n' +
+                             'the most recently cached go first (so a stack larger than the cache keeps its\n' +
+                             'first slices instead of cycling through them).')
+            self.cache_size_label.setToolTip('Memory currently used by the feature cache (and number of cached images/planes).')
+            self.btn_cache_clear.setToolTip('Drop all cached features (they are extracted again when needed).')
+            self.check_use_store.setToolTip('Keep the extracted features of all processed images/planes (incl. Multifile batches) in the folder below (also across sessions),\n' +
+                                            'so that stacks and movies only need to be extracted once (e.g. for re-predicting after re-training).\n' +
+                                            'Nothing is dropped automatically; use "Delete stored features" to free the disk space.')
+            for w in [self.store_folder_label, self.btn_store_folder]:
+                w.setToolTip('Folder of the feature store (must be empty, not yet existing, or a feature store); choosing one enables the store.')
+            self.store_size_label.setToolTip('Number of stored images/planes and their size on disk.')
+            self.btn_store_delete.setToolTip('Delete all stored features in the folder (the store stays active).')
+            self.btn_store_features.setToolTip('Extract the features of the selected image (all planes of a stack) into the feature store now,\n' +
+                                               'so that training and prediction can reuse them later.')
 
         if 'Multifile' in self.tab_names:
             self.multifile_select_btn.setToolTip('Select the folder containing the images to segment.\n' +
@@ -855,8 +990,11 @@ class ConvpaintWidget(QWidget):
                       self.check_auto_select_annot, # 	self.text_annot_prefix,
                       self.btn_train_on_selected, self.radio_img_training, self.radio_global_training, self.radio_single_training, # self.check_cont_training,
                       self.btn_class_distribution_trained, self.btn_reset_training, self.check_use_dask, self.channels_label,
-                    self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching, self.btn_add_features, self.btn_add_features_stack,
-                      self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans]:
+                      self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching, self.btn_add_features, self.btn_add_features_stack,
+                      self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans,
+                      self.check_use_cache, self.cache_max_ram_label, self.cache_max_ram_spinbox, self.cache_size_label, self.btn_cache_clear,
+                      self.check_use_store, self.store_folder_label, self.btn_store_folder, self.store_size_label, self.btn_store_delete,
+                      self.btn_store_features]:
                 w.setToolTip('')
 
         if 'Multifile' in self.tab_names:
@@ -873,6 +1011,7 @@ class ConvpaintWidget(QWidget):
     def showEvent(self, event):
         """Override the showEvent to populate the model defaults and set up connections AFTER the GUI is shown."""
         super().showEvent(event)
+        QTimer.singleShot(0, self._set_width_floor) # (Every time shown: the sizes are only final once styled)
 
         # Run only once
         if hasattr(self, "_post_init_done") and self._post_init_done:
@@ -882,6 +1021,18 @@ class ConvpaintWidget(QWidget):
 
         # Defer slightly to let Qt finish rendering
         QTimer.singleShot(0, self._late_init)
+
+    def _set_width_floor(self):
+        """Set the minimum width of the widget from the widest tab's content (the scroll areas do not impose
+        one, and the dock could open or be resized too narrow). Called once shown, when napari's styling is
+        applied and the sizes are final; the tabs scroll vertically only."""
+        from qtpy.QtWidgets import QTabWidget
+        scroll_area = QTabWidget.widget(self.tabs, self.tabs.currentIndex())
+        scrollbar = scroll_area.verticalScrollBar()
+        # Everything around a tab's viewport (margins, frames, the vertical scrollbar), measured
+        chrome = self.width() - scroll_area.viewport().width() + (0 if scrollbar.isVisible() else scrollbar.sizeHint().width())
+        widest = max(self.tabs.widget(i).minimumSizeHint().width() for i in range(self.tabs.count()))
+        self.setMinimumWidth(widest + chrome)
 
     def ensure_init(self):
         """Run deferred model initialization synchronously if it hasn't run yet.
@@ -896,6 +1047,56 @@ class ConvpaintWidget(QWidget):
             from .convpaint_model import ConvpaintModel
             self._cpm_class = ConvpaintModel
 
+    def _apply_feature_cache(self, *args, recreate=False):
+        """Apply the caching settings from the GUI controls to the active model
+        (connected directly to the controls' change signals). The cache_*
+        attributes hold the pre-GUI defaults and simply mirror the controls
+        afterwards. Pass recreate=True right after the model is (re)created;
+        otherwise the existing cache is updated in place so its entries survive
+        a settings change (disabling clears it, freeing RAM)."""
+        self.cache_enabled = self.check_use_cache.isChecked()
+        self.cache_max_mb = self.cache_max_ram_spinbox.value()
+        # Use decimal MB (1e6) here to match the size shown in the label (also
+        # /1e6), so the number the user types is exactly the max size displayed.
+        max_bytes = int(self.cache_max_mb) * 1_000_000
+        fc = self.cp_model._feature_cache
+        if not self.cache_enabled:
+            self.cp_model.disable_feature_cache()
+        elif fc is None or recreate:
+            self.cp_model.enable_feature_cache(max_bytes=max_bytes)
+        else:
+            fc.set_max_bytes(max_bytes)
+        self._refresh_reuse_labels()
+
+    def _apply_feature_store(self, *args, recreate=False):
+        """Apply the feature store settings from the GUI controls to the active model
+        (see _apply_feature_cache): the store is on when the checkbox is checked, using the
+        chosen folder; unchecking only disconnects it (the stored files are kept). The model's
+        store is the single source of truth for the widget state (checkbox, buttons, labels).
+        A folder that cannot be used is reported and not kept."""
+        if not self.check_use_store.isChecked():
+            self.cp_model.disable_feature_store()
+        elif recreate or self.cp_model._feature_store is None:
+            # Not disabled first: enable_feature_store replaces the store only once the new folder
+            # works, so a store that is running survives an unusable one (see the except branch)
+            try:
+                self.cp_model.enable_feature_store(self.store_folder)
+                self._store_folder_ok = self.store_folder # Keep as the fall-back for the next call
+            except ValueError as e: # Folder not usable (not empty and not a feature store, no write access, ...)
+                # enable_feature_store only replaces the store once the new folder works, so a store
+                # that was already running is still there: follow the model and keep it connected
+                keep = self.cp_model._feature_store is not None
+                show_info(f'Feature store folder not changed: {e}' if keep else
+                          f'Feature store not enabled: {e}')
+                self.store_folder = self._store_folder_ok # Back to the last usable folder
+        self.store_enabled = self.cp_model._feature_store is not None
+        self.check_use_store.blockSignals(True) # setChecked would call this method again
+        self.check_use_store.setChecked(self.store_enabled)
+        self.check_use_store.blockSignals(False)
+        self.btn_store_delete.setEnabled(self.store_enabled)
+        self.btn_store_features.setEnabled(self.store_enabled)
+        self._refresh_reuse_labels()
+
     def _late_init(self):
         """Populate UI widgets with defaults from ConvpaintModel, set up connections, and reset model.
         This is called after the GUI is shown to ensure that all components are properly initialized."""
@@ -903,6 +1104,9 @@ class ConvpaintWidget(QWidget):
         # === MODEL DEFAULTS & WIDGET POPULATION ===
         self._import_convpaint_model_class()
         self.cp_model = self._cpm_class()
+        self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
+        self._apply_feature_cache(recreate=True)
+        self._apply_feature_store(recreate=True)
         # Get default parameters to set in widget
         self.default_cp_param = self._cpm_class.get_default_params()
         # Use variables of main model as temp variables for the Models tab, as it is the one model used at that time
@@ -1068,6 +1272,8 @@ class ConvpaintWidget(QWidget):
                 self, 'auto_add_layers', self.check_auto_add_layers.isChecked()))
             self.check_keep_layers.stateChanged.connect(lambda: setattr(
                 self, 'keep_layers', self.check_keep_layers.isChecked()))
+            self.check_use_dask.stateChanged.connect(lambda: setattr(
+                self, 'use_dask', self.check_use_dask.isChecked()))
             self.btn_add_all_annot_layers.clicked.connect(self._on_add_all_annot_layers)
             self.check_auto_select_annot.stateChanged.connect(lambda: setattr(
                 self, 'auto_select_annot', self.check_auto_select_annot.isChecked()))
@@ -1084,8 +1290,15 @@ class ConvpaintWidget(QWidget):
             self.btn_class_distribution_trained.clicked.connect(lambda: self._on_show_class_distribution(trained_data=True))
             self.btn_reset_training.clicked.connect(self._reset_train_features)
 
-            self.check_use_dask.stateChanged.connect(lambda: setattr(
-                self, 'use_dask', self.check_use_dask.isChecked()))
+            # Both cache controls apply the full settings set in one go.
+            self.check_use_cache.stateChanged.connect(self._apply_feature_cache)
+            self.cache_max_ram_spinbox.valueChanged.connect(self._apply_feature_cache)
+            self.cache_max_ram_spinbox.editingFinished.connect(self._warn_cache_ram)
+            self.btn_cache_clear.clicked.connect(self._on_clear_cache)
+            self.check_use_store.stateChanged.connect(self._apply_feature_store)
+            self.btn_store_folder.clicked.connect(self._on_choose_store_folder)
+            self.btn_store_delete.clicked.connect(self._on_delete_stored_features)
+            self.btn_store_features.clicked.connect(self._on_store_features)
 
             self.text_input_channels.textChanged.connect(lambda: setattr(
                 self, 'input_channels', self.text_input_channels.text()))
@@ -1116,6 +1329,7 @@ class ConvpaintWidget(QWidget):
             self.btn_add_features_stack.clicked.connect(self._on_get_feature_image_all)
 
         # === Multifile tab ===
+
         if 'Multifile' in self.tab_names:
             self.multifile_select_btn.clicked.connect(self._select_multifile_img_folder)
             self.multifile_list.cellDoubleClicked.connect(self._on_multifile_open_file)
@@ -1231,15 +1445,81 @@ class ConvpaintWidget(QWidget):
         self._create_default_class_names()
 
         # Re-add the buttons below the class names
-        self.classes_layout.addWidget(self.add_class_btn, len(self.class_names)+1, 0, 1, 5)
-        self.classes_layout.addWidget(self.remove_class_btn, len(self.class_names)+1, 5, 1, 5)
-        self.classes_layout.addWidget(self.export_class_names_btn, len(self.class_names)+2, 0, 1, 5)
-        self.classes_layout.addWidget(self.import_class_names_btn, len(self.class_names)+2, 5, 1, 5)
-        self.classes_layout.addWidget(self.reset_class_names_btn, len(self.class_names)+3, 0, 1, 10)
-        self.classes_layout.addWidget(self.btn_class_distribution_annot, len(self.class_names)+4, 0, 1, 10)
+        self._place_class_buttons(len(self.class_names))
+
+    def _theme_colors(self):
+        """Colors of the active napari theme (hex), for stylesheets that must follow dark/light switches."""
+        from napari.utils.theme import get_theme
+        theme = get_theme(self.viewer.theme)
+        return {name: getattr(theme, name).as_hex() for name in ('background', 'foreground', 'current', 'text')}
+
+    def _style_tabs(self, event=None):
+        """(Re-)apply the tab-bar style with the active theme's colors as solid fills (napari's own
+        tab rule paints a gradient, which clashes with the joined look). Connected to viewer.events.theme."""
+        colors = self._theme_colors()
+        fg, cur = colors['foreground'], colors['current']
+        self.tabs.setStyleSheet(
+            "QTabWidget::pane { border: 0; margin: 0; padding: 0; } "
+            "QTabWidget::tab-bar { alignment: left; } "
+            # Joined segmented-control look: adjacent tabs share square inner
+            # corners (rounded inner corners leave notches that expose
+            # tab-colored nubs of the neighbor when the bar is squeezed);
+            # only the outer corners of the first/last tab stay rounded.
+            "QTabBar { background: transparent; } "
+            f"QTabBar::tab {{ margin-right: 0px; border-radius: 0px; background: {fg}; }} "
+            f"QTabBar::tab:selected {{ background: {cur}; }} "
+            "QTabBar::tab:first { border-top-left-radius: 4px; border-bottom-left-radius: 4px; } "
+            "QTabBar::tab:last { border-top-right-radius: 4px; border-bottom-right-radius: 4px; } "
+            "QTabBar::tab:only-one { border-radius: 4px; }")
+
+    def _style_multifile_list(self, event=None):
+        """(Re-)apply the active napari theme's colors to the multifile list (flat header and frame;
+        the Qt palette cannot be used, since napari themes via stylesheet only). Connected to viewer.events.theme."""
+        colors = self._theme_colors()
+        bg, fg, txt = colors['background'], colors['foreground'], colors['text']
+        self.multifile_list.setStyleSheet(
+            f"QHeaderView::section {{ background-color: {fg}; color: {txt};"
+            f" border: none; border-right: 1px solid {bg}; padding: 3px 6px; }}"
+            f"QHeaderView::section:first {{ border-top-left-radius: 4px; }}"
+            f"QHeaderView::section:last {{ border-top-right-radius: 4px; border-right: none; }}"
+            f"QTableWidget {{ border: 1px solid {fg}; border-radius: 4px;"
+            f" gridline-color: {fg}; background-color: {bg}; }}"
+            f"QTableCornerButton::section {{ background-color: {fg}; border: none; }}")
+
+    @staticmethod
+    def _dashed_divider():
+        """A thin dashed horizontal line used to separate subsections,
+        with breathing room above and below."""
+        divider = QtWidgets.QFrame()
+        divider.setFixedHeight(13)  # 6px margin + 1px line + 6px margin
+        divider.setStyleSheet(
+            "border: none; border-top: 1px dashed rgba(120, 120, 120, 50%); margin: 6px 0;")
+        return divider
+
+    def _place_class_buttons(self, n_classes):
+        """(Re-)place the static buttons below the class-name rows.
+        Export/import are stacked vertically: side by side they would be the
+        widest row of the Classes tab and dictate the dock's minimum width."""
+        # Dividers are created once and re-placed on layout rebuilds.
+        if not hasattr(self, '_classes_divider1'):
+            self._classes_divider1 = self._dashed_divider()
+            self._classes_divider2 = self._dashed_divider()
+        self.classes_layout.addWidget(self.add_class_btn, n_classes, 0, 1, 5)
+        self.classes_layout.addWidget(self.remove_class_btn, n_classes, 5, 1, 5)
+        self.classes_layout.addWidget(self._classes_divider1, n_classes+1, 0, 1, 10)
+        self.classes_layout.addWidget(self.export_class_names_btn, n_classes+2, 0, 1, 10)
+        self.classes_layout.addWidget(self.import_class_names_btn, n_classes+3, 0, 1, 10)
+        self.classes_layout.addWidget(self._classes_divider2, n_classes+4, 0, 1, 10)
+        self.classes_layout.addWidget(self.reset_class_names_btn, n_classes+5, 0, 1, 10)
+        self.classes_layout.addWidget(self.btn_class_distribution_annot, n_classes+6, 0, 1, 10)
 
     def _on_add_class(self, text=None):
         """Add a new class name and icon to the layout and update all annotations and segmentation layers."""
+
+        if len(self.class_names) >= self.max_classes:
+            show_info(f'At most {self.max_classes} classes are supported (the annotation and segmentation '
+                      'layers are uint8).')
+            return
 
         # Create a new class name
         new_name = QtWidgets.QLineEdit()
@@ -1247,7 +1527,7 @@ class ConvpaintWidget(QWidget):
         self.class_names.append(new_name)
         class_num = len(self.class_names)  # Class number is the length of the list
         # Add the new name to the layout
-        self.classes_layout.addWidget(new_name, class_num, 1, 1, 9)
+        self.classes_layout.addWidget(new_name, class_num-1, 1, 1, 9)
         # Set the text of the new name
         text_str = text if text is not None else f'Class {class_num}'
         new_name.setText(text_str)
@@ -1263,7 +1543,7 @@ class ConvpaintWidget(QWidget):
         # Add a new icon
         new_icon = QtWidgets.QLabel()
         self.class_icons.append(new_icon)
-        self.classes_layout.addWidget(new_icon, class_num, 0)
+        self.classes_layout.addWidget(new_icon, class_num-1, 0)
         new_icon.mousePressEvent = lambda event: self._set_all_labels_classes(class_num, event)
         
         # Update the icon with the color of the last label and all class names
@@ -1275,12 +1555,7 @@ class ConvpaintWidget(QWidget):
         self.classes_layout.removeWidget(self.remove_class_btn)
         self.classes_layout.removeWidget(self.reset_class_names_btn)
         self.classes_layout.removeWidget(self.btn_class_distribution_annot)
-        self.classes_layout.addWidget(self.add_class_btn, class_num+1, 0, 1, 5)
-        self.classes_layout.addWidget(self.remove_class_btn, class_num+1, 5, 1, 5)
-        self.classes_layout.addWidget(self.export_class_names_btn, class_num+2, 0, 1, 5)
-        self.classes_layout.addWidget(self.import_class_names_btn, class_num+2, 5, 1, 5)
-        self.classes_layout.addWidget(self.reset_class_names_btn, class_num+3, 0, 1, 10)
-        self.classes_layout.addWidget(self.btn_class_distribution_annot, class_num+4, 0, 1, 10)
+        self._place_class_buttons(class_num)
 
     def _on_remove_class(self, del_annots=True, event=None):
         """Remove the last class name and icon from the layout and update all annotations and segmentation layers."""
@@ -1305,12 +1580,7 @@ class ConvpaintWidget(QWidget):
             self.classes_layout.removeWidget(self.remove_class_btn)
             self.classes_layout.removeWidget(self.reset_class_names_btn)
             self.classes_layout.removeWidget(self.btn_class_distribution_annot)
-            self.classes_layout.addWidget(self.add_class_btn, len(self.class_names)+1, 0, 1, 5)
-            self.classes_layout.addWidget(self.remove_class_btn, len(self.class_names)+1, 5, 1, 5)
-            self.classes_layout.addWidget(self.export_class_names_btn, len(self.class_names)+2, 0, 1, 5)
-            self.classes_layout.addWidget(self.import_class_names_btn, len(self.class_names)+2, 5, 1, 5)
-            self.classes_layout.addWidget(self.reset_class_names_btn, len(self.class_names)+3, 0, 1, 10)
-            self.classes_layout.addWidget(self.btn_class_distribution_annot, len(self.class_names)+4, 0, 1, 10)
+            self._place_class_buttons(len(self.class_names))
             # Update the icons and class names
             self._update_class_names()
         else:
@@ -1544,6 +1814,11 @@ class ConvpaintWidget(QWidget):
                 if val != "":
                     parsed.append(val)
                     num_appended += 1
+
+        # Too many classes: stop before the current ones are reset below
+        if len(parsed) > self.max_classes:
+            raise ValueError(f"The file holds {len(parsed)} classes, at most {self.max_classes} are "
+                             "supported (the annotation and segmentation layers are uint8).")
 
         # Reset to defaults (this will create 2 labels)
         self._on_reset_class_names()
@@ -1790,10 +2065,26 @@ class ConvpaintWidget(QWidget):
             pbr.set_description(f"Training")
             img_name = self._get_selected_img().name
             in_channels = self._parse_in_channels(self.input_channels)
+            # With auto-segment and feature reuse (cache/store) on, train on the whole plane(s) instead of
+            # annotation tiles (unless the image is tiled for prediction): the prediction needs the whole
+            # plane anyway, so one extraction serves both (annotation tiles are never cached/stored)
+            untile = (self.auto_seg and self.cp_model._reuse_enabled()
+                      and self.cp_model.get_param('tile_annotations') and not self.cp_model.get_param('tile_image'))
+            if untile:
+                self.cp_model.set_param('tile_annotations', False, ignore_warnings=True)
+                if not self.untile_info_shown: # Inform once per session
+                    show_info('Auto-segment with feature caching: training extracts the whole plane (no annotation tiles), '
+                              'so that the prediction can reuse the features.')
+                    self.untile_info_shown = True
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
-            _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
-                                    in_channels=in_channels, skip_norm=False,
-                                    fe_use_device=self.fe_device, clf_use_device=self.clf_device)
+            # (as in prediction, so train and predict hash identical data and share feature-cache entries)
+            try:
+                _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
+                                        in_channels=in_channels, skip_norm=True,
+                                        fe_use_device=self.fe_device, clf_use_device=self.clf_device)
+            finally:
+                if untile:
+                    self.cp_model.set_param('tile_annotations', True, ignore_warnings=True)
             self._update_training_counts()
     
         with warnings.catch_warnings():
@@ -1805,6 +2096,7 @@ class ConvpaintWidget(QWidget):
         self.trained = True
         self._reset_predict_buttons()
         self._set_model_description()
+        self._refresh_reuse_labels()
 
         # Automatically segment the image if the option is activated
         if self.auto_seg:
@@ -1904,6 +2196,8 @@ class ConvpaintWidget(QWidget):
             # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
             self.viewer.layers[self.instances_prefix].refresh()
 
+        self._refresh_reuse_labels()
+
     def _on_get_feature_image(self, event=None):
         """Get the feature image for the currently viewed frame based
         on the current feature extractor and show it in a new layer."""
@@ -1952,6 +2246,7 @@ class ConvpaintWidget(QWidget):
             self.viewer.layers[self.features_prefix].data[..., step, :, :] = feature_image
         # Case `data_dims is None` and other invalid cases are already caught above, so we don't need an else statement here
         self.viewer.layers[self.features_prefix].refresh()
+        self._refresh_reuse_labels()
 
     def _on_predict_all(self):
         """Predict the segmentation of all frames based 
@@ -2029,6 +2324,7 @@ class ConvpaintWidget(QWidget):
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(False)
+        self._refresh_reuse_labels()
 
     def _on_get_feature_image_all(self):
         """Get the feature image for all frames based
@@ -2102,6 +2398,7 @@ class ConvpaintWidget(QWidget):
             with warnings.catch_warnings():
                 warnings.simplefilter(action="ignore", category=FutureWarning)
                 self.viewer.window._status_bar._toggle_activity_dock(False)
+        self._refresh_reuse_labels()
 
 
     # Load/Save
@@ -2188,6 +2485,8 @@ class ConvpaintWidget(QWidget):
 
         # Load the model (Note: done after updating GUI, since GUI updates might reset clf or change model)
         self.cp_model = new_model
+        self._apply_feature_cache(recreate=True)
+        self._apply_feature_store(recreate=True)
         self.cp_model._param = new_param
         temp_fe_model = self._cpm_class.create_fe(new_param.fe_name)
         self.temp_fe_description = temp_fe_model.get_description()
@@ -2277,6 +2576,16 @@ class ConvpaintWidget(QWidget):
          "Global": lambda: self.radio_global_training.setChecked(True)}[self.cont_training]()
         # self.check_cont_training.setChecked(self.cont_training)
         self.check_use_dask.setChecked(self.use_dask)
+        # Setting one of the two controls mirrors both of them back into the attributes, so the
+        # defaults are read out first; applied explicitly, as an unchanged control emits no signal
+        cache_enabled, cache_max_mb = self.cache_enabled, self.cache_max_mb
+        self.check_use_cache.setChecked(cache_enabled)
+        self.cache_max_ram_spinbox.setValue(cache_max_mb)
+        self._apply_feature_cache(recreate=True)
+        # The checkbox holds whether the store is on, and the model keeps the old folder until the
+        # settings are applied again (setChecked stays silent if the checkbox is off already)
+        self.check_use_store.setChecked(self.store_enabled)
+        self._apply_feature_store(recreate=True)
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
         self.check_add_probas.setChecked(self.add_probas)
@@ -2299,12 +2608,7 @@ class ConvpaintWidget(QWidget):
             self._create_default_class_names()
 
             # Re-add the buttons below the class names
-            self.classes_layout.addWidget(self.add_class_btn, len(self.class_names)+1, 0, 1, 5)
-            self.classes_layout.addWidget(self.remove_class_btn, len(self.class_names)+1, 5, 1, 5)
-            self.classes_layout.addWidget(self.export_class_names_btn, len(self.class_names)+2, 0, 1, 5)
-            self.classes_layout.addWidget(self.import_class_names_btn, len(self.class_names)+2, 5, 1, 5)
-            self.classes_layout.addWidget(self.reset_class_names_btn, len(self.class_names)+3, 0, 1, 10)
-            self.classes_layout.addWidget(self.btn_class_distribution_annot, len(self.class_names)+4, 0, 1, 10)
+            self._place_class_buttons(len(self.class_names))
         
         if 'Multifile' in self.tab_names:
             self._reset_multifile_folder()
@@ -2341,6 +2645,7 @@ class ConvpaintWidget(QWidget):
 
     def _reset_attributes(self):
         """Reset all attributes of the widget."""
+        import psutil # For the available RAM the feature cache limit is clamped to
         # Set widget-specific attributes
         self.image_mean = None
         self.image_std = None
@@ -2368,6 +2673,13 @@ class ConvpaintWidget(QWidget):
         self.features_prefix = 'features' # Prefix for the feature image layer name
         self.cont_training = "Image" # Update features for subsequent training ("Image" or "Off" or "Global")
         self.use_dask = False # Use Dask for parallel processing
+        self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
+        self.cache_max_mb = min(2048, int(psutil.virtual_memory().available / 4e6)) # Max RAM (MB) the feature cache may use (2 GB default, clamped to a quarter of the available RAM for small machines)
+        self.untile_info_shown = False # Whether the user was informed that auto-segment with caching skips annotation tiles
+        self.store_enabled = False # Feature store off by default (on = keep the features of all processed planes on disk)
+        import platformdirs # (napari dependency)
+        self.store_folder = str(Path(platformdirs.user_cache_dir('convpaint')) / 'feature_store') # Default folder of the feature store
+        self._store_folder_ok = self.store_folder # Last folder the store could be enabled with (to fall back to)
         self.fe_device = 'auto' # Device to use for the FE (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.clf_device = 'auto' # Device to use for the classifier (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.input_channels = "" # Input channels for the model (as txt, will be parsed)
@@ -2566,6 +2878,8 @@ class ConvpaintWidget(QWidget):
         # Sync the channel-mode and normalization radios with the new model's params
         self._reset_radio_channel_mode_choices()
         self._reset_radio_norm_choices()
+        self._apply_feature_cache(recreate=True)
+        self._apply_feature_store(recreate=True)
         self._reset_device_options()
         self._reset_clf() # Call to take all actions needed after resetting the clf
         # Reset the features for continuous training
@@ -2609,6 +2923,23 @@ class ConvpaintWidget(QWidget):
 
 
 ### Helper functions
+
+    def _refresh_reuse_labels(self):
+        """Show the current sizes of the feature cache and store (called after ops that change them)."""
+        fc = self.cp_model._feature_cache
+        if fc is None:
+            self.cache_size_label.setText('Cached: 0 MB')
+        else:
+            s = fc.stats()
+            self.cache_size_label.setText(f'Cached: {s["bytes"] / 1e6:.0f} MB ({s["entries"]} planes)')
+        self.store_folder_label.setText(self.store_folder)
+        fs = self.cp_model._feature_store
+        if fs is None:
+            self.store_size_label.setText('Stored: (store off)')
+        else:
+            s = fs.stats()
+            self.store_size_label.setText(f'Stored: {s["entries"]} planes, {s["bytes"] / 1e6:.0f} MB')
+
 
     def _get_layer_transform_kwargs(self, img_layer, num_spatial_dims, num_leading_dims=0):
         """Get transform kwargs from image layer for creating a derived layer.
@@ -2721,17 +3052,27 @@ class ConvpaintWidget(QWidget):
         # Track annotations data changes to keep in-memory store in sync (for Multifile)
         self.store_annot = from_multifile # Only store if the annot was added from Multifile, to avoid storing unnecessarily when not using Multifile
 
+    def _restore_active_layer(self, prev_active):
+        """Re-activate `prev_active` after adding an output layer. napari
+        selects newly added layers, which would silently steer the user's
+        brush into the segmentation/probabilities/features layer instead of
+        the annotations layer they were painting on."""
+        if prev_active is not None and prev_active in self.viewer.layers:
+            self.viewer.layers.selection.active = prev_active
+
     def _check_create_segmentation_layer(self):
         """Check if segmentation layer exists and create it if not."""
-        
+
         img = self._get_selected_img(check=True)
         if img is None:
             warnings.warn('No image selected. No layers added.')
             return
+
+        prev_active = self.viewer.layers.selection.active
         layer_shape = self._get_annot_shape(img)
         num_spatial = len(layer_shape)
         transform_kwargs = self._get_layer_transform_kwargs(img, num_spatial_dims=num_spatial, num_leading_dims=0)
-    
+
         # Create a new segmentation layer if it doesn't exist yet or we need a new one
         seg_exists = self.seg_tag in self.viewer.layers
 
@@ -2757,6 +3098,7 @@ class ConvpaintWidget(QWidget):
             # Add it to the list of layers where class names shall be updated
             self.seg_layers.add(self.viewer.layers[self.seg_tag])
             self.update_all_class_names_and_cmaps()
+        self._restore_active_layer(prev_active)
 
     def _check_create_probas_layer(self, num_classes):
         """Check if class probabilities layer exists and create it if not."""
@@ -2765,7 +3107,8 @@ class ConvpaintWidget(QWidget):
         if img is None:
             warnings.warn('No image selected. No layers added.')
             return
-        
+
+        prev_active = self.viewer.layers.selection.active
         spatial_dims = self._get_annot_shape(img)
         if isinstance(num_classes, int):
             num_classes = (num_classes,)
@@ -2799,6 +3142,7 @@ class ConvpaintWidget(QWidget):
             self.viewer.layers[self.proba_prefix].colormap = "turbo"
             # Save information about the probabilities layer to be able to rename it later
             self._set_old_proba_tag()
+        self._restore_active_layer(prev_active)
 
     def _check_create_instances_layer(self):
         """Check if instances layer exists and create it if not."""
@@ -2808,6 +3152,7 @@ class ConvpaintWidget(QWidget):
             warnings.warn('No image selected. No layers added.')
             return
 
+        prev_active = self.viewer.layers.selection.active
         layer_shape = self._get_annot_shape(img)
         num_spatial = len(layer_shape)
         transform_kwargs = self._get_layer_transform_kwargs(img, num_spatial_dims=num_spatial, num_leading_dims=0)
@@ -2833,6 +3178,7 @@ class ConvpaintWidget(QWidget):
                 )
             # Save information about the instances layer to be able to rename it later
             self._set_old_instances_tag()
+        self._restore_active_layer(prev_active)
 
     def _check_create_features_layer(self, num_features):
         """Check if feature image layer exists and create it if not."""
@@ -2841,7 +3187,8 @@ class ConvpaintWidget(QWidget):
         if img is None:
             warnings.warn('No image selected. No layers added.')
             return
-        
+
+        prev_active = self.viewer.layers.selection.active
         spatial_dims = self._get_annot_shape(img)
 
         # Create a new features layer if it doesn't exist yet or we need a new one
@@ -2885,6 +3232,7 @@ class ConvpaintWidget(QWidget):
                     )
             # Save information about the features layer to be able to rename it later
             self._set_old_features_tag()
+        self._restore_active_layer(prev_active)
 
     def _rename_annot_for_backup(self):
         """Name the annotations with a unique name according to its image,
@@ -3092,9 +3440,6 @@ class ConvpaintWidget(QWidget):
 
     def _reset_device_options(self):
         """Reset device dropdown availability and synchronize FE/CLF device policies."""
-        if not hasattr(self, "device_dropdown"):
-            return
-
         default_tooltip = 'Select device policy for feature extraction and classifier.'
         no_gpu_tooltip = 'No CUDA/MPS backend available. Device is fixed to CPU.'
         cuda_both_tooltip = 'CUDA is available and supported by this feature extractor. GPU can be used for both feature extraction and classifier.'
@@ -3775,6 +4120,90 @@ class ConvpaintWidget(QWidget):
 
 ### ADVANCED TAB
 
+    def _on_clear_cache(self):
+        """Drop the cached features (the cache stays enabled)."""
+        self.cp_model.clear_feature_cache()
+        self._refresh_reuse_labels()
+
+    def _on_choose_store_folder(self):
+        """Let the user choose the folder of the feature store, and use it right away: as in the API,
+        where a folder comes with enabling the store, the folder is checked when it is chosen (an
+        unusable one is reported and nothing changes) instead of only when the box is ticked."""
+        folder = QFileDialog.getExistingDirectory(self, 'Choose a folder for the feature store', self.store_folder)
+        if folder:
+            self.store_folder = folder
+            self.check_use_store.blockSignals(True) # Applied once below, not per signal
+            self.check_use_store.setChecked(True)
+            self.check_use_store.blockSignals(False)
+            self._apply_feature_store(recreate=True) # Reverts store_folder if it cannot be used
+
+    def _on_delete_stored_features(self):
+        """Delete all entries of the feature store (after confirmation); the store stays active."""
+        fs = self.cp_model._feature_store
+        if fs is None:
+            return
+        answer = QMessageBox.question(self, 'Delete stored features',
+                                      f'Delete all stored features in\n{fs.folder} ?\n\n' +
+                                      'The store stays active and the folder is kept.',
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            self.cp_model.clear_feature_store()
+            self._refresh_reuse_labels()
+
+    def _on_store_features(self):
+        """Extract the features of the selected image (plane by plane for stacks) into the
+        feature store, so that training and prediction can reuse them."""
+        if self.cp_model._feature_store is None:
+            warnings.warn('No feature store enabled. Features not stored.')
+            return
+        img = self._get_selected_img(check=True)
+        data_dims = self._get_data_dims(img.data, img.ndim) if img is not None else None
+        if data_dims not in self.supported_data_dims:
+            warnings.warn(f'Non-supported image dimensions {data_dims}. Features not stored.')
+            return
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(True)
+
+        # Get normalized data (entire stack, and stats prepared given the radio buttons)
+        image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        in_channels = self._parse_in_channels(self.input_channels)
+
+        # Store features in the feature store (single image or stack)
+        if data_dims in ['2D', '2D_RGB', '3D_multi']: # Single image
+            self.cp_model.store_features(image_stack_norm, in_channels=in_channels, skip_norm=True,
+                                         fe_use_device=self.fe_device)
+        else: # Stack: step through the planes for progress bar (as _on_predict_all does); skip norm as it is done above
+            num_steps = image_stack_norm.shape[-3]
+            for step in progress(range(num_steps)):
+                image = image_stack_norm[..., step, :, :]
+                self.cp_model.store_features(image, in_channels=in_channels, skip_norm=True,
+                                             fe_use_device=self.fe_device)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=FutureWarning)
+            self.viewer.window._status_bar._toggle_activity_dock(False)
+
+        # Update the labels to reflect the new state
+        self._refresh_reuse_labels()
+
+        # Point out the one setting that decides whether training profits from the store as well
+        # (auto-segment switches the tiling off by itself, but only if the image is not tiled; see _on_train)
+        untiles = self.auto_seg and not self.cp_model.get_param('tile_image')
+        if self.cp_model.get_param('tile_annotations') and not untiles:
+            show_info("All planes of this image are stored. Training reuses them too, once 'Tile annotations for training' "
+                      "is off (annotation tiles are not stored); with 'Auto segment' on and 'Tile image for segmentation' off, automatically.")
+
+    def _warn_cache_ram(self):
+        """Warn if the feature cache limit exceeds half of the currently available RAM."""
+        import psutil
+        available_mb = psutil.virtual_memory().available / 1e6
+        if self.cache_max_ram_spinbox.value() > available_mb / 2:
+            show_info(f'The feature cache limit ({self.cache_max_ram_spinbox.value()} MB) exceeds half of the '
+                      f'currently available RAM ({available_mb:.0f} MB).')
+
+
     def _on_add_all_annot_layers(self):
         """Add annotations layers for all image layers selected in the layers widget (napari).
         Has been deprecated in favor of the "Multifile" Tab."""
@@ -3850,7 +4279,7 @@ class ConvpaintWidget(QWidget):
         pix = len(self.cp_model.table)
         imgs = len(np.unique(self.cp_model.table['img_id']))
         lbls = len(np.unique(self.cp_model.table['label']))
-        self.label_training_count.setText(f'{pix} pixels, {imgs} image{"s"*(imgs>1)}, {lbls} labels')
+        self.label_training_count.setText(f'{pix} px / {imgs} img{"s"*(imgs>1)} / {lbls} labels')
 
     def _on_show_class_distribution(self, trained_data=False):
         """Show the class distribution of the data used with continuous_training/memory_mode (saved in self.cp_model.table)

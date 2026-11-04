@@ -833,6 +833,48 @@ def test_set_fe_syncs_channel_and_norm_options(make_napari_viewer):
     assert my_widget.radio_single_channel.isChecked()
     assert my_widget.radio_normalize_over_stack.isEnabled()
 
+def test_cache_ram_limit_is_applied_once_typed(make_napari_viewer, qtbot):
+    """A typed cache limit is applied when it is complete, not per keystroke: typing 4096 passes
+    through 409 MB, which would evict most of the cache before the user is done."""
+    from qtpy.QtCore import Qt
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+    my_widget.cache_max_ram_spinbox.setValue(2048)
+    fc = my_widget.cp_model._feature_cache
+    assert fc.stats()['max_bytes'] == 2048 * 10**6
+
+    my_widget.cache_max_ram_spinbox.setFocus()
+    my_widget.cache_max_ram_spinbox.selectAll()
+    qtbot.keyClicks(my_widget.cache_max_ram_spinbox, '4096')
+    assert fc.stats()['max_bytes'] == 2048 * 10**6 # Nothing applied while typing
+    qtbot.keyClick(my_widget.cache_max_ram_spinbox, Qt.Key_Return)
+    assert fc.stats()['max_bytes'] == 4096 * 10**6 # Applied once the number is complete
+
+def test_reset_restores_cache_settings(make_napari_viewer, monkeypatch):
+    """Resetting Convpaint puts the feature cache settings back to their defaults, controls,
+    attributes and the model's cache alike (as it does for the other options)."""
+    import psutil
+    # Report plenty of RAM, so that the default limit is not clamped to a quarter of it (it is on
+    # small machines and CI runners, where the default would then depend on the free memory)
+    plenty = psutil.virtual_memory()._replace(available=32 * 10**9)
+    monkeypatch.setattr(psutil, 'virtual_memory', lambda: plenty)
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+
+    # Move both settings away from their defaults
+    my_widget.check_use_cache.setChecked(False)
+    my_widget.cache_max_ram_spinbox.setValue(512)
+    assert my_widget.cp_model._feature_cache is None # Off = no cache on the model
+
+    my_widget._on_reset_convpaint()
+
+    assert my_widget.check_use_cache.isChecked() and my_widget.cache_enabled
+    assert my_widget.cache_max_ram_spinbox.value() == my_widget.cache_max_mb == 2048
+    fc = my_widget.cp_model._feature_cache
+    assert fc is not None and fc.stats()['max_bytes'] == my_widget.cache_max_mb * 10**6
+
 def test_stack_after_rgb_uses_fresh_stack_defaults(make_napari_viewer):
     """Regression test: after an RGB image, selecting a 3D grayscale stack must
     fall back to the fresh-stack defaults ('single' channel mode, normalization

@@ -35,7 +35,7 @@ dependencies = [
     "magicgui",
     "napari",
     "napari-annotation-project",
-    "napari-guitils",
+    "napari-guitils>=0.2.0",
     "numpy",
     "omegaconf",
     "pandas",
