@@ -684,7 +684,7 @@ class ConvpaintWidget(QWidget):
             self.advanced_cache_group.glayout.addWidget(self.store_max_size_label, 7, 0, 1, 2)
             self.store_max_size_spinbox = QSpinBox()
             self.store_max_size_spinbox.setRange(1, 10 * 1000)  # 1 GB .. 10 TB (disk is cheap)
-            self.store_max_size_spinbox.setSingleStep(10) # Divides the default (100), so the arrows stay round
+            self.store_max_size_spinbox.setSingleStep(10) # Divides the default (20), so the arrows stay round
             self.store_max_size_spinbox.setKeyboardTracking(False) # Apply a typed limit only once complete
             self.store_max_size_spinbox.setValue(self.store_max_gb)
             self.advanced_cache_group.glayout.addWidget(self.store_max_size_spinbox, 7, 2, 1, 1)
@@ -951,14 +951,15 @@ class ConvpaintWidget(QWidget):
             self.btn_cache_clear.setToolTip('Drop all cached features (they are extracted again when needed).')
             self.check_use_store.setToolTip('Keep the extracted features of all processed images/planes (incl. Multifile batches) in the folder below (also across sessions),\n' +
                                             'so that stacks and movies only need to be extracted once (e.g. for re-predicting after re-training).\n' +
-                                            'Unlike the cache above, nothing is dropped when it grows; use "Delete stored features" to free the disk space.')
+                                            f'In the default location, features unused for {self.store_max_age_days} days are removed when Convpaint starts;\n' +
+                                            'a folder you choose is never cleaned up automatically (use "Delete stored features").')
             for w in [self.store_folder_label, self.btn_store_folder]:
                 w.setToolTip('Folder of the feature store (must be empty, not yet existing, or a feature store); choosing one enables the store.\n' +
                              'The folders used so far are listed in\n' + str(_store_folders_file()) + '.')
             for w in [self.store_max_size_label, self.store_max_size_spinbox]:
                 w.setToolTip('Maximum size the feature store may take on disk.\n' +
-                             'Once it is reached nothing more is stored, and nothing is deleted either\n' +
-                             '(unlike the cache, which drops its oldest entries); use "Delete stored features".')
+                             f'When it is reached, the default location makes room by dropping features unused for {self.store_full_age_days} day(s)\n' +
+                             '(never those of the running session); a folder you choose stops storing instead, and nothing is deleted.')
             self.store_size_label.setToolTip('Number of stored images/planes and their size on disk.')
             self.btn_store_delete.setToolTip('Delete all stored features in the folder (the store stays active).')
             self.btn_store_features.setToolTip('Extract the features of the selected image (all planes of a stack) into the feature store now,\n' +
@@ -1122,11 +1123,17 @@ class ConvpaintWidget(QWidget):
             try:
                 # Convpaint's own folder makes room for what comes next; a chosen one keeps
                 # what it was given and says so when it is full
-                own = self.store_folder == self._store_folder_default
+                is_default = self.store_folder == self._store_folder_default
                 self.cp_model.enable_feature_store(self.store_folder, max_bytes=max_bytes,
-                                                   prune_when_full_days=self.store_full_age_days if own else None)
+                                                   prune_when_full_days=self.store_full_age_days if is_default else None)
                 self._store_folder_ok = self.store_folder # Keep as the fall-back for the next call
                 self._note_store_folder(self.store_folder)
+                if is_default and not self.store_info_shown: # Inform once per session, so that nothing is stored unnoticed
+                    kept = (f'unused ones are removed after {self.store_max_age_days} days (when Convpaint starts) or anytime '
+                            if self.store_max_age_days is not None else 'remove them ')
+                    show_info(f"Features are stored on disk in Convpaint's own folder, up to {self.store_max_gb} GB "
+                              f"({self.store_folder}); {kept}with \"Delete stored features\".")
+                    self.store_info_shown = True
             except ValueError as e: # Folder not usable (not empty and not a feature store, no write access, ...)
                 # enable_feature_store only replaces the store once the new folder works, so a store
                 # that was already running is still there: follow the model and keep it connected
@@ -2767,6 +2774,7 @@ class ConvpaintWidget(QWidget):
         self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
         self.cache_max_mb = self.default_cache_max_mb # Max RAM (MB) the feature cache may use
         self.untile_info_shown = False # Whether the user was informed that auto-segment with caching skips annotation tiles
+        self.store_info_shown = False # Whether the user was told where the store keeps the features, and for how long
         self._noted_image = None # Image the model was told about last (see _note_image_layer)
         self.store_enabled = False # Feature store off by default (on = keep the features of all processed planes on disk)
         self.store_max_gb = self.default_store_max_gb # Max disk space (GB) the feature store may take

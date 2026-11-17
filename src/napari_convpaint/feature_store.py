@@ -36,13 +36,13 @@ _DISK_HEADROOM_BYTES = 2 * 1024 ** 3 # Never fill the disk below this much free 
 
 
 # Default cap, see default_max_bytes().
-_DEFAULT_MAX_BYTES = 100 * 10**9  # 100 GB
+_DEFAULT_MAX_BYTES = 20 * 10**9  # 20 GB
 
 
 def default_max_bytes() -> int:
-    """The cap used when none is given: generous, as the store never drops anything by itself
-    and simply stops storing once it is reached - a guard rail against growing without end,
-    not a budget (the disk is protected by _DISK_HEADROOM_BYTES in any case)."""
+    """The cap used when none is given: moderate, since a store may be forgotten on disk. With
+    prune_when_full_days it works as a rolling budget, otherwise storing simply stops once it is
+    reached (the disk is protected by _DISK_HEADROOM_BYTES in any case)."""
     return _DEFAULT_MAX_BYTES
 
 
@@ -240,14 +240,14 @@ class FeatureStore:
         nbytes = sum(a.nbytes for arrays, _, _ in entry["levels"] for a in arrays)
         if not self._folder_ready():
             return
-        if self.max_bytes is not None and self._nbytes + nbytes > self.max_bytes:
+        if self._nbytes + nbytes > self.max_bytes:
             # Make room once with what went unused, reaching back at least to the start of this
             # session (entries are touched when read), so that a run can never drop what it wrote
             # or read itself, however long it takes and however short the span is
             if self.prune_when_full_days is not None and not self.is_full:
                 session_days = (time.time() - self._session_start) / 86400
                 self.prune(max(self.prune_when_full_days, session_days))
-        if self.max_bytes is not None and self._nbytes + nbytes > self.max_bytes:
+        if self._nbytes + nbytes > self.max_bytes:
             self.is_full = True
             self._warn_no_write(f"size cap ({self.max_bytes / 1e9:.1f} GB) reached, features are not "
                                 "stored anymore (delete stored features or raise the cap).")
@@ -295,8 +295,8 @@ class FeatureStore:
 
     def prune(self, max_age_days):
         """Delete the entries of this store that have not been used for `max_age_days` days and
-        return how many (see prune_folder). Offered for a folder whose owner wants it kept small;
-        the store never does this by itself."""
+        return how many (see prune_folder). Also how the store makes room when it is full, if
+        prune_when_full_days is given (see put); otherwise it never does this by itself."""
         deleted = prune_folder(self.folder, max_age_days)
         if deleted:
             self._nbytes = self._scan_bytes()

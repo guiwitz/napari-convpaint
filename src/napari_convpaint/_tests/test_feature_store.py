@@ -488,6 +488,20 @@ def test_widget_store_size_cap(make_napari_viewer, tmp_path):
     assert w.store_max_gb == default_gb and w.store_max_size_spinbox.value() == default_gb
 
 
+def test_widget_says_where_the_default_store_keeps_features(make_napari_viewer, monkeypatch):
+    """Switching the store on in Convpaint's own folder says once per session where the features
+    go and for how long, so that nothing is stored on disk unnoticed."""
+    import napari_convpaint.convpaint_widget as cw
+    shown = []
+    monkeypatch.setattr(cw, 'show_info', shown.append)
+    w = cw.ConvpaintWidget(make_napari_viewer())
+    w.ensure_init()
+    for on in [True, False, True]:
+        w.check_use_store.setChecked(on)
+    notes = [m for m in shown if "Convpaint's own folder" in m]
+    assert len(notes) == 1 and w.store_folder in notes[0]
+
+
 def test_widget_notes_the_folders_used(make_napari_viewer, tmp_path):
     """Every folder the store is enabled with is listed once in Convpaint's own folder."""
     from napari_convpaint.convpaint_widget import ConvpaintWidget, _store_folders_file

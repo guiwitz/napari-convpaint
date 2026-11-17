@@ -983,8 +983,8 @@ class ConvpaintModel:
         scribbles, or the train->predict of one image — instead of recomputing them.
         Entries are content-addressed (a hash of the prepared plane), so the cache is
         self-invalidating: a changed image simply misses. Bounded by a RAM budget
-        (``max_bytes``, default: 2 GB, clamped to a quarter of the available RAM;
-        least recently used entries are dropped).
+        (``max_bytes``, default: 2 GB, clamped to a quarter of the available RAM; when full,
+        the entries of images worked on earlier go first, then those never used, see FeatureCache).
         On by default; call this again to change the budget, or disable_feature_cache to
         turn it off (e.g. in a batch over many images, where nothing is ever reused)."""
         from .feature_cache import FeatureCache
@@ -1030,7 +1030,7 @@ class ConvpaintModel:
         The folder must be empty, not yet existing, or a feature store. Nothing is ever
         removed from it automatically (see clear_feature_store and prune_feature_store);
         ``max_bytes`` caps its size instead, and once that is reached nothing more is
-        stored (default: 100 GB) - unless ``prune_when_full_days`` is given, which then
+        stored (default: 20 GB) - unless ``prune_when_full_days`` is given, which then
         makes room by dropping what has not been used for that long."""
         from .feature_store import FeatureStore
         # Only replaced once the folder works: a failing constructor leaves a running store
