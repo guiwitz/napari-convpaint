@@ -59,7 +59,9 @@ class FeatureCache:
     current image, the ones that were never used, then the least recently used: when a stack
     larger than the cache is processed plane by plane, the first planes stay resident instead
     of being pushed out one by one, so a second pass over the stack reuses them (with plain
-    LRU, every plane would evict the next one it needs -> no reuse at all).
+    LRU, every plane would evict the next one it needs -> no reuse at all). Both of the first
+    two tiers take the newest entry, so the beginning of a pass survives even where its planes
+    ended up in separate scopes (e.g. a caller handing them over one by one, see new_scope).
 
     Parameters
     ----------
@@ -117,11 +119,11 @@ class FeatureCache:
         self._total_bytes += nbytes
 
     def _evict_one(self):
-        """Evict the oldest entry of an image worked on earlier; failing that, the newest
+        """Evict the newest entry of an image worked on earlier; failing that, the newest
         never-used entry of the current one, else its least recently used (plain LRU would
         cycle through a stack larger than the cache: every plane evicts the one needed next,
         so nothing is ever reused; see the class docstring)."""
-        key = next((k for k in self._entries if self._entries[k][3] < self._scope), None)
+        key = next((k for k in reversed(self._entries) if self._entries[k][3] < self._scope), None)
         if key is None:
             key = next((k for k in reversed(self._entries) if not self._entries[k][2]), next(iter(self._entries)))
         self._total_bytes -= self._entries.pop(key)[1]

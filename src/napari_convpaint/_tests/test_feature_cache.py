@@ -82,6 +82,22 @@ def test_new_scope_is_ignored_while_the_image_is_still_being_read():
     assert ("p", 0) in c._entries and ("p", 2) not in c._entries
 
 
+def test_separate_scopes_per_plane_still_keep_the_first_planes():
+    """Even where the planes of a stack end up in separate scopes (a caller handing them over as
+    single images), the newest of the earlier entries is evicted, not the oldest: the beginning of
+    the pass stays resident instead of every plane evicting the one needed next."""
+    c = FeatureCache(max_bytes=int(3.5 * 10**6))  # room for 3 planes of 1 MB
+    for z in range(6):
+        c._scope += 1                             # every plane taken for another image
+        if c.get(("p", z)) is None:
+            c.put(("p", z), _arr(1))
+    assert ("p", 0) in c._entries and ("p", 1) in c._entries
+    hits = c.stats()["hits"]
+    for z in range(2):                            # so a second pass reuses them
+        c.get(("p", z))
+    assert c.stats()["hits"] == hits + 2
+
+
 def test_lru_touch_on_get_protects_entry():
     c = FeatureCache(max_bytes=int(2.5 * 10**6))
     c.put(("a",), _arr(1))
