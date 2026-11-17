@@ -117,6 +117,7 @@ class ConvpaintModel:
         self.enable_feature_cache()  # Creates _feature_cache: features are reused from RAM by default
         self._feature_store = None  # created by enable_feature_store
         self._image_scope = None  # identity of the image worked on (see _update_image_scope)
+        self._in_plane_loop = False  # the caller says when the image changes (see new_plane_loop)
         self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
@@ -999,6 +1000,28 @@ class ConvpaintModel:
         if self._feature_cache is not None:
             self._feature_cache.clear()
 
+    def new_plane_loop(self, image=None):
+        """Start working on an image (stack) whose planes are handed over one by one (e.g. to show
+        progress or to bound memory). The model cannot tell such planes apart from a series of
+        separate images, so from now on it stops guessing which image is worked on, and this is
+        called for every new image instead, until end_plane_looping. Pass the image to have it
+        compared with the one before (so calling it again for the same one changes nothing), or
+        nothing if the caller knows that it changed (as the widget does, following the selected
+        layer). Affects only which features the cache drops first, never the results."""
+        self._in_plane_loop = True
+        if image is not None:
+            self._update_image_scope(image, force=True)
+            return
+        self._image_scope = None # Unknown image, so a later one passed in counts as new
+        if self._feature_cache is not None:
+            self._feature_cache.new_scope(force=True)
+
+    def end_plane_looping(self):
+        """Back to the default after new_plane_loop: the model guesses again from the data it is
+        given when the work moves on to another image."""
+        self._in_plane_loop = False
+        self._image_scope = None # The guess starts afresh
+
     def enable_feature_store(self, folder, max_bytes=None, prune_when_full_days=None):
         """Turn on the feature store: the native features of every extracted plane are
         kept as files in ``folder`` (no eviction, also across sessions) and reused like
@@ -1086,20 +1109,21 @@ class ConvpaintModel:
                                    use_device=fe_use_device)
                 done += 1
 
-    def _update_image_scope(self, data):
+    def _update_image_scope(self, data, force=False):
         """Note when the work moves on to another image, identified by its shape and its
         middle plane (a first plane is often black). Tracked only while the feature cache is
         on - its only consumer so far - which evicts the previous image's entries first
-        (see FeatureCache.new_scope)."""
+        (see FeatureCache.new_scope). In a plane loop only new_plane_loop gets here (`force`,
+        which also skips the cache's guess); the calls with the planes do not."""
         cache = self._feature_cache
-        if cache is None:
+        if cache is None or (self._in_plane_loop and not force):
             return
         img = data[0] if isinstance(data, (list, tuple)) else data
         plane = img[..., (img.shape[-3] - 1) // 2, :, :] if img.ndim > 2 else img
         scope = (img.shape, self._data_signature(plane))
         if scope != self._image_scope:
             self._image_scope = scope
-            cache.new_scope()
+            cache.new_scope(force=force)
 
     def _extraction_signature(self):
         """The settings part of the cache/store key: the parameters whose change

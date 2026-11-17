@@ -2093,6 +2093,16 @@ class ConvpaintWidget(QWidget):
 
     # Train
 
+    def _note_image_layer(self):
+        """Start a new plane loop on the model when the work moves on to another image (layer): the
+        widget hands the planes of a stack over one by one, so it stays in that mode for good and
+        tells the model about every new image itself (see ConvpaintModel.new_plane_loop)."""
+        img = self._get_selected_img()
+        noted = (img.name, getattr(img.data, 'shape', None)) if img is not None else None
+        if noted != self._noted_image or not self.cp_model._in_plane_loop: # A new model would always start guessing
+            self._noted_image = noted
+            self.cp_model.new_plane_loop()
+
     def _on_train(self, event=None):
         """Given a set of new annotations, update the CatBoost classifier."""
 
@@ -2147,6 +2157,7 @@ class ConvpaintWidget(QWidget):
                     self.untile_info_shown = True
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
             # (as in prediction, so train and predict hash identical data and share feature-cache entries)
+            self._note_image_layer() # Note the image worked on, for the feature cache
             try:
                 _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
                                         in_channels=in_channels, skip_norm=True,
@@ -2196,6 +2207,7 @@ class ConvpaintWidget(QWidget):
                 return
             
             # Get the data
+            self._note_image_layer() # Note the image worked on, for the feature cache
             image_plane = self._get_current_plane_norm()
             in_channels = self._parse_in_channels(self.input_channels)
 
@@ -2286,6 +2298,7 @@ class ConvpaintWidget(QWidget):
                 return
 
             # Get the data
+            self._note_image_layer() # Note the image worked on, for the feature cache
             image_plane = self._get_current_plane_norm()
             in_channels = self._parse_in_channels(self.input_channels)
 
@@ -2347,6 +2360,7 @@ class ConvpaintWidget(QWidget):
 
         # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        self._note_image_layer() # Note the image worked on, for the feature cache
         
         # Step through the stack and predict each image
         num_steps = image_stack_norm.shape[-3]
@@ -2418,6 +2432,7 @@ class ConvpaintWidget(QWidget):
 
         # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        self._note_image_layer() # Note the image worked on, for the feature cache
         pca, kmeans = self._check_parse_pca_kmeans()
         in_channels = self._parse_in_channels(self.input_channels)
 
@@ -2752,6 +2767,7 @@ class ConvpaintWidget(QWidget):
         self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
         self.cache_max_mb = self.default_cache_max_mb # Max RAM (MB) the feature cache may use
         self.untile_info_shown = False # Whether the user was informed that auto-segment with caching skips annotation tiles
+        self._noted_image = None # Image the model was told about last (see _note_image_layer)
         self.store_enabled = False # Feature store off by default (on = keep the features of all processed planes on disk)
         self.store_max_gb = self.default_store_max_gb # Max disk space (GB) the feature store may take
         self.store_folder = str(_convpaint_cache_dir() / 'feature_store') # Default folder of the feature store
@@ -4202,6 +4218,8 @@ class ConvpaintWidget(QWidget):
                         or self.cont_training == "Global")
             # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
             in_channels = self._parse_in_channels(self.input_channels)
+            self.cp_model.new_plane_loop(img_list) # The images worked on, for the feature cache
+            self._noted_image = None # They are not the selected layer, which is noted again next time
             _ = self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list,
                                     in_channels=in_channels, skip_norm=False,
                                     fe_use_device=self.fe_device, clf_use_device=self.clf_device)
@@ -4278,6 +4296,7 @@ class ConvpaintWidget(QWidget):
 
         # Get normalized data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        self._note_image_layer() # Note the image worked on, for the feature cache
         in_channels = self._parse_in_channels(self.input_channels)
 
         # Store features in the feature store (single image or stack)
@@ -5141,6 +5160,8 @@ class ConvpaintWidget(QWidget):
                     warnings.warn(f'Could not prepare image {fname} for prediction. Skipping.')
                     continue
 
+                self.cp_model.new_plane_loop(prep) # Every file is another image
+                self._noted_image = None # Not the selected layer, which is noted again next time
                 try:
                     probas, seg = self.cp_model._predict(prep, add_seg=True, in_channels=in_channels,
                                                          skip_norm=False, use_dask=self.use_dask,

@@ -98,6 +98,22 @@ def test_separate_scopes_per_plane_still_keep_the_first_planes():
     assert c.stats()["hits"] == hits + 2
 
 
+def test_forced_new_scope_moves_on_despite_never_used_entries():
+    """A pass leaves its entries never-used, which the guard takes for an unfinished stack; a
+    caller that announces its images itself (see ConvpaintModel.new_plane_loop) overrules it."""
+    c = FeatureCache(max_bytes=int(3.5 * 10**6))  # room for 3 planes of 1 MB
+    for z in range(3):
+        c.put(("A", z), _arr(1))                  # image A: stored, never read
+    c.new_scope()                                 # guessed: still the same image
+    assert c._scope == 0
+    c.new_scope(force=True)                       # announced: the work moved on
+    assert c._scope == 1
+    for z in range(3):
+        c.put(("B", z), _arr(1))
+    assert all(("B", z) in c._entries for z in range(3))        # B replaced A, not itself
+    assert not any(("A", z) in c._entries for z in range(3))
+
+
 def test_lru_touch_on_get_protects_entry():
     c = FeatureCache(max_bytes=int(2.5 * 10**6))
     c.put(("a",), _arr(1))
@@ -407,3 +423,75 @@ def test_clear_feature_cache_keeps_the_cache():
     assert len(fc) == 1
     cp.clear_feature_cache()
     assert len(fc) == 0 and cp._feature_cache is fc and fc.stats()["max_bytes"] == 10**7
+
+
+def test_plane_loop_steers_the_scope():
+    """In a plane loop the caller says when the image changes (new_plane_loop) and the model no
+    longer guesses from the planes it is given, until end_plane_looping."""
+    import warnings as _w
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    rng = np.random.default_rng(0)
+    stack = rng.random((3, 32, 32), dtype=np.float32)
+    other = rng.random((3, 32, 32), dtype=np.float32)
+    cp = ConvpaintModel('gaussian')
+    fc = cp.enable_feature_cache(max_bytes=10**7)
+    with _w.catch_warnings():
+        _w.simplefilter('ignore')
+        cp.new_plane_loop(stack)
+        scope, image = fc._scope, cp._image_scope
+        for z in range(3):                        # its planes: not compared at all
+            cp.get_feature_image(stack[z])
+        assert fc._scope == scope and cp._image_scope == image and len(fc) == 3
+        cp.new_plane_loop(stack)                  # the same stack again: nothing changes
+        assert fc._scope == scope
+        cp.new_plane_loop(other)                  # another one: a new scope despite the unread planes
+        assert fc._scope == scope + 1
+        cp.end_plane_looping()                    # back to the guess
+        cp.get_feature_image(other[0])
+        assert fc._scope == scope + 2
+
+
+def test_widget_starts_a_plane_loop_per_image(make_napari_viewer, monkeypatch):
+    """The widget hands the planes of a stack to the model one by one, so it follows the selected
+    layer and starts a new plane loop for every new image: training, auto-segment and the
+    plane-by-plane prediction of one image stay in one scope, and another image starts a new one
+    although nothing of the first one was read back (which the model's own guess would take for an
+    unfinished stack). A new model, e.g. after choosing another FE, is put in that mode again."""
+    from napari_convpaint.convpaint_widget import ConvpaintWidget
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    from napari_convpaint.testing_data import generate_synthetic_square, generate_synthetic_circle_annotation
+    started = []
+    start = ConvpaintModel.new_plane_loop
+    def spy(self, image=None):
+        started.append(image)
+        return start(self, image)
+    monkeypatch.setattr(ConvpaintModel, 'new_plane_loop', spy)
+
+    viewer = make_napari_viewer()
+    w = ConvpaintWidget(viewer)
+    w.ensure_init()
+    im, _ = generate_synthetic_square(im_dims=(100, 100), square_dims=(30, 30), rgb=False)
+    stack = np.stack([im, im[::-1], im[:, ::-1]])           # 3 different planes [Z, H, W]
+    viewer.add_image(stack)
+    w._on_select_layer()                                    # (the changed-signal handler is QTimer-delayed)
+    w._on_add_annot_layer()
+    viewer.layers['annotations'].data[0] = generate_synthetic_circle_annotation(
+        im_dims=(100, 100), circle1_xy=(50, 25), circle2_xy=(50, 75))
+    w.check_tile_annotations.setChecked(False)
+
+    w._on_train()                                           # also auto-segments the current plane
+    fc = w.cp_model._feature_cache
+    scope = fc._scope
+    w._on_predict_all()
+    assert started == [None]                                # one loop for the image, from its first run on
+    assert fc._scope == scope and len(fc) == 3              # one scope, one entry per plane
+
+    other = viewer.add_image(stack * 0.5)                   # another image, nothing of the first was read
+    w.image_layer_selection_widget.value = other
+    w._on_select_layer()
+    w._on_predict_all()
+    assert started == [None, None] and fc._scope == scope + 1
+
+    w.cp_model = ConvpaintModel('gaussian')                 # as when another FE is chosen
+    w._note_image_layer()
+    assert w.cp_model._in_plane_loop

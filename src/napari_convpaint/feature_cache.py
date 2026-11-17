@@ -130,13 +130,15 @@ class FeatureCache:
 
     # -- invalidation / limits --------------------------------------------
 
-    def new_scope(self):
+    def new_scope(self, force=False):
         """Note that the work moved on to another image, whose entries are then kept over the
         earlier ones (which would otherwise stay resident for good once they have been used).
         Ignored while the current image still has entries that were never used: a stack is
         processed plane by plane, i.e. announced as one image after another, and has to stay
-        one scope (its planes would otherwise evict each other instead of the earlier image)."""
-        if any(not e[2] and e[3] == self._scope for e in self._entries.values()):
+        one scope (its planes would otherwise evict each other instead of the earlier image).
+        `force` skips that guess, for callers that know the image really changed (see
+        ConvpaintModel.new_plane_loop)."""
+        if not force and any(not e[2] and e[3] == self._scope for e in self._entries.values()):
             return
         self._scope += 1
 
