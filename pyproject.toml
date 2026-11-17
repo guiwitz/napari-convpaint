@@ -30,6 +30,7 @@ dependencies = [
     "catboost>=1.2.8",
     "dask",
     "einops",
+    "imageio",
     "joblib",
     "magicgui",
     "napari",
@@ -37,10 +38,13 @@ dependencies = [
     "napari-guitils>=0.2.0",
     "numpy",
     "omegaconf",
+    "pandas",
     "pyyaml",
     "qtpy",
+    "requests",
     "scikit-learn",
     "scikit-image",
+    "scipy",
     "tifffile",
     "timm>=1.0.20",
     "torch",
@@ -65,7 +69,7 @@ ilastik = [
     # conda install -c ilastik-forge fastfilters
 ]
 qt = [
-    "pyqt5",
+    "pyqt6",
 ]
 
 [project.entry-points."napari.manifest"]
