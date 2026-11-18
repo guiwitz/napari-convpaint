@@ -111,6 +111,7 @@ class FeatureStore:
         self._warned_no_write = False
         self._ensure_folder()
         self._nbytes = self._scan_bytes() # Size on disk, kept up to date by put/clear
+        self._update_is_full()
 
     # -- the folder ---------------------------------------------------------
 
@@ -197,6 +198,11 @@ class FeatureStore:
     def _entry_dirs(self, include_tmp=False):
         """Folders of the entries of this store (see the module function of the same name)."""
         return _entry_dirs(self.folder, include_tmp)
+
+    def _update_is_full(self):
+        """Full once the cap is reached, unless the store can still make room: then put finds out
+        by trying (and sets it if pruning does not free enough)."""
+        self.is_full = self._nbytes >= self.max_bytes and self.prune_when_full_days is None
 
     # -- public API ---------------------------------------------------------
 
@@ -290,7 +296,7 @@ class FeatureStore:
         for d in self._entry_dirs(include_tmp=True):
             shutil.rmtree(d, ignore_errors=True)
         self._nbytes = self._scan_bytes() # Not 0: deleting can fail, e.g. while a file is memory-mapped
-        self.is_full = self._nbytes >= self.max_bytes
+        self._update_is_full()
         self._warned_no_write = False
 
     def prune(self, max_age_days):
@@ -300,15 +306,14 @@ class FeatureStore:
         deleted = prune_folder(self.folder, max_age_days)
         if deleted:
             self._nbytes = self._scan_bytes()
-            self.is_full = self._nbytes >= self.max_bytes
+            self._update_is_full()
         return deleted
 
     def set_max_bytes(self, max_bytes):
         """Change the cap in place; nothing is deleted by it, and storing resumes if there is
-        room again. A cap below what is stored is full right away, while room that may still be
-        too small for the next entry is left to be found out by trying."""
+        room again or can be made (see _update_is_full)."""
         self.max_bytes = int(max_bytes)
-        self.is_full = self._nbytes >= self.max_bytes
+        self._update_is_full()
         self._warned_no_write = False
 
     def __len__(self):

@@ -383,6 +383,35 @@ def test_a_full_store_makes_room_for_what_comes_next(tmp_path):
         assert store3.is_full and len(store3) == 1
 
 
+def test_a_lowered_cap_still_makes_room(tmp_path):
+    """Lowering the cap down to what is stored does not stop a store that makes room when full:
+    the next plane drops what went unused. A store that keeps everything is full right away."""
+    import os, time
+    import warnings as _w
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    stack, _ = _stack_and_annot()
+    earlier = (stack[:1] * 0.5).astype(stack.dtype)  # Another image, so the stack does not reuse it
+    with _w.catch_warnings():
+        _w.simplefilter('ignore')
+        cp = ConvpaintModel('gaussian')
+        cp.disable_feature_cache()                   # The store alone
+        cp.set_params(tile_annotations=False, normalize=1)
+        store = cp.enable_feature_store(tmp_path / "store", prune_when_full_days=1)
+        cp.store_features(earlier)
+        old_entry = store._entry_dirs()[0]
+        two_days_ago = time.time() - 2 * 86400
+        os.utime(old_entry, (two_days_ago, two_days_ago))
+        cp.set_feature_store_max_bytes(store.nbytes) # Nothing fits anymore without making room
+        assert not store.is_full
+        cp.store_features(stack[1:2])
+        assert not os.path.exists(old_entry) and len(store) == 1
+
+        keeping = cp.enable_feature_store(tmp_path / "keeping")
+        cp.store_features(earlier)
+        cp.set_feature_store_max_bytes(keeping.nbytes)
+        assert keeping.is_full
+
+
 def test_a_full_store_never_drops_the_running_session(tmp_path):
     """Even with a span of 0, making room reaches back only to the start of the session, so a
     run cannot wipe and rewrite its own work: it stops instead."""
