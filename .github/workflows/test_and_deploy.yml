@@ -60,7 +60,8 @@ jobs:
       # tox-conda: https://github.com/tox-dev/tox-conda
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
-        run: uvx --with tox-gh-actions tox -- ${{ matrix.group.files }}
+        # tox 4.67.14 removed a name that tox-gh-actions (3.5.0) imports; unpin once they fit again
+        run: uvx --from "tox<4.67.14" --with tox-gh-actions tox -- ${{ matrix.group.files }}
         env:
           PLATFORM: ${{ matrix.platform }}
           CONVPAINT_SKIP_MPS_CLEANUP: "1"
