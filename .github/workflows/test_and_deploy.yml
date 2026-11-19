@@ -35,6 +35,23 @@ jobs:
             files: "src/napari_convpaint/_tests/test_convpaint.py src/napari_convpaint/_tests/test_utils.py"
           - name: dims suite
             files: "src/napari_convpaint/_tests/test_dims.py"
+        # All other test files (new ones included automatically), once per OS to keep the run short
+        include:
+          - platform: ubuntu-latest
+            python-version: "3.13"
+            group:
+              name: remaining tests
+              files: "src/napari_convpaint/_tests --ignore=src/napari_convpaint/_tests/test_convpaint.py --ignore=src/napari_convpaint/_tests/test_utils.py --ignore=src/napari_convpaint/_tests/test_dims.py"
+          - platform: windows-latest
+            python-version: "3.13"
+            group:
+              name: remaining tests
+              files: "src/napari_convpaint/_tests --ignore=src/napari_convpaint/_tests/test_convpaint.py --ignore=src/napari_convpaint/_tests/test_utils.py --ignore=src/napari_convpaint/_tests/test_dims.py"
+          - platform: macos-latest
+            python-version: "3.13"
+            group:
+              name: remaining tests
+              files: "src/napari_convpaint/_tests --ignore=src/napari_convpaint/_tests/test_convpaint.py --ignore=src/napari_convpaint/_tests/test_utils.py --ignore=src/napari_convpaint/_tests/test_dims.py"
     steps:
       - uses: actions/checkout@v6
 
