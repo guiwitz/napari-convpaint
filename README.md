@@ -17,11 +17,15 @@ Following an idea similar to other tools like ilastik, its main strength lies in
 
 ## Installation
 
-You can install `napari-convpaint` via [pip]:
+The easiest way is a new conda environment with everything from conda-forge (napari comes with the plugin):
 
-    pip install napari-convpaint
+    conda create -n convpaint -c conda-forge python=3.13 napari-convpaint pyqt6
 
-*Note: If you are running into an error that vispy requires a certain C++ version, you can install vispy via `conda install vispy` and then install `napari-convpaint` via `pip` to avoid this.*
+Or with [pip], together with a Qt backend for napari:
+
+    pip install "napari-convpaint[qt]"
+
+*Note: Use one or the other within an environment. Installing the plugin with pip into an environment whose napari comes from conda can crash napari on macOS (`OMP: Error #15`), as both then bring their own copy of OpenMP.*
 
 To install the latest development version:
 
