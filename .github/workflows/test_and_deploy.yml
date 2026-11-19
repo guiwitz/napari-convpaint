@@ -25,6 +25,13 @@ jobs:
     timeout-minutes: 60
     permissions:
       id-token: write  # needed for codecov OIDC authentication
+    env:
+      # The "remaining tests" group: every test file except those of the other two groups
+      REMAINING_TESTS: >-
+        src/napari_convpaint/_tests
+        --ignore=src/napari_convpaint/_tests/test_convpaint.py
+        --ignore=src/napari_convpaint/_tests/test_utils.py
+        --ignore=src/napari_convpaint/_tests/test_dims.py
     strategy:
       fail-fast: false
       matrix:
@@ -35,23 +42,15 @@ jobs:
             files: "src/napari_convpaint/_tests/test_convpaint.py src/napari_convpaint/_tests/test_utils.py"
           - name: dims suite
             files: "src/napari_convpaint/_tests/test_dims.py"
-        # All other test files (new ones included automatically), once per OS to keep the run short
+        # All other test files (new ones included automatically, see REMAINING_TESTS): on every Python
+        # on Linux and on 3.13 on every OS, to keep the run short
         include:
-          - platform: ubuntu-latest
-            python-version: "3.13"
-            group:
-              name: remaining tests
-              files: "src/napari_convpaint/_tests --ignore=src/napari_convpaint/_tests/test_convpaint.py --ignore=src/napari_convpaint/_tests/test_utils.py --ignore=src/napari_convpaint/_tests/test_dims.py"
-          - platform: windows-latest
-            python-version: "3.13"
-            group:
-              name: remaining tests
-              files: "src/napari_convpaint/_tests --ignore=src/napari_convpaint/_tests/test_convpaint.py --ignore=src/napari_convpaint/_tests/test_utils.py --ignore=src/napari_convpaint/_tests/test_dims.py"
-          - platform: macos-latest
-            python-version: "3.13"
-            group:
-              name: remaining tests
-              files: "src/napari_convpaint/_tests --ignore=src/napari_convpaint/_tests/test_convpaint.py --ignore=src/napari_convpaint/_tests/test_utils.py --ignore=src/napari_convpaint/_tests/test_dims.py"
+          - {platform: ubuntu-latest, python-version: "3.11", group: {name: remaining tests}}
+          - {platform: ubuntu-latest, python-version: "3.12", group: {name: remaining tests}}
+          - {platform: ubuntu-latest, python-version: "3.13", group: {name: remaining tests}}
+          - {platform: ubuntu-latest, python-version: "3.14", group: {name: remaining tests}}
+          - {platform: windows-latest, python-version: "3.13", group: {name: remaining tests}}
+          - {platform: macos-latest, python-version: "3.13", group: {name: remaining tests}}
     steps:
       - uses: actions/checkout@v6
 
@@ -78,7 +77,7 @@ jobs:
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
         # tox 4.67.14 removed a name that tox-gh-actions (3.5.0) imports; unpin once they fit again
-        run: uvx --from "tox<4.67.14" --with tox-gh-actions tox -- ${{ matrix.group.files }}
+        run: uvx --from "tox<4.67.14" --with tox-gh-actions tox -- ${{ matrix.group.files || env.REMAINING_TESTS }}
         env:
           PLATFORM: ${{ matrix.platform }}
           CONVPAINT_SKIP_MPS_CLEANUP: "1"
