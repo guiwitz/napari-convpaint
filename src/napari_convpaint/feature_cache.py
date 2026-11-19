@@ -88,8 +88,8 @@ class FeatureCache:
         return None
 
     def put(self, key, entry):
-        """Store `entry` under `key` if it fits the budget; else evict (see _evict_one)
-        and retry. An entry that can never fit is not cached (the caller recomputes)."""
+        """Store `entry` under `key` if it fits the budget; else evict LRU and
+        retry. An entry that can never fit is not cached (the caller recomputes)."""
         if entry is None:
             return
         nbytes = _nbytes(entry)
@@ -136,7 +136,7 @@ class FeatureCache:
         self._total_bytes = 0
 
     def set_max_bytes(self, max_bytes: int):
-        """Change the cap in place, evicting (see _evict_one) while over it."""
+        """Change the cap in place, evicting LRU entries if over."""
         self._max_bytes = int(max_bytes)
         while self._entries and self._total_bytes > self._max_bytes:
             self._evict_one()

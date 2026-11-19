@@ -56,8 +56,8 @@ from ..feature_extractor import FeatureExtractor
 
 class DinoJafarFeatures(FeatureExtractor):
     """
-    DINO + JAFAR upsampler feature extractor integrated with ConvPaint.
-    Expects that ConvPaint already padded/cropped images so H,W are multiples
+    DINO + JAFAR upsampler feature extractor integrated with Convpaint.
+    Expects that Convpaint already padded/cropped images so H,W are multiples
     of self.patch_size. Provides dynamic patch size: large images use sliding
     patches with overlap; smaller images shrink patch size to the largest
     multiple of the backbone patch size that fits within min(H,W).

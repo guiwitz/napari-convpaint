@@ -319,25 +319,51 @@ def test_widget_store_controls(make_napari_viewer, tmp_path, monkeypatch):
     w.cp_model.set_params(channel_mode='rgb')
     w._on_train()
     w._on_predict()
-    assert len(fs) >= 1 and 'Stored features: 1 planes' in w.store_size_label.text()
+    assert len(fs) >= 1 and 'Stored: 1 planes' in w.store_size_label.text()
 
     monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: QMessageBox.Yes)
     w._on_delete_stored_features()
     assert len(fs) == 0 and w.cp_model._feature_store is fs   # emptied, still active
+    assert len(w.cp_model._feature_cache) >= 1
+    w._on_clear_cache()                                        # 'Clear cache' empties the cache, keeps it enabled
+    assert len(w.cp_model._feature_cache) == 0 and w.check_use_cache.isChecked()
 
     w.check_use_store.setChecked(False)
     assert w.cp_model._feature_store is None and not w.btn_store_delete.isEnabled()
     assert (tmp_path / 'store' / 'convpaint_feature_store.json').is_file()
 
-    # A folder that cannot be used: reported, checkbox stays off, the previous folder is kept,
-    # and the store can be enabled again right away (nothing sticky)
+    # A folder that cannot be used: reported, the previous folder is kept, and a store that is
+    # running stays connected; with none running the store stays off (checkbox, buttons and label
+    # agree either way) and can be enabled again right away (nothing sticky)
     (tmp_path / 'dogs').mkdir(); (tmp_path / 'dogs' / 'dog1.png').write_bytes(b'x')
-    w.store_folder = str(tmp_path / 'dogs')
+    def choose(folder):   # what 'Choose folder' does after the dialog
+        w.store_folder = str(folder)
+        w.check_use_store.blockSignals(True); w.check_use_store.setChecked(True); w.check_use_store.blockSignals(False)
+        w._apply_feature_store(recreate=True)
+    def store_off_with(folder):
+        return (w.cp_model._feature_store is None and not w.check_use_store.isChecked() and not w.store_enabled
+                and not w.btn_store_features.isEnabled() and not w.btn_store_delete.isEnabled()
+                and w.store_folder == str(folder) and w.store_size_label.text() == 'Stored: (store off)')
+    def store_on_with(folder):
+        return (w.cp_model._feature_store is not None and w.cp_model._feature_store.folder == str(folder)
+                and w.check_use_store.isChecked() and w.store_enabled and w.btn_store_features.isEnabled()
+                and w.btn_store_delete.isEnabled() and w.store_folder == str(folder))
+    choose(tmp_path / 'dogs')                       # while off
+    assert store_off_with(tmp_path / 'store')
     w.check_use_store.setChecked(True)
-    assert w.cp_model._feature_store is None and not w.check_use_store.isChecked()
-    assert w.store_folder == str(tmp_path / 'store') and not w.btn_store_features.isEnabled()
+    assert store_on_with(tmp_path / 'store')
+    choose(tmp_path / 'dogs')                       # while on -> the running store is kept
+    assert store_on_with(tmp_path / 'store')
+    w.check_use_store.setChecked(False)
+    choose(tmp_path / 'dogs')                       # again, while off -> nothing to fall back to
+    assert store_off_with(tmp_path / 'store')
     w.check_use_store.setChecked(True)
-    assert w.cp_model._feature_store is not None and w.cp_model._feature_store.folder == str(tmp_path / 'store')
+    assert store_on_with(tmp_path / 'store')
+    choose(tmp_path / 'other')                      # a valid new folder while on
+    assert store_on_with(tmp_path / 'other')
+    w.check_use_store.setChecked(False)
+    choose(tmp_path / 'third')                      # a valid new folder while off -> enables
+    assert store_on_with(tmp_path / 'third')
 
 
 def test_widget_choosing_a_folder_uses_it(make_napari_viewer, tmp_path, monkeypatch):

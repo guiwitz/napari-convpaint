@@ -725,7 +725,7 @@ class ConvpaintModel:
         new_param : Param
             Convpaint model defaults adjusted to the feature extractor defaults
         """
-        cpm_defaults = ConvpaintModel.get_default_params() # Get ConvPaint defaults
+        cpm_defaults = ConvpaintModel.get_default_params() # Get Convpaint defaults
         new_param = self.fe_model.get_default_params(cpm_defaults) # Overwrite defaults defined in the FE model
         return new_param
 
@@ -978,9 +978,7 @@ class ConvpaintModel:
         scribbles, or the train->predict of one image — instead of recomputing them.
         Entries are content-addressed (a hash of the prepared plane), so the cache is
         self-invalidating: a changed image simply misses. Bounded by a RAM budget
-        (``max_bytes``, default 2 GB; reused entries are kept longest, and among the
-        never reused the newest is dropped first, so a stack larger than the cache
-        keeps its first planes).
+        (``max_bytes``, default 2 GB; least recently used entries are dropped).
         Off by default in the API; the widget enables it by default."""
         from .feature_cache import FeatureCache
         self._feature_cache = FeatureCache(max_bytes=max_bytes)
