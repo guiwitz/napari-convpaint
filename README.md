@@ -17,15 +17,15 @@ Following an idea similar to other tools like ilastik, its main strength lies in
 
 ## Installation
 
-The easiest way is a new conda environment with everything from conda-forge (napari comes with the plugin):
+The easiest way to install Convpaint is into a new conda environment with everything from conda-forge (napari comes with the plugin):
 
-    conda create -n convpaint -c conda-forge python=3.13 napari-convpaint pyqt6
+    conda create -n convpaint-env -c conda-forge python=3.13 napari-convpaint pyqt6
 
 Or with [pip], together with a Qt backend for napari:
 
     pip install "napari-convpaint[qt]"
 
-*Note: Use one or the other within an environment. Installing the plugin with pip into an environment whose napari comes from conda can crash napari on macOS (`OMP: Error #15`), as both then bring their own copy of OpenMP.*
+*Note: Use one or the other within an environment. Installing the plugin with pip into an environment whose napari comes from conda can crash napari on macOS (`OMP: Error #15`).*
 
 To install the latest development version:
 
