@@ -5,7 +5,7 @@ same image (or z-slice / movie frame) is segmented repeatedly while refining
 scribbles, its features can be reused instead of recomputed. This module holds a
 generic, feature-extractor-agnostic cache: it stores an *opaque entry* defined
 by each FE (e.g. DINO patch tokens — tiny and lossless to upsample), keyed by
-`(img_id, slice, FE-signature)`, and owns everything storage-related — LRU
+`(data signature, extraction signature)`, and owns everything storage-related — LRU
 eviction and, crucially, a memory budget so caching a 100-slice stack or a
 300-frame movie can never grow unbounded and crash the kernel.
 
@@ -56,14 +56,11 @@ class FeatureCache:
     ----------
     max_bytes : int or None
         Hard cap on the cache's size. None → `_DEFAULT_MAX_BYTES` (2 GB).
-    enabled : bool
-        Master switch; when False, get() always misses and put() is a no-op.
     """
 
-    def __init__(self, max_bytes: int | None = None, enabled: bool = True):
+    def __init__(self, max_bytes: int | None = None):
         self._entries: "OrderedDict[tuple, tuple]" = OrderedDict()  # key -> (entry, nbytes, used, scope)
         self._total_bytes = 0
-        self.enabled = bool(enabled)
         if max_bytes is None:
             max_bytes = _DEFAULT_MAX_BYTES
         self._max_bytes = int(max_bytes)
@@ -81,8 +78,6 @@ class FeatureCache:
 
     def get(self, key):
         """Return the cached entry for `key`, or None."""
-        if not self.enabled:
-            return None
         item = self._entries.get(key)
         if item is not None:
             self._entries[key] = (item[0], item[1], True, self._scope) # Used, and part of the current image
@@ -95,7 +90,7 @@ class FeatureCache:
     def put(self, key, entry):
         """Store `entry` under `key` if it fits the budget; else evict (see _evict_one)
         and retry. An entry that can never fit is not cached (the caller recomputes)."""
-        if not self.enabled or entry is None:
+        if entry is None:
             return
         nbytes = _nbytes(entry)
         # Overwrite of an existing key: drop the old size first.
@@ -145,12 +140,6 @@ class FeatureCache:
         self._max_bytes = int(max_bytes)
         while self._entries and self._total_bytes > self._max_bytes:
             self._evict_one()
-
-    def set_enabled(self, enabled: bool):
-        """Enable/disable in place; disabling clears the cache to free space."""
-        self.enabled = bool(enabled)
-        if not self.enabled:
-            self.clear()
 
     @property
     def nbytes(self) -> int:

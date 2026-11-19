@@ -109,12 +109,6 @@ class ComboFeatures(FeatureExtractor):
         # So, the combo FE itself is not patched, even if it works with a patch_size to comply with the models
         return False
 
-    def supports_feature_reuse(self, param):
-        # ComboFeatures overrides extract_features_pyramid to combine two sub-FEs,
-        # so it does not go through the base extract_native/reconstruct_from_native
-        # split the reuse relies on. Opt out of reusing features for now (v1).
-        return False
-
     def extract_features_pyramid(self, image, param, patched=False, device=None):
         def1 = self.model1.get_default_params(param)
         features1 = self.model1.extract_features_pyramid(image, def1, patched=False, device=device)
