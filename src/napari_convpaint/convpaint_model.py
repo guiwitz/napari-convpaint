@@ -37,6 +37,10 @@ class ConvpaintModel:
     - a `classifier`, which is responsible for the final pixel classification
     - a `Param` object, which defines the details of the model procedures, and is also defined in a separate class
 
+    Extracted features are **reused** from a RAM cache by default (the same image with the same settings
+    is not extracted twice); see `enable_feature_cache` / `disable_feature_cache`, and `enable_feature_store`
+    to keep them on disk as well.
+
     Note that the `ConvpaintModel` and its **`FeatureExtractor` model** are closely linked to each other. The intended way to
     use them is to create a `ConvpaintModel` instance, which will in turn create the corresponding `FeatureExtractor` instance.
     If a `ConvpaintModel` with another feature extractor is desired (including different configurations in layers),
@@ -110,9 +114,10 @@ class ConvpaintModel:
         self.num_features = 0
         self._fe_locked_device = None
         self._clf_locked_device = None
-        self._feature_cache = None  # created by enable_feature_cache
+        self.enable_feature_cache()  # Creates _feature_cache: features are reused from RAM by default
         self._feature_store = None  # created by enable_feature_store
         self._image_scope = None  # identity of the image worked on (see _update_image_scope)
+        self._in_plane_loop = False  # the caller says when the image changes (see new_plane_loop)
         self._params_to_reset_training = ['channel_mode',
                                           'normalize',
                                         #   'image_downsample',
@@ -303,7 +308,7 @@ class ConvpaintModel:
         # Input and output parameters
         def_param.image_downsample = 1
         def_param.seg_smoothening = 1
-        def_param.tile_annotations = True
+        def_param.tile_annotations = False
         def_param.tile_image = False
         def_param.use_dask = False
         def_param.unpatch_order = 1
@@ -969,7 +974,7 @@ class ConvpaintModel:
         return features
     
 ### FEATURE REUSE: CACHE (RAM) AND STORE (DISK)
-# Both are off unless enabled (the widget enables the cache by default); see feature_cache.py and feature_store.py
+# The cache is on by default (in the API as in the widget), the store until a folder is given; see feature_cache.py and feature_store.py
 
     def enable_feature_cache(self, max_bytes=None):
         """Turn on feature caching (in RAM). When on, the native (pre-rescale) features
@@ -978,14 +983,16 @@ class ConvpaintModel:
         scribbles, or the train->predict of one image — instead of recomputing them.
         Entries are content-addressed (a hash of the prepared plane), so the cache is
         self-invalidating: a changed image simply misses. Bounded by a RAM budget
-        (``max_bytes``, default 2 GB; least recently used entries are dropped).
-        Off by default in the API; the widget enables it by default."""
+        (``max_bytes``, default: 2 GB, clamped to a quarter of the available RAM; when full,
+        the entries of images worked on earlier go first, then those never used, see FeatureCache).
+        On by default; call this again to change the budget, or disable_feature_cache to
+        turn it off (e.g. in a batch over many images, where nothing is ever reused)."""
         from .feature_cache import FeatureCache
         self._feature_cache = FeatureCache(max_bytes=max_bytes)
         return self._feature_cache
 
     def disable_feature_cache(self):
-        """Turn off feature caching and free the cached features."""
+        """Turn off feature caching (on by default) and free the cached features."""
         self._feature_cache = None
 
     def clear_feature_cache(self):
@@ -993,18 +1000,55 @@ class ConvpaintModel:
         if self._feature_cache is not None:
             self._feature_cache.clear()
 
-    def enable_feature_store(self, folder, max_bytes=None):
+    def new_plane_loop(self, image=None):
+        """Start working on an image (stack) whose planes are handed over one by one (e.g. to show
+        progress or to bound memory). The model cannot tell such planes apart from a series of
+        separate images, so from now on it stops guessing which image is worked on, and this is
+        called for every new image instead, until end_plane_looping. Pass the image to have it
+        compared with the one before (so calling it again for the same one changes nothing), or
+        nothing if the caller knows that it changed (as the widget does, following the selected
+        layer). Affects only which features the cache drops first, never the results."""
+        self._in_plane_loop = True
+        if image is not None:
+            self._update_image_scope(image, force=True)
+            return
+        self._image_scope = None # Unknown image, so a later one passed in counts as new
+        if self._feature_cache is not None:
+            self._feature_cache.new_scope(force=True)
+
+    def end_plane_looping(self):
+        """Back to the default after new_plane_loop: the model guesses again from the data it is
+        given when the work moves on to another image."""
+        self._in_plane_loop = False
+        self._image_scope = None # The guess starts afresh
+
+    def enable_feature_store(self, folder, max_bytes=None, prune_when_full_days=None):
         """Turn on the feature store: the native features of every extracted plane are
         kept as files in ``folder`` (no eviction, also across sessions) and reused like
         cached ones — e.g. extract the features of a stack or movie once (see
         store_features), then train and predict from them. Same keys as the cache.
-        The folder must be empty, not yet existing, or a feature store. ``max_bytes``
-        optionally caps the size of the store (default: no cap, only a disk headroom)."""
+        The folder must be empty, not yet existing, or a feature store. Nothing is ever
+        removed from it automatically (see clear_feature_store and prune_feature_store);
+        ``max_bytes`` caps its size instead, and once that is reached nothing more is
+        stored (default: 20 GB) - unless ``prune_when_full_days`` is given, which then
+        makes room by dropping what has not been used for that long."""
         from .feature_store import FeatureStore
         # Only replaced once the folder works: a failing constructor leaves a running store
         # connected (the widget relies on that when a chosen folder turns out to be unusable)
-        self._feature_store = FeatureStore(folder, max_bytes=max_bytes)
+        self._feature_store = FeatureStore(folder, max_bytes=max_bytes,
+                                           prune_when_full_days=prune_when_full_days)
         return self._feature_store
+
+    def set_feature_cache_max_bytes(self, max_bytes):
+        """Change the RAM budget of the cache in place, dropping entries if it is over it now."""
+        if self._feature_cache is not None:
+            self._feature_cache.set_max_bytes(max_bytes)
+
+    def set_feature_store_max_bytes(self, max_bytes):
+        """Change the size cap of the store in place; nothing is deleted, but storing resumes
+        if the entries fit under the new cap again."""
+        if self._feature_store is not None:
+            self._feature_store.set_max_bytes(max_bytes)
 
     def disable_feature_store(self):
         """Turn off the feature store (the stored files are kept; see clear_feature_store)."""
@@ -1014,6 +1058,13 @@ class ConvpaintModel:
         """Delete the stored features from disk, keeping the store itself enabled."""
         if self._feature_store is not None:
             self._feature_store.clear()
+
+    def prune_feature_store(self, max_age_days):
+        """Delete the stored features that have not been used for `max_age_days` days, keeping
+        the store enabled; returns how many entries were deleted. Nothing calls this on its own."""
+        if self._feature_store is None:
+            return 0
+        return self._feature_store.prune(max_age_days)
 
     def store_features(self, image, in_channels=None, skip_norm=False, fe_use_device=None):
         """
@@ -1045,26 +1096,34 @@ class ConvpaintModel:
         data, _ = self._prep_dims(image)
         data = self._prep_whole_images(data, in_channels, skip_norm)
         # Extract plane by plane (bounded memory); FEs with 3D context need the whole stack
+        done, total = 0, sum(1 if self.fe_model.get_has_3d_context() else d.shape[1] for d in data)
         for d in data:
             units = [d] if self.fe_model.get_has_3d_context() else [d[:, z:z+1] for z in range(d.shape[1])]
             for unit in units:
+                if self._feature_store.is_full: # Extracting without being able to store is pointless
+                    warnings.warn(f"Feature store full: stopped after {done} of {total} planes "
+                                  "(see clear_feature_store, prune_feature_store and "
+                                  "set_feature_store_max_bytes).")
+                    return
                 self._get_features(unit, restore_input_form=False, in_channels=None, skip_norm=True,
                                    use_device=fe_use_device)
+                done += 1
 
-    def _update_image_scope(self, data):
+    def _update_image_scope(self, data, force=False):
         """Note when the work moves on to another image, identified by its shape and its
         middle plane (a first plane is often black). Tracked only while the feature cache is
         on - its only consumer so far - which evicts the previous image's entries first
-        (see FeatureCache.new_scope)."""
+        (see FeatureCache.new_scope). In a plane loop only new_plane_loop gets here (`force`,
+        which also skips the cache's guess); the calls with the planes do not."""
         cache = self._feature_cache
-        if cache is None:
+        if cache is None or (self._in_plane_loop and not force):
             return
         img = data[0] if isinstance(data, (list, tuple)) else data
         plane = img[..., (img.shape[-3] - 1) // 2, :, :] if img.ndim > 2 else img
         scope = (img.shape, self._data_signature(plane))
         if scope != self._image_scope:
             self._image_scope = scope
-            cache.new_scope()
+            cache.new_scope(force=force)
 
     def _extraction_signature(self):
         """The settings part of the cache/store key: the parameters whose change

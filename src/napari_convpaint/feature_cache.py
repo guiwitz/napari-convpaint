@@ -24,8 +24,17 @@ from __future__ import annotations
 from collections import OrderedDict
 
 
-# Default cap (same as the widget default of 2048 MB).
+# Default cap, see default_max_bytes().
 _DEFAULT_MAX_BYTES = 2048 * 10**6  # 2 GB
+_DEFAULT_RAM_SHARE = 4  # At most a quarter of the available RAM
+
+
+def default_max_bytes() -> int:
+    """The cap used when none is given: 2 GB, but at most a quarter of the RAM that is
+    currently available, so that the cache stays harmless on small machines. API and
+    widget both start from this budget."""
+    import psutil
+    return min(_DEFAULT_MAX_BYTES, int(psutil.virtual_memory().available / _DEFAULT_RAM_SHARE))
 
 
 def _nbytes(entry) -> int:
@@ -50,19 +59,21 @@ class FeatureCache:
     current image, the ones that were never used, then the least recently used: when a stack
     larger than the cache is processed plane by plane, the first planes stay resident instead
     of being pushed out one by one, so a second pass over the stack reuses them (with plain
-    LRU, every plane would evict the next one it needs -> no reuse at all).
+    LRU, every plane would evict the next one it needs -> no reuse at all). Both of the first
+    two tiers take the newest entry, so the beginning of a pass survives even where its planes
+    ended up in separate scopes (e.g. a caller handing them over one by one, see new_scope).
 
     Parameters
     ----------
     max_bytes : int or None
-        Hard cap on the cache's size. None → `_DEFAULT_MAX_BYTES` (2 GB).
+        Hard cap on the cache's size. None → `default_max_bytes()`.
     """
 
     def __init__(self, max_bytes: int | None = None):
         self._entries: "OrderedDict[tuple, tuple]" = OrderedDict()  # key -> (entry, nbytes, used, scope)
         self._total_bytes = 0
         if max_bytes is None:
-            max_bytes = _DEFAULT_MAX_BYTES
+            max_bytes = default_max_bytes()
         self._max_bytes = int(max_bytes)
         self._scope = 0
         self.hits = 0
@@ -108,24 +119,26 @@ class FeatureCache:
         self._total_bytes += nbytes
 
     def _evict_one(self):
-        """Evict the oldest entry of an image worked on earlier; failing that, the newest
+        """Evict the newest entry of an image worked on earlier; failing that, the newest
         never-used entry of the current one, else its least recently used (plain LRU would
         cycle through a stack larger than the cache: every plane evicts the one needed next,
         so nothing is ever reused; see the class docstring)."""
-        key = next((k for k in self._entries if self._entries[k][3] < self._scope), None)
+        key = next((k for k in reversed(self._entries) if self._entries[k][3] < self._scope), None)
         if key is None:
             key = next((k for k in reversed(self._entries) if not self._entries[k][2]), next(iter(self._entries)))
         self._total_bytes -= self._entries.pop(key)[1]
 
     # -- invalidation / limits --------------------------------------------
 
-    def new_scope(self):
+    def new_scope(self, force=False):
         """Note that the work moved on to another image, whose entries are then kept over the
         earlier ones (which would otherwise stay resident for good once they have been used).
         Ignored while the current image still has entries that were never used: a stack is
         processed plane by plane, i.e. announced as one image after another, and has to stay
-        one scope (its planes would otherwise evict each other instead of the earlier image)."""
-        if any(not e[2] and e[3] == self._scope for e in self._entries.values()):
+        one scope (its planes would otherwise evict each other instead of the earlier image).
+        `force` skips that guess, for callers that know the image really changed (see
+        ConvpaintModel.new_plane_loop)."""
+        if not force and any(not e[2] and e[3] == self._scope for e in self._entries.values()):
             return
         self._scope += 1
 

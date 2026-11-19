@@ -39,6 +39,8 @@ dependencies = [
     "numpy",
     "omegaconf",
     "pandas",
+    "platformdirs",
+    "psutil",
     "pyyaml",
     "qtpy",
     "requests",

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import uuid
 import warnings
 
@@ -34,6 +35,51 @@ _META = "meta.json" # Per-entry description (shapes, native form)
 _DISK_HEADROOM_BYTES = 2 * 1024 ** 3 # Never fill the disk below this much free space
 
 
+# Default cap, see default_max_bytes().
+_DEFAULT_MAX_BYTES = 20 * 10**9  # 20 GB
+
+
+def default_max_bytes() -> int:
+    """The cap used when none is given: moderate, since a store may be forgotten on disk. With
+    prune_when_full_days it works as a rolling budget, otherwise storing simply stops once it is
+    reached (the disk is protected by _DISK_HEADROOM_BYTES in any case)."""
+    return _DEFAULT_MAX_BYTES
+
+
+def _entry_dirs(folder, include_tmp=False):
+    """Folders of the entries (sub-folders with a meta file; optionally also leftover .tmp folders).
+    Empty if the folder is gone, so that reading and reporting never fail on it."""
+    try:
+        dirs = [os.path.join(folder, n) for n in os.listdir(folder)]
+    except OSError:
+        return []
+    return [d for d in dirs if os.path.isfile(os.path.join(d, _META))
+            or (include_tmp and d.endswith('.tmp') and os.path.isdir(d))]
+
+
+def prune_folder(folder, max_age_days):
+    """Delete the entries of a feature store folder that have not been used for `max_age_days`
+    days and return how many were deleted (an entry is touched whenever it is read, see
+    FeatureStore.get). Takes a folder rather than a store, so that one can be tidied up without
+    being opened - and a folder that is not there is left alone instead of being created.
+    None skips it, 0 days drops every entry, i.e. keeps nothing beyond the session that stored it."""
+    if max_age_days is None:
+        return 0
+    if not os.path.isfile(os.path.join(folder, _MARKER)):
+        return 0 # Only ever a folder Convpaint marked as a store of its own, never anything else
+    cutoff = time.time() - max_age_days * 86400
+    deleted = 0
+    for d in _entry_dirs(folder):
+        try:
+            if os.path.getmtime(d) >= cutoff:
+                continue
+        except OSError: # Gone in the meantime
+            continue
+        shutil.rmtree(d, ignore_errors=True) # Stays if locked -> tried again next time
+        deleted += 1
+    return deleted
+
+
 class FeatureStore:
     """Feature store in a folder: one sub-folder per entry (plane), no eviction.
 
@@ -44,18 +90,28 @@ class FeatureStore:
         folder must be empty or a feature store (marked by a marker file).
     max_bytes : int, optional
         Size cap of the store; once reached, nothing more is stored (with a warning).
-        None (default) = no cap (the disk headroom still applies). The size is tracked per
-        session, so entries another instance adds in the meantime are not counted.
+        None → `default_max_bytes()`. The size is tracked per session, so entries another
+        instance adds in the meantime are not counted.
+    prune_when_full_days : int, optional
+        Make room when the cap is reached by dropping the entries that have not been used
+        for that many days (once per time it fills up, see prune). None (default) = keep
+        everything and stop storing instead, which is what a folder chosen for keeping wants.
+        What this session has written or read is never dropped, however long it runs, so the
+        span only says how far beyond this session to reach back; 0 keeps exactly this session's.
     """
 
-    def __init__(self, folder, max_bytes=None):
+    def __init__(self, folder, max_bytes=None, prune_when_full_days=None):
         self.folder = str(folder)
-        self.max_bytes = max_bytes
+        self.max_bytes = default_max_bytes() if max_bytes is None else max_bytes
+        self.prune_when_full_days = prune_when_full_days
+        self._session_start = time.time() # Nothing used since then can be dropped to make room
         self.hits = 0
         self.misses = 0
+        self.is_full = False # Nothing fits anymore (cap or disk); extracting to store is then pointless
         self._warned_no_write = False
         self._ensure_folder()
         self._nbytes = self._scan_bytes() # Size on disk, kept up to date by put/clear
+        self._update_is_full()
 
     # -- the folder ---------------------------------------------------------
 
@@ -140,14 +196,13 @@ class FeatureStore:
         return os.path.join(self.folder, self._entry_name(key))
 
     def _entry_dirs(self, include_tmp=False):
-        """Folders of the entries (sub-folders with a meta file; optionally also leftover .tmp folders).
-        Empty if the folder is gone, so that reading and reporting never fail on it."""
-        try:
-            dirs = [os.path.join(self.folder, n) for n in os.listdir(self.folder)]
-        except OSError:
-            return []
-        return [d for d in dirs if os.path.isfile(os.path.join(d, _META))
-                or (include_tmp and d.endswith('.tmp') and os.path.isdir(d))]
+        """Folders of the entries of this store (see the module function of the same name)."""
+        return _entry_dirs(self.folder, include_tmp)
+
+    def _update_is_full(self):
+        """Full once the cap is reached, unless the store can still make room: then put finds out
+        by trying (and sets it if pruning does not free enough)."""
+        self.is_full = self._nbytes >= self.max_bytes and self.prune_when_full_days is None
 
     # -- public API ---------------------------------------------------------
 
@@ -177,6 +232,10 @@ class FeatureStore:
             self._nbytes = self._scan_bytes()
             self.misses += 1
             return None
+        try:
+            os.utime(entry_dir) # When it was last used, for prune(); read-only folders keep their times
+        except OSError:
+            pass
         self.hits += 1
         return entry
 
@@ -187,10 +246,20 @@ class FeatureStore:
         nbytes = sum(a.nbytes for arrays, _, _ in entry["levels"] for a in arrays)
         if not self._folder_ready():
             return
-        if self.max_bytes is not None and self._nbytes + nbytes > self.max_bytes:
-            self._warn_no_write(f"size cap ({self.max_bytes / 1e9:.1f} GB) reached, features are not stored anymore.")
+        if self._nbytes + nbytes > self.max_bytes:
+            # Make room once with what went unused, reaching back at least to the start of this
+            # session (entries are touched when read), so that a run can never drop what it wrote
+            # or read itself, however long it takes and however short the span is
+            if self.prune_when_full_days is not None and not self.is_full:
+                session_days = (time.time() - self._session_start) / 86400
+                self.prune(max(self.prune_when_full_days, session_days))
+        if self._nbytes + nbytes > self.max_bytes:
+            self.is_full = True
+            self._warn_no_write(f"size cap ({self.max_bytes / 1e9:.1f} GB) reached, features are not "
+                                "stored anymore (delete stored features or raise the cap).")
             return
         if shutil.disk_usage(self.folder).free - nbytes < _DISK_HEADROOM_BYTES:
+            self.is_full = True
             self._warn_no_write("disk (almost) full, features are not stored anymore.")
             return
         # Write into a temporary folder of this write alone and rename it, so that readers never see
@@ -227,6 +296,24 @@ class FeatureStore:
         for d in self._entry_dirs(include_tmp=True):
             shutil.rmtree(d, ignore_errors=True)
         self._nbytes = self._scan_bytes() # Not 0: deleting can fail, e.g. while a file is memory-mapped
+        self._update_is_full()
+        self._warned_no_write = False
+
+    def prune(self, max_age_days):
+        """Delete the entries of this store that have not been used for `max_age_days` days and
+        return how many (see prune_folder). Also how the store makes room when it is full, if
+        prune_when_full_days is given (see put); otherwise it never does this by itself."""
+        deleted = prune_folder(self.folder, max_age_days)
+        if deleted:
+            self._nbytes = self._scan_bytes()
+            self._update_is_full()
+        return deleted
+
+    def set_max_bytes(self, max_bytes):
+        """Change the cap in place; nothing is deleted by it, and storing resumes if there is
+        room again or can be made (see _update_is_full)."""
+        self.max_bytes = int(max_bytes)
+        self._update_is_full()
         self._warned_no_write = False
 
     def __len__(self):

@@ -152,8 +152,6 @@ class Hookmodel(FeatureExtractor):
             param.fe_scalings = [1,2]
             param.fe_layers = self.selectable_layer_keys[:3] # Use the first 3 layers by default
 
-        # Note that tile_annotations is set to `not self.get_has_global_context()` in the feature extractor superclass
-
         return param
 
     def get_layer_keys(self):

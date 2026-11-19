@@ -23,6 +23,18 @@ from collections import defaultdict
 # from .convpaint_model import ConvpaintModel
 
 
+def _convpaint_cache_dir():
+    """Convpaint's own folder: the feature store goes here unless another one is chosen, and the
+    folders that were used are listed here. The OS location for data that can be re-created."""
+    import platformdirs
+    return Path(platformdirs.user_cache_dir('convpaint', appauthor=False))
+
+
+def _store_folders_file():
+    """File listing the folders features were stored in (a record only, see _note_store_folder)."""
+    return _convpaint_cache_dir() / 'feature_store_folders.txt'
+
+
 class NoteLabel(QLabel):
     """Word-wrapped label that always gets the height its text needs at the current width
     (in grid layouts, wrapped labels are otherwise cut off when the widget gets narrow)."""
@@ -44,9 +56,11 @@ class PathLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred) # Takes the available width, never forces it
         self.setText(path)
 
-    def setText(self, path):
+    def setText(self, path, text=None, tooltip=None):
+        """Show `text` in place of the path if given; the tooltip is the full path by default."""
         self._path = path
-        self.setToolTip(path)
+        self._text = path if text is None else text
+        self.setToolTip(path if tooltip is None else tooltip)
         self._elide()
 
     def text(self):
@@ -57,7 +71,7 @@ class PathLabel(QLabel):
         self._elide()
 
     def _elide(self):
-        super().setText(self.fontMetrics().elidedText(self.text(), Qt.ElideMiddle, self.width()))
+        super().setText(self.fontMetrics().elidedText(getattr(self, '_text', ''), Qt.ElideMiddle, self.width()))
 
 
 class ConvpaintWidget(QWidget):
@@ -92,7 +106,15 @@ class ConvpaintWidget(QWidget):
         self.selected_channel = None
         self.spatial_dim_info_thresh = 1000000
         self.default_brush_size = 3
+        from .feature_cache import default_max_bytes as cache_default_max_bytes
+        from .feature_store import default_max_bytes as store_default_max_bytes
+        self.default_cache_max_mb = int(cache_default_max_bytes() / 1e6) # RAM (MB) the feature cache may use
+        self.default_store_max_gb = int(store_default_max_bytes() / 1e9) # Disk (GB) the feature store may use
         self.max_classes = 255 # Annotations and segmentation are uint8, so higher values would wrap around
+        self.store_max_age_days = 7 # Features unused for that long are dropped from Convpaint's own folder
+                                    # (None skips it; 0 empties it at every start, effectively a cache on disk)
+        self.store_full_age_days = 1 # Once it is full, that is how far back it makes room (default folder only;
+                                     # None skips it, 0 keeps only what the running session used)
         # suffixes for opening images in multifile, to exclude potential annotation/segmentation files
         self.multifile_annot_suffixes = ["annot", "annotation", "annotations", "scribble", "scribbles", "scrib"]
         self.multifile_seg_suffixes = ["seg", "segmentation", "segmentations", "prediction", "predictions", "pred", "preds", "mask", "masks"]
@@ -277,38 +299,34 @@ class ConvpaintWidget(QWidget):
         self.train_group.glayout.addWidget(self.segment_all_btn, 1,1,1,1)
 
         # Add elements to "Acceleration" group
-        # "Tile annotations" checkbox
-        self.check_tile_annotations = QCheckBox('Tile annotations for training')
-        self.check_tile_annotations.setChecked(False)
-        self.acceleration_group.glayout.addWidget(self.check_tile_annotations, 0,0,1,2)
-        # "Tile image" checkbox
+        # "Tile image" checkbox ("Tile annotations" is on the Advanced tab)
         self.check_tile_image = QCheckBox('Tile image for segmentation')
         self.check_tile_image.setChecked(False)
-        self.acceleration_group.glayout.addWidget(self.check_tile_image, 1,0,1,2)
+        self.acceleration_group.glayout.addWidget(self.check_tile_image, 0,0,1,2)
         # Use Device/GPU dropdown
         self.device_options_default = ['auto', 'gpu', 'cpu']
         self.device_options_gpu_only_clf = ['auto', 'gpu (only classifier)', 'cpu']
         self.device_dropdown = QComboBox()
         self.device_dropdown.addItems(self.device_options_default)
         self.device_label = QLabel('Device (GPU/CPU)')
-        self.acceleration_group.glayout.addWidget(self.device_label, 2,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.device_dropdown, 2,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.device_label, 1,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.device_dropdown, 1,1,1,1)
         # "Downsample" spinbox
         self.spin_downsample = QSpinBox()
         self.spin_downsample.setMinimum(-20)
         self.spin_downsample.setMaximum(20)
         self.spin_downsample.setValue(1)
         self.downsample_label = QLabel('Downsample input')
-        self.acceleration_group.glayout.addWidget(self.downsample_label, 3,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.spin_downsample, 3,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.downsample_label, 2,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.spin_downsample, 2,1,1,1)
         # "Smoothen output" spinbox
         self.spin_smoothen = QSpinBox()
         self.spin_smoothen.setMinimum(1)
         self.spin_smoothen.setMaximum(20)
         self.spin_smoothen.setValue(1)
         self.smoothen_label = QLabel('Smoothen output')
-        self.acceleration_group.glayout.addWidget(self.smoothen_label, 4,0,1,1)
-        self.acceleration_group.glayout.addWidget(self.spin_smoothen, 4,1,1,1)
+        self.acceleration_group.glayout.addWidget(self.smoothen_label, 3,0,1,1)
+        self.acceleration_group.glayout.addWidget(self.spin_smoothen, 3,1,1,1)
 
         # === MODEL TAB ===
 
@@ -449,7 +467,7 @@ class ConvpaintWidget(QWidget):
             self.advanced_input_group = VHGroup('Input', orientation='G')
             self.advanced_output_group = VHGroup('Output', orientation='G')
             self.advanced_unsupervised_group = VHGroup('Unsupervised extraction (without annotations)', orientation='G')
-            self.advanced_cache_group = VHGroup('Feature reuse (cache && store)', orientation='G')
+            self.advanced_cache_group = VHGroup('Feature reuse (RAM cache && disk store)', orientation='G')
 
             # Add groups to the tab
             self.tabs.add_named_tab('Advanced', self.advanced_note_group.gbox)
@@ -506,6 +524,11 @@ class ConvpaintWidget(QWidget):
             self.advanced_labels_group.glayout.setColumnStretch(0, 1)
             self.advanced_labels_group.glayout.setColumnStretch(1, 1)
 
+            # "Tile annotations" checkbox, above the continuous training part it does not belong to
+            self.check_tile_annotations = QCheckBox('Tile annotations for training')
+            self.check_tile_annotations.setChecked(False)
+            self.advanced_training_group.glayout.addWidget(self.check_tile_annotations, 0, 0, 1, 4)
+
             # Button for training on selected images
             self.btn_train_on_selected = QPushButton('Train on selected data')
             # self.advanced_training_group.glayout.addWidget(self.btn_train_on_selected, 1, 0, 1, 2)
@@ -544,7 +567,7 @@ class ConvpaintWidget(QWidget):
             self.advanced_training_group.glayout.addWidget(self._dashed_divider(), 6, 0, 1, 4)
             self.check_use_dask = QCheckBox('Put image tiles on Dask workers')
             self.check_use_dask.setChecked(self.use_dask)
-            self.advanced_training_group.glayout.addWidget(self.check_use_dask, 7, 0, 1, 4)
+            self.advanced_training_group.glayout.addWidget(self.check_use_dask, 8, 0, 1, 4)
 
             # Input channels option
             self.text_input_channels = QtWidgets.QLineEdit()
@@ -617,15 +640,14 @@ class ConvpaintWidget(QWidget):
 
             # Feature caching: explanatory note
             self.cache_note = NoteLabel(
-                "Reuse extracted features when segmenting or training the same image "
-                "repeatedly (e.g. while refining annotations), instead of recomputing "
-                "them. Bounded by the memory limit below; features you have reused are "
-                "kept longest.")
+                "Reuse extracted features instead of recomputing them: in RAM while you "
+                "work (bounded by the limit below, where features you have reused are kept "
+                "longest) and, optionally, on disk (kept across sessions).")
             self.cache_note.setStyleSheet(style_for_infos)
             self.advanced_cache_group.glayout.addWidget(self.cache_note, 0, 0, 1, 3)
 
             # Enable/disable checkbox
-            self.check_use_cache = QCheckBox('Enable feature caching')
+            self.check_use_cache = QCheckBox('Cache features in RAM')
             self.check_use_cache.setChecked(self.cache_enabled)
             self.advanced_cache_group.glayout.addWidget(self.check_use_cache, 1, 0, 1, 3)
 
@@ -634,7 +656,7 @@ class ConvpaintWidget(QWidget):
             self.advanced_cache_group.glayout.addWidget(self.cache_max_ram_label, 2, 0, 1, 2)
             self.cache_max_ram_spinbox = QSpinBox()
             self.cache_max_ram_spinbox.setRange(64, 1024 * 1024)  # 64 MB .. 1 TB
-            self.cache_max_ram_spinbox.setSingleStep(256)
+            self.cache_max_ram_spinbox.setSingleStep(256) # Divides the default (2048), so the arrows stay round
             # Apply a typed limit only once it is complete: typing 4096 passes through 409 MB,
             # which would evict most of the cache on the way (the arrows still apply immediately)
             self.cache_max_ram_spinbox.setKeyboardTracking(False)
@@ -658,14 +680,22 @@ class ConvpaintWidget(QWidget):
             self.advanced_cache_group.glayout.addWidget(self.store_folder_label, 6, 0, 1, 2)
             self.btn_store_folder = QPushButton('Choose folder')
             self.advanced_cache_group.glayout.addWidget(self.btn_store_folder, 6, 2, 1, 1)
+            self.store_max_size_label = QLabel('Max store size (GB)')
+            self.advanced_cache_group.glayout.addWidget(self.store_max_size_label, 7, 0, 1, 2)
+            self.store_max_size_spinbox = QSpinBox()
+            self.store_max_size_spinbox.setRange(1, 10 * 1000)  # 1 GB .. 10 TB (disk is cheap)
+            self.store_max_size_spinbox.setSingleStep(10) # Divides the default (20), so the arrows stay round
+            self.store_max_size_spinbox.setKeyboardTracking(False) # Apply a typed limit only once complete
+            self.store_max_size_spinbox.setValue(self.store_max_gb)
+            self.advanced_cache_group.glayout.addWidget(self.store_max_size_spinbox, 7, 2, 1, 1)
             self.store_size_label = QLabel('Stored: (store off)')
-            self.advanced_cache_group.glayout.addWidget(self.store_size_label, 7, 0, 1, 2)
+            self.advanced_cache_group.glayout.addWidget(self.store_size_label, 8, 0, 1, 2)
             self.btn_store_delete = QPushButton('Delete stored features')
             self.btn_store_delete.setEnabled(self.store_enabled)
-            self.advanced_cache_group.glayout.addWidget(self.btn_store_delete, 7, 2, 1, 1)
+            self.advanced_cache_group.glayout.addWidget(self.btn_store_delete, 8, 2, 1, 1)
             self.btn_store_features = QPushButton('Store features of this image/stack')
             self.btn_store_features.setEnabled(self.store_enabled)
-            self.advanced_cache_group.glayout.addWidget(self.btn_store_features, 8, 0, 1, 3)
+            self.advanced_cache_group.glayout.addWidget(self.btn_store_features, 9, 0, 1, 3)
 
         # === MULTIFILE TAB ===
 
@@ -821,10 +851,6 @@ class ConvpaintWidget(QWidget):
         self.check_auto_seg.setToolTip('Automatically segment image after training.')
         self.segment_btn.setToolTip('Segment 2D image or current slice/frame of 3D image/movie.')
         self.segment_all_btn.setToolTip('Segment all slices/frames of 3D image/movie.')
-        self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\n' +
-                                               'Disable for models that extract long range features (e.g. DINO).\n' +
-                                               'Skipped when training with auto-segment and feature caching on\n' +
-                                               '(the whole plane is extracted, since the prediction needs it anyway).')
         self.check_tile_image.setToolTip('Tile image to reduce memory usage.\n' +
                                          'Use with care when using models that extract long range features (e.g. DINO).')
         # Do not toggle device dropdown, as we want to show tooltips dynamically and permanently
@@ -882,6 +908,10 @@ class ConvpaintWidget(QWidget):
             self.radio_img_training.setToolTip('Keep features in memory, updating them only for new annotations in each training, as long as the image is not changed.')
             self.radio_global_training.setToolTip('Keep features in memory, updating them only for new annotations in each training, until reset manually.')
             self.radio_single_training.setToolTip('Extract all features freshly for each training.')
+            self.check_tile_annotations.setToolTip('Crop around annotated regions to speed up training.\n' +
+                                                   'Disable for models that extract long range features (e.g. DINO).\n' +
+                                                   'Skipped when training with auto-segment and feature caching on\n' +
+                                                   '(the whole plane is extracted, since the prediction needs it anyway).')
             self.check_use_dask.setToolTip('Distribute the tiles of a tiled segmentation to parallel Dask workers\n' +
                                            '(only applies with "Tile image for segmentation").')
             # self.check_cont_training.setToolTip('Save and use combined features in memory for training')
@@ -908,9 +938,10 @@ class ConvpaintWidget(QWidget):
                  w.setToolTip('Number of PCA components to use for the features image.\nSet to 0 to disable PCA.')
             for w in [self.kmeans_label, self.text_features_kmeans]:
                 w.setToolTip('Number of Kmeans clusters to use for the features image.\nSet to 0 to disable Kmeans.')
-            self.check_use_cache.setToolTip('Keep the extracted features of recently processed images in memory,\n' +
+            self.check_use_cache.setToolTip('Keep the extracted features of recently processed images in RAM,\n' +
                                             'so that re-training or re-segmenting the same image does not extract them again.\n' +
-                                            'Features of annotation tiles (see "Tile annotations") are not kept, since predictions cannot reuse them.')
+                                            'Features of annotation tiles (see "Tile annotations") are not kept, since predictions cannot reuse them.\n' +
+                                            'Kept only while Convpaint runs; use the store below to keep them on disk.')
             for w in [self.cache_max_ram_label, self.cache_max_ram_spinbox]:
                 w.setToolTip('Maximum memory (RAM) the feature cache may use.\n' +
                              'When full, features you have reused are kept longest; among the never reused,\n' +
@@ -920,9 +951,15 @@ class ConvpaintWidget(QWidget):
             self.btn_cache_clear.setToolTip('Drop all cached features (they are extracted again when needed).')
             self.check_use_store.setToolTip('Keep the extracted features of all processed images/planes (incl. Multifile batches) in the folder below (also across sessions),\n' +
                                             'so that stacks and movies only need to be extracted once (e.g. for re-predicting after re-training).\n' +
-                                            'Nothing is dropped automatically; use "Delete stored features" to free the disk space.')
+                                            f'In the default location, features unused for {self.store_max_age_days} days are removed when Convpaint starts;\n' +
+                                            'a folder you choose is never cleaned up automatically (use "Delete stored features").')
             for w in [self.store_folder_label, self.btn_store_folder]:
-                w.setToolTip('Folder of the feature store (must be empty, not yet existing, or a feature store); choosing one enables the store.')
+                w.setToolTip('Folder of the feature store (must be empty, not yet existing, or a feature store); choosing one enables the store.\n' +
+                             'The folders used so far are listed in\n' + str(_store_folders_file()) + '.')
+            for w in [self.store_max_size_label, self.store_max_size_spinbox]:
+                w.setToolTip('Maximum size the feature store may take on disk.\n' +
+                             f'When it is reached, the default location makes room by dropping features unused for {self.store_full_age_days} day(s)\n' +
+                             '(never those of the running session); a folder you choose stops storing instead, and nothing is deleted.')
             self.store_size_label.setToolTip('Number of stored images/planes and their size on disk.')
             self.btn_store_delete.setToolTip('Delete all stored features in the folder (the store stays active).')
             self.btn_store_features.setToolTip('Extract the features of the selected image (all planes of a stack) into the feature store now,\n' +
@@ -961,7 +998,7 @@ class ConvpaintWidget(QWidget):
                   self.add_layers_btn, self.radio_single_channel, self.radio_multi_channel, self.radio_rgb,
                   self.radio_no_normalize, self.radio_normalize_over_stack, self.radio_normalize_by_image,
                   self.train_classifier_btn, self.check_auto_seg, self.segment_btn, self.segment_all_btn,
-                  self.check_tile_annotations, self.check_tile_image, self.device_label, #self.device_dropdown,
+                  self.check_tile_image, self.device_label, #self.device_dropdown,
                   self.downsample_label, self.spin_downsample, self.smoothen_label, self.spin_smoothen]:
             w.setToolTip('')
 
@@ -989,11 +1026,13 @@ class ConvpaintWidget(QWidget):
                       self.check_keep_layers, self.btn_add_all_annot_layers,
                       self.check_auto_select_annot, # 	self.text_annot_prefix,
                       self.btn_train_on_selected, self.radio_img_training, self.radio_global_training, self.radio_single_training, # self.check_cont_training,
-                      self.btn_class_distribution_trained, self.btn_reset_training, self.check_use_dask, self.channels_label,
+                      self.btn_class_distribution_trained, self.btn_reset_training,
+                      self.check_tile_annotations, self.check_use_dask, self.channels_label,
                       self.text_input_channels, self.btn_switch_axes, self.check_add_seg, self.check_add_probas, self.check_add_instances, self.inst_min_size_label, self.text_inst_min_size, self.check_split_touching, self.btn_add_features, self.btn_add_features_stack,
                       self.pca_label, self.text_features_pca, self.kmeans_label, self.text_features_kmeans,
                       self.check_use_cache, self.cache_max_ram_label, self.cache_max_ram_spinbox, self.cache_size_label, self.btn_cache_clear,
-                      self.check_use_store, self.store_folder_label, self.btn_store_folder, self.store_size_label, self.btn_store_delete,
+                      self.check_use_store, self.store_folder_label, self.btn_store_folder,
+                      self.store_max_size_label, self.store_max_size_spinbox, self.store_size_label, self.btn_store_delete,
                       self.btn_store_features]:
                 w.setToolTip('')
 
@@ -1065,7 +1104,7 @@ class ConvpaintWidget(QWidget):
         elif fc is None or recreate:
             self.cp_model.enable_feature_cache(max_bytes=max_bytes)
         else:
-            fc.set_max_bytes(max_bytes)
+            self.cp_model.set_feature_cache_max_bytes(max_bytes)
         self._refresh_reuse_labels()
 
     def _apply_feature_store(self, *args, recreate=False):
@@ -1074,14 +1113,27 @@ class ConvpaintWidget(QWidget):
         chosen folder; unchecking only disconnects it (the stored files are kept). The model's
         store is the single source of truth for the widget state (checkbox, buttons, labels).
         A folder that cannot be used is reported and not kept."""
+        self.store_max_gb = self.store_max_size_spinbox.value()
+        max_bytes = int(self.store_max_gb) * 1_000_000_000 # Decimal GB, as the store grows in that order
         if not self.check_use_store.isChecked():
             self.cp_model.disable_feature_store()
         elif recreate or self.cp_model._feature_store is None:
             # Not disabled first: enable_feature_store replaces the store only once the new folder
             # works, so a store that is running survives an unusable one (see the except branch)
             try:
-                self.cp_model.enable_feature_store(self.store_folder)
+                # Convpaint's own folder makes room for what comes next; a chosen one keeps
+                # what it was given and says so when it is full
+                is_default = self.store_folder == self._store_folder_default
+                self.cp_model.enable_feature_store(self.store_folder, max_bytes=max_bytes,
+                                                   prune_when_full_days=self.store_full_age_days if is_default else None)
                 self._store_folder_ok = self.store_folder # Keep as the fall-back for the next call
+                self._note_store_folder(self.store_folder)
+                if is_default and not self.store_info_shown: # Inform once per session, so that nothing is stored unnoticed
+                    kept = (f'unused ones are removed after {self.store_max_age_days} days (when Convpaint starts) or anytime '
+                            if self.store_max_age_days is not None else 'remove them ')
+                    show_info(f"Features are stored on disk in Convpaint's own folder, up to {self.store_max_gb} GB "
+                              f"({self.store_folder}); {kept}with \"Delete stored features\".")
+                    self.store_info_shown = True
             except ValueError as e: # Folder not usable (not empty and not a feature store, no write access, ...)
                 # enable_feature_store only replaces the store once the new folder works, so a store
                 # that was already running is still there: follow the model and keep it connected
@@ -1089,6 +1141,8 @@ class ConvpaintWidget(QWidget):
                 show_info(f'Feature store folder not changed: {e}' if keep else
                           f'Feature store not enabled: {e}')
                 self.store_folder = self._store_folder_ok # Back to the last usable folder
+        else:
+            self.cp_model.set_feature_store_max_bytes(max_bytes) # The one setting that changes in place
         self.store_enabled = self.cp_model._feature_store is not None
         self.check_use_store.blockSignals(True) # setChecked would call this method again
         self.check_use_store.setChecked(self.store_enabled)
@@ -1097,6 +1151,20 @@ class ConvpaintWidget(QWidget):
         self.btn_store_features.setEnabled(self.store_enabled)
         self._refresh_reuse_labels()
 
+    def _note_store_folder(self, folder):
+        """Add the folder to the list of the folders features were stored in, so that they can be
+        found (and deleted) again later. A record only: nothing reads it back, and deleting it
+        loses no features, just the history."""
+        try:
+            path = _store_folders_file()
+            if folder in (path.read_text(encoding='utf-8').splitlines() if path.is_file() else []):
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'a', encoding='utf-8') as f: # Appending one line, so that sessions do not overwrite each other
+                f.write(folder + '\n')
+        except OSError:
+            pass # Not worth a message: the features are stored either way
+
     def _late_init(self):
         """Populate UI widgets with defaults from ConvpaintModel, set up connections, and reset model.
         This is called after the GUI is shown to ensure that all components are properly initialized."""
@@ -1104,6 +1172,13 @@ class ConvpaintWidget(QWidget):
         # === MODEL DEFAULTS & WIDGET POPULATION ===
         self._import_convpaint_model_class()
         self.cp_model = self._cpm_class()
+        # Tidy up Convpaint's own folder once per session, whether the store is used or not (a
+        # chosen folder is never touched); nothing can age past the limit while a session runs
+        from .feature_store import prune_folder
+        dropped = prune_folder(self._store_folder_default, self.store_max_age_days)
+        if dropped:
+            show_info(f'Feature store: {dropped} planes unused for over {self.store_max_age_days} '
+                      'days were removed from the default location.')
         self.cache_max_ram_spinbox.setValue(self.cache_max_mb)
         self._apply_feature_cache(recreate=True)
         self._apply_feature_store(recreate=True)
@@ -1213,8 +1288,6 @@ class ConvpaintWidget(QWidget):
             self.cp_model.set_param('seg_smoothening', self.spin_smoothen.value(), ignore_warnings=True))
         # set self.use_device according to the drop down value
         self.device_dropdown.currentIndexChanged.connect(self._on_change_device)
-        self.check_tile_annotations.stateChanged.connect(lambda:
-            self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked(), ignore_warnings=True))
         self.check_tile_image.stateChanged.connect(lambda:
             self.cp_model.set_param('tile_image', self.check_tile_image.isChecked(), ignore_warnings=True))
 
@@ -1272,6 +1345,8 @@ class ConvpaintWidget(QWidget):
                 self, 'auto_add_layers', self.check_auto_add_layers.isChecked()))
             self.check_keep_layers.stateChanged.connect(lambda: setattr(
                 self, 'keep_layers', self.check_keep_layers.isChecked()))
+            self.check_tile_annotations.stateChanged.connect(lambda:
+                self.cp_model.set_param('tile_annotations', self.check_tile_annotations.isChecked(), ignore_warnings=True))
             self.check_use_dask.stateChanged.connect(lambda: setattr(
                 self, 'use_dask', self.check_use_dask.isChecked()))
             self.btn_add_all_annot_layers.clicked.connect(self._on_add_all_annot_layers)
@@ -1296,6 +1371,7 @@ class ConvpaintWidget(QWidget):
             self.cache_max_ram_spinbox.editingFinished.connect(self._warn_cache_ram)
             self.btn_cache_clear.clicked.connect(self._on_clear_cache)
             self.check_use_store.stateChanged.connect(self._apply_feature_store)
+            self.store_max_size_spinbox.valueChanged.connect(self._apply_feature_store)
             self.btn_store_folder.clicked.connect(self._on_choose_store_folder)
             self.btn_store_delete.clicked.connect(self._on_delete_stored_features)
             self.btn_store_features.clicked.connect(self._on_store_features)
@@ -2024,6 +2100,16 @@ class ConvpaintWidget(QWidget):
 
     # Train
 
+    def _note_image_layer(self):
+        """Start a new plane loop on the model when the work moves on to another image (layer): the
+        widget hands the planes of a stack over one by one, so it stays in that mode for good and
+        tells the model about every new image itself (see ConvpaintModel.new_plane_loop)."""
+        img = self._get_selected_img()
+        noted = (img.name, getattr(img.data, 'shape', None)) if img is not None else None
+        if noted != self._noted_image or not self.cp_model._in_plane_loop: # A new model would always start guessing
+            self._noted_image = noted
+            self.cp_model.new_plane_loop()
+
     def _on_train(self, event=None):
         """Given a set of new annotations, update the CatBoost classifier."""
 
@@ -2078,6 +2164,7 @@ class ConvpaintWidget(QWidget):
                     self.untile_info_shown = True
             # Train the model with the current image and annotations; skip normalization as it is done in the widget
             # (as in prediction, so train and predict hash identical data and share feature-cache entries)
+            self._note_image_layer() # Note the image worked on, for the feature cache
             try:
                 _ = self.cp_model.train(image_stack_norm, annot, memory_mode=mem_mode, img_ids=img_name,
                                         in_channels=in_channels, skip_norm=True,
@@ -2127,6 +2214,7 @@ class ConvpaintWidget(QWidget):
                 return
             
             # Get the data
+            self._note_image_layer() # Note the image worked on, for the feature cache
             image_plane = self._get_current_plane_norm()
             in_channels = self._parse_in_channels(self.input_channels)
 
@@ -2217,6 +2305,7 @@ class ConvpaintWidget(QWidget):
                 return
 
             # Get the data
+            self._note_image_layer() # Note the image worked on, for the feature cache
             image_plane = self._get_current_plane_norm()
             in_channels = self._parse_in_channels(self.input_channels)
 
@@ -2278,10 +2367,14 @@ class ConvpaintWidget(QWidget):
 
         # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        self._note_image_layer() # Note the image worked on, for the feature cache
         
         # Step through the stack and predict each image
         num_steps = image_stack_norm.shape[-3]
-        for step in progress(range(num_steps)):
+        reuse_before = self._reuse_counts() # To show on the bar what the run reuses
+        pbr = progress(range(num_steps))
+        for step in pbr:
+            pbr.set_description(self._reuse_progress_text('Prediction', reuse_before))
 
             # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
             image = image_stack_norm[..., step, :, :]
@@ -2346,6 +2439,7 @@ class ConvpaintWidget(QWidget):
 
         # Get normalized stack data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        self._note_image_layer() # Note the image worked on, for the feature cache
         pca, kmeans = self._check_parse_pca_kmeans()
         in_channels = self._parse_in_channels(self.input_channels)
 
@@ -2367,7 +2461,10 @@ class ConvpaintWidget(QWidget):
         else: # No kmeans, can do step-by-step to save memory (and show progress)
             # Step through the stack and predict each image
             num_steps = image_stack_norm.shape[-3]
-            for step in progress(range(num_steps)):
+            reuse_before = self._reuse_counts() # To show on the bar what the run reuses
+            pbr = progress(range(num_steps))
+            for step in pbr:
+                pbr.set_description(self._reuse_progress_text('Feature extraction', reuse_before))
 
                 # Take the slice of the 3rd last dimension (since images are C, Z, H, W or Z, H, W)
                 image = image_stack_norm[..., step, :, :]
@@ -2584,7 +2681,9 @@ class ConvpaintWidget(QWidget):
         self._apply_feature_cache(recreate=True)
         # The checkbox holds whether the store is on, and the model keeps the old folder until the
         # settings are applied again (setChecked stays silent if the checkbox is off already)
-        self.check_use_store.setChecked(self.store_enabled)
+        store_enabled, store_max_gb = self.store_enabled, self.store_max_gb
+        self.check_use_store.setChecked(store_enabled)
+        self.store_max_size_spinbox.setValue(store_max_gb)
         self._apply_feature_store(recreate=True)
         self.text_input_channels.setText(self.input_channels)
         self.check_add_seg.setChecked(self.add_seg)
@@ -2645,7 +2744,6 @@ class ConvpaintWidget(QWidget):
 
     def _reset_attributes(self):
         """Reset all attributes of the widget."""
-        import psutil # For the available RAM the feature cache limit is clamped to
         # Set widget-specific attributes
         self.image_mean = None
         self.image_std = None
@@ -2674,11 +2772,14 @@ class ConvpaintWidget(QWidget):
         self.cont_training = "Image" # Update features for subsequent training ("Image" or "Off" or "Global")
         self.use_dask = False # Use Dask for parallel processing
         self.cache_enabled = True # Feature cache on by default: reuse extracted features when re-segmenting / re-training the same image
-        self.cache_max_mb = min(2048, int(psutil.virtual_memory().available / 4e6)) # Max RAM (MB) the feature cache may use (2 GB default, clamped to a quarter of the available RAM for small machines)
+        self.cache_max_mb = self.default_cache_max_mb # Max RAM (MB) the feature cache may use
         self.untile_info_shown = False # Whether the user was informed that auto-segment with caching skips annotation tiles
+        self.store_info_shown = False # Whether the user was told where the store keeps the features, and for how long
+        self._noted_image = None # Image the model was told about last (see _note_image_layer)
         self.store_enabled = False # Feature store off by default (on = keep the features of all processed planes on disk)
-        import platformdirs # (napari dependency)
-        self.store_folder = str(Path(platformdirs.user_cache_dir('convpaint')) / 'feature_store') # Default folder of the feature store
+        self.store_max_gb = self.default_store_max_gb # Max disk space (GB) the feature store may take
+        self.store_folder = str(_convpaint_cache_dir() / 'feature_store') # Default folder of the feature store
+        self._store_folder_default = self.store_folder # Shown as the default rather than as a path
         self._store_folder_ok = self.store_folder # Last folder the store could be enabled with (to fall back to)
         self.fe_device = 'auto' # Device to use for the FE (if applicable); 'auto' will use GPU if available, otherwise CPU
         self.clf_device = 'auto' # Device to use for the classifier (if applicable); 'auto' will use GPU if available, otherwise CPU
@@ -2810,12 +2911,9 @@ class ConvpaintWidget(QWidget):
                       fe_order = self.spin_interpolation_order.value(),
                       fe_use_min_features = self.check_use_min_features.isChecked())
 
-        # Get default non-FE params from a temp model built with the
-        # user-selected layers so defaults (e.g. tile_annotations) reflect
-        # has_global_context for the chosen layers rather than the FE's
-        # module-level defaults.
-        # Create a temp FE using the user-selected layers so defaults (like
-        # tile_annotations) reflect the chosen layers' properties.
+        # Get the default non-FE params from a temp model built with the user-selected
+        # layers, so that layer-dependent defaults reflect the chosen layers rather than
+        # the FE's module-level ones.
         temp_fe_model_for_defaults = self._cpm_class.create_fe(new_param.fe_name, layers=new_layers)
         fe_defaults = temp_fe_model_for_defaults.get_default_params()
         adjusted_params = [] # List of adjusted parameters for raising a warning
@@ -2924,6 +3022,23 @@ class ConvpaintWidget(QWidget):
 
 ### Helper functions
 
+    def _reuse_counts(self):
+        """Lookups served from the cache or the store so far, and lookups in total. The cache is
+        asked first, so a store hit is a cache miss as well and the two cannot simply be summed."""
+        fc, fs = self.cp_model._feature_cache, self.cp_model._feature_store
+        reused = (fc.hits if fc is not None else 0) + (fs.hits if fs is not None else 0)
+        total = (fc.hits + fc.misses) if fc is not None else (fs.hits + fs.misses) if fs is not None else 0
+        return reused, total
+
+    def _reuse_progress_text(self, label, before):
+        """`label` with what has been reused since the counts in `before` (see _reuse_counts), to
+        show on the progress bar of a run: a run that reuses nothing although it should points at
+        a setting that changed, which otherwise only shows as the run being slow again. Plain
+        `label` while nothing is looked up at all (neither cache nor store on)."""
+        reused, total = self._reuse_counts()
+        reused, total = reused - before[0], total - before[1]
+        return f'{label} - {reused} of {total} reused' if total else label
+
     def _refresh_reuse_labels(self):
         """Show the current sizes of the feature cache and store (called after ops that change them)."""
         fc = self.cp_model._feature_cache
@@ -2932,13 +3047,21 @@ class ConvpaintWidget(QWidget):
         else:
             s = fc.stats()
             self.cache_size_label.setText(f'Cached: {s["bytes"] / 1e6:.0f} MB ({s["entries"]} planes)')
-        self.store_folder_label.setText(self.store_folder)
+        if self.store_folder == self._store_folder_default:
+            self.store_folder_label.setText(self.store_folder, text='Default location',
+                                            tooltip="Convpaint's own folder:\n" + self.store_folder +
+                                                    f"\nFeatures unused for {self.store_max_age_days} days are "
+                                                    "dropped from it; a folder you choose is never touched.")
+        else:
+            self.store_folder_label.setText(self.store_folder)
         fs = self.cp_model._feature_store
         if fs is None:
             self.store_size_label.setText('Stored: (store off)')
         else:
             s = fs.stats()
-            self.store_size_label.setText(f'Stored: {s["entries"]} planes, {s["bytes"] / 1e6:.0f} MB')
+            size = (f'{s["bytes"] / 1e9:.1f} GB' if s["bytes"] >= 1e9 else # As the cap, which is in GB,
+                    f'{s["bytes"] / 1e6:.0f} MB')                         # unless the store is still small
+            self.store_size_label.setText(f'Stored: {s["entries"]} planes, {size}')
 
 
     def _get_layer_transform_kwargs(self, img_layer, num_spatial_dims, num_leading_dims=0):
@@ -4103,6 +4226,8 @@ class ConvpaintWidget(QWidget):
                         or self.cont_training == "Global")
             # Train; in this case, normalization is not skipped (but done in the ConvpaintModel)
             in_channels = self._parse_in_channels(self.input_channels)
+            self.cp_model.new_plane_loop(img_list) # The images worked on, for the feature cache
+            self._noted_image = None # They are not the selected layer, which is noted again next time
             _ = self.cp_model.train(img_list, annot_list, memory_mode=mem_mode, img_ids=id_list,
                                     in_channels=in_channels, skip_norm=False,
                                     fe_use_device=self.fe_device, clf_use_device=self.clf_device)
@@ -4128,10 +4253,21 @@ class ConvpaintWidget(QWidget):
     def _on_choose_store_folder(self):
         """Let the user choose the folder of the feature store, and use it right away: as in the API,
         where a folder comes with enabling the store, the folder is checked when it is chosen (an
-        unusable one is reported and nothing changes) instead of only when the box is ticked."""
-        folder = QFileDialog.getExistingDirectory(self, 'Choose a folder for the feature store', self.store_folder)
+        unusable one is reported and nothing changes) instead of only when the box is ticked.
+        The dialog opens at the folder in use, so that confirming it right away does what ticking
+        the box does; the default folder is created for that, as enabling the store would do."""
+        if self.store_folder == self._store_folder_default:
+            try:
+                Path(self.store_folder).mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass # The dialog then opens at the nearest folder that does exist
+        start = Path(self.store_folder)
+        while not start.is_dir() and start.parent != start: # A chosen folder may be gone (external drive)
+            start = start.parent
+        folder = QFileDialog.getExistingDirectory(self, 'Choose a folder for the feature store', str(start))
         if folder:
-            self.store_folder = folder
+            self.store_folder = str(Path(folder)) # Qt answers with forward slashes, the rest of the widget
+                                                  # uses the separator of the OS (comparing and listing folders)
             self.check_use_store.blockSignals(True) # Applied once below, not per signal
             self.check_use_store.setChecked(True)
             self.check_use_store.blockSignals(False)
@@ -4168,6 +4304,7 @@ class ConvpaintWidget(QWidget):
 
         # Get normalized data (entire stack, and stats prepared given the radio buttons)
         image_stack_norm = self._get_data_channel_first_norm(img) # Normalize the entire stack
+        self._note_image_layer() # Note the image worked on, for the feature cache
         in_channels = self._parse_in_channels(self.input_channels)
 
         # Store features in the feature store (single image or stack)
@@ -4176,7 +4313,15 @@ class ConvpaintWidget(QWidget):
                                          fe_use_device=self.fe_device)
         else: # Stack: step through the planes for progress bar (as _on_predict_all does); skip norm as it is done above
             num_steps = image_stack_norm.shape[-3]
-            for step in progress(range(num_steps)):
+            reuse_before = self._reuse_counts() # To show on the bar what the run reuses
+            pbr = progress(range(num_steps))
+            for step in pbr:
+                pbr.set_description(self._reuse_progress_text('Storing features', reuse_before))
+                if self.cp_model._feature_store.is_full: # Extracting without being able to store is pointless
+                    show_info(f'Feature store full: stopped after {step} of {num_steps} planes. '
+                              'Delete stored features or raise the max store size.')
+                    pbr.close()
+                    break
                 image = image_stack_norm[..., step, :, :]
                 self.cp_model.store_features(image, in_channels=in_channels, skip_norm=True,
                                              fe_use_device=self.fe_device)
@@ -5000,12 +5145,14 @@ class ConvpaintWidget(QWidget):
             warnings.simplefilter(action="ignore", category=FutureWarning)
             self.viewer.window._status_bar._toggle_activity_dock(True)
 
+        reuse_before = self._reuse_counts() # To show on the bar what the run reuses
         with progress(total=len(filenames)) as pbr:
             pbr.set_description('Segmenting')
 
             segmented = 0
             for fname in filenames:
                 pbr.update(1)
+                pbr.set_description(self._reuse_progress_text('Segmenting', reuse_before))
                 try:
                     img_path = folder / fname
                     arr = imageio.imread(str(img_path))
@@ -5021,6 +5168,8 @@ class ConvpaintWidget(QWidget):
                     warnings.warn(f'Could not prepare image {fname} for prediction. Skipping.')
                     continue
 
+                self.cp_model.new_plane_loop(prep) # Every file is another image
+                self._noted_image = None # Not the selected layer, which is noted again next time
                 try:
                     probas, seg = self.cp_model._predict(prep, add_seg=True, in_channels=in_channels,
                                                          skip_norm=False, use_dask=self.use_dask,

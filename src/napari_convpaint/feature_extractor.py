@@ -105,9 +105,6 @@ class FeatureExtractor:
         def_param.fe_order = 0
         def_param.fe_use_min_features = False
 
-        # NOTE: Non-FE params should be set as default with caution
-        def_param.tile_annotations = not self.get_has_global_context()
-
         return def_param
     
     def get_layer_keys(self):
