@@ -70,7 +70,7 @@ class ConvpaintModel:
         'fe_order': list(range(0, 6)), # from 0 (nearest) to 5
     }
 
-    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, **kwargs):
+    def __init__(self, alias=None, model_path=None, param=None, fe_name=None, fe_model=None, **kwargs):
         """
         **Initializes a Convpaint model**. This can be done with an alias, a model path, a param object, or a feature extractor name.
         If initialized by FE name, also other parameters can be given to override the defaults of the FE model.
@@ -98,6 +98,9 @@ class ConvpaintModel:
             Param object with the model parameters (see Param class for details)
         fe_name : str, optional
             Name of the feature extractor model
+        fe_model : FeatureExtractor, optional
+            An already created feature extractor instance for the given param (same fe_name and fe_layers),
+            to be reused instead of creating it again (avoids loading heavy model weights twice)
         **kwargs : additional parameters, optional
             Additional parameters to override defaults for the model or feature extractor (see Param class for details)
 
@@ -177,7 +180,7 @@ class ConvpaintModel:
         if model_path is not None:
             self._load(model_path)
         elif param is not None:
-            self._load_param(param)
+            self._load_param(param, fe_model=fe_model)
         elif fe_name is not None:
             fe_layers = kwargs.pop('fe_layers', None)
             self._set_fe(fe_name, fe_layers)
@@ -552,12 +555,14 @@ class ConvpaintModel:
         self._set_fe(new_param.fe_name, new_param.fe_layers)
         self._param = new_param
 
-    def _load_param(self, param: Param):
+    def _load_param(self, param: Param, fe_model=None):
         """
         Loads the given param object into the model and sets the model accordingly.
         Only intended for internal use at model initiation.
+        `fe_model` optionally injects an already-constructed FeatureExtractor
+        matching param.fe_name/fe_layers, to avoid loading model weights twice.
         """
-        self._set_fe(param.fe_name, param.fe_layers)
+        self._set_fe(param.fe_name, param.fe_layers, fe_model=fe_model)
         self._param = self.get_fe_defaults()
         self.set_params(ignore_warnings=True, **param.__dict__) # Overwrite the parameters with the given parameters
 
@@ -601,11 +606,14 @@ class ConvpaintModel:
 
 
 ### FE METHODS
-    def _set_fe(self, fe_name=None, fe_layers=None):
+    def _set_fe(self, fe_name=None, fe_layers=None, fe_model=None):
         """
         Sets the FE model based on the given FE parameters.
         Creates new feature extractor, and resets the classifier.
         Only intended for internal use at model initiation.
+        `fe_model` optionally provides an already-constructed FeatureExtractor
+        for exactly these fe_name/fe_layers (heavy FEs load weights on
+        construction — reusing an instance avoids a second load).
         """
         # Lazy-import catboost here (before torch loads model weights) to avoid
         # a segfault on Apple Silicon caused by catboost initialising shared
@@ -620,12 +628,15 @@ class ConvpaintModel:
         fe_name_changed = fe_name != self._param.get("fe_name")
         fe_layers_changed = fe_layers != self._param.get("fe_layers")
 
-        # Create the feature extractor model
+        # Create the feature extractor model (or reuse the given instance, if it matches)
         if fe_name_changed or fe_layers_changed:
-            self.fe_model = ConvpaintModel.create_fe(
-                name=fe_name,
-                layers=fe_layers
-            )
+            if fe_model is not None and fe_model.model_name == fe_name:
+                self.fe_model = fe_model
+            else:
+                self.fe_model = ConvpaintModel.create_fe(
+                    name=fe_name,
+                    layers=fe_layers
+                )
             if self._feature_cache is not None:
                 # The cache key holds the extraction signature, so entries of the old FE could never be
                 # returned anyway; clearing frees the RAM they would occupy until evicted

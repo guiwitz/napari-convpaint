@@ -900,3 +900,23 @@ def test_stack_after_rgb_uses_fresh_stack_defaults(make_napari_viewer):
     assert my_widget.radio_single_channel.isChecked()
     assert my_widget.radio_normalize_over_stack.isEnabled()
     assert my_widget.radio_normalize_over_stack.isChecked()
+
+def test_set_fe_model_reuses_the_temp_fe(make_napari_viewer, monkeypatch):
+    """'Set FE model' builds a temp FE to read its defaults; the new model must reuse that
+    instance instead of creating the FE a second time (heavy FEs load weights on creation)."""
+    from napari_convpaint.convpaint_model import ConvpaintModel
+    viewer = make_napari_viewer()
+    my_widget = ConvpaintWidget(viewer)
+    my_widget.ensure_init()
+    viewer.add_image(np.random.random((64, 64)), name='img')
+    my_widget._on_select_layer()
+
+    created = []
+    orig_create_fe = ConvpaintModel.create_fe
+    monkeypatch.setattr(ConvpaintModel, 'create_fe', staticmethod(lambda *a, **k: created.append((a, k)) or orig_create_fe(*a, **k)))
+    my_widget.qcombo_fe_type.setCurrentText('gaussian_features') # (selecting creates a temp FE for the GUI, not counted)
+    created.clear()
+    my_widget._on_set_fe_model()
+    assert len(created) == 1, f"FE created {len(created)} times on 'Set FE model': {created}"
+    assert my_widget.cp_model.get_param('fe_name') == 'gaussian_features'
+
