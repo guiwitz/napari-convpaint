@@ -585,15 +585,23 @@ def rescale_features(feature_img, target_shape, order=1):
 
     if feature_img.shape == output_shape:
         return feature_img
-    
+
+    # Torch interpolation for numpy arrays too (skimage.transform.resize resizes many-channel
+    # feature stacks per channel and single-threaded: 20-130x slower, seconds per ViT feature image).
+    # order 0 -> 'nearest-exact' (same half-pixel rule as skimage: identical results when upsampling,
+    # which is the case here; plain 'nearest' would shift by ~0.5 px for non-integer ratios).
+    # order > 0 -> bilinear with align_corners=False (skimage's pixel-centre convention; results
+    # differ from skimage only at the image borders, where the two handle the edge differently).
+    int_mode = 'bilinear' if order > 0 else 'nearest-exact'
+    align_corners = False if order > 0 else None
+
     if isinstance(feature_img, torch.Tensor):
-        # If the input is a PyTorch tensor, use the faster torch interpolation
-        int_mode = 'bilinear' if order > 0 else 'nearest'
-        align_corners = False if order > 0 else None
         return torch_interpolate(feature_img, size=output_shape[2:],
                                   mode=int_mode, align_corners=align_corners)
     else:
-        return skimage.transform.resize(feature_img, output_shape, order=order, mode='reflect', preserve_range=True)
+        t = torch.from_numpy(np.ascontiguousarray(feature_img)).float()
+        out = torch_interpolate(t, size=output_shape[2:], mode=int_mode, align_corners=align_corners)
+        return out.numpy().astype(feature_img.dtype, copy=False)
 
 def rescale_class_labels(label_img, output_shape):
     """
@@ -636,9 +644,18 @@ def rescale_outputs(output_img, output_shape, order=0):
         Rescaled class probability or feature image.
     """
     if output_img.shape == tuple(output_shape):
-        return output_img  # identity resize: skimage doesn't short-circuit, so skip it
-    rescaled_output = skimage.transform.resize(output_img, output_shape, order=order, mode='reflect', preserve_range=True)
-    return rescaled_output
+        return output_img  # identity resize: nothing to interpolate
+    # Torch interpolation instead of skimage.transform.resize (see rescale_features for the why and
+    # the interpolation modes); only the last two dims are resized
+    int_mode = 'bilinear' if order > 0 else 'nearest-exact'
+    align_corners = False if order > 0 else None
+    was_3d = output_img.ndim == 3  # [Z, H, W] -> add a channel dim for interpolate
+    arr = output_img[None] if was_3d else output_img
+    size = tuple(output_shape[-2:])
+    t = torch.from_numpy(np.ascontiguousarray(arr)).float()
+    out = torch_interpolate(t, size=size, mode=int_mode, align_corners=align_corners)
+    out = out.numpy().astype(output_img.dtype, copy=False)
+    return out[0] if was_3d else out
 
 
 ### CROPPING, PADDING, TILING & ANNOTATIONS EXTRACTION

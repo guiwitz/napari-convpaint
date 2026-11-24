@@ -1,9 +1,8 @@
 import warnings
 import torch
 import numpy as np
-import skimage
 import importlib.util
-from ..utils import get_device_from_torch_model
+from ..utils import get_device_from_torch_model, rescale_outputs
 
 def import_models():
     try:
@@ -161,20 +160,14 @@ class CellposeFeatures(FeatureExtractor):
             # Resize if necessary
             f,w,h = t.shape[-3:]
             if (w,h) != (w_img,h_img):
-                t = skimage.transform.resize(
-                        image=t,
-                        output_shape=(f, w_img, h_img),
-                        preserve_range=True, order=0)
+                t = rescale_outputs(t, (f, w_img, h_img), order=0)
             out_t.append(t)
 
         #append the output tensor from T1 (gradients and cell probability)
         t = T1.detach().cpu().numpy()[0]
         f,w,h = t.shape[-3:]
         if (w,h) != (w_img,h_img):
-            t = skimage.transform.resize(
-                    image=t,
-                    output_shape=(f, w_img, h_img),
-                    preserve_range=True, order=0)
+            t = rescale_outputs(t, (f, w_img, h_img), order=0)
         out_t.append(t)
 
         #append the original image

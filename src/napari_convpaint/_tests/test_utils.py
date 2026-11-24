@@ -225,3 +225,30 @@ def test_instance_size_filter_keywords():
             assert calls == expected
     finally:
         utils._SKIMAGE_MAX_SIZE = installed
+
+@pytest.mark.parametrize("hin,hout", [(36, 504), (36, 500), (33, 512), (7, 100)])
+def test_rescale_order0_upsampling_matches_skimage(hin, hout):
+    """order 0 (nearest-exact) upsampling is identical to skimage.transform.resize(order=0),
+    for integer and non-integer ratios, in rescale_features and rescale_outputs."""
+    from napari_convpaint.utils import rescale_features, rescale_outputs
+    rng = np.random.default_rng(0)
+    feats = rng.random((5, 1, hin, hin), dtype=np.float32)
+    ref = skimage.transform.resize(feats, (5, 1, hout, hout), order=0, mode='reflect', preserve_range=True)
+    assert np.array_equal(rescale_features(feats, (5, 1, hout, hout), order=0), ref)
+    out = rng.random((3, hin, hin), dtype=np.float32)   # [Z, H, W] path
+    ref = skimage.transform.resize(out, (3, hout, hout), order=0, mode='reflect', preserve_range=True)
+    got = rescale_outputs(out, (3, hout, hout), order=0)
+    assert np.array_equal(got, ref) and got.dtype == out.dtype
+
+
+def test_rescale_order1_close_to_skimage_inside_borders():
+    """order 1 (bilinear) matches skimage away from the image borders (edge handling differs)."""
+    from napari_convpaint.utils import rescale_features
+    rng = np.random.default_rng(1)
+    feats = rng.random((4, 1, 36, 36), dtype=np.float32)
+    ref = skimage.transform.resize(feats, (4, 1, 504, 504), order=1, mode='reflect', preserve_range=True)
+    got = rescale_features(feats, (4, 1, 504, 504), order=1)
+    b = 14   # one source pixel
+    assert np.abs(got[..., b:-b, b:-b] - ref[..., b:-b, b:-b]).max() < 1e-5
+
+
