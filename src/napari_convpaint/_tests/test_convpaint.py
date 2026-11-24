@@ -173,6 +173,21 @@ def test_save_model(make_napari_viewer, capsys):
     assert os.path.exists(file_path)
 
 
+def test_saved_model_does_not_need_pyarrow(tmp_path):
+    """A saved model must load without pyarrow installed. Since pandas 3, the strings of the
+    features table (and its column names) are backed by pyarrow arrays, which the pickle would
+    then require - convpaint does not depend on pyarrow."""
+    from napari_convpaint.convpaint_model import ConvpaintModel
+
+    model = ConvpaintModel(alias="gaussian")
+    model.table.loc[0] = ['img0', 1, (0, 0), 1, np.zeros(3)] # As continuous training fills it
+
+    model_path = str(tmp_path / 'model')
+    model.save(model_path, create_yml=False)
+    with open(model_path + '.pkl', 'rb') as f:
+        assert b'pyarrow' not in f.read()
+
+
 def test_load_model(make_napari_viewer, capsys):
     model_dir = os.path.join(os.path.dirname(__file__), 'model_dir')
     if not os.path.exists(model_dir):

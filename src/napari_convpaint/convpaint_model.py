@@ -431,6 +431,23 @@ class ConvpaintModel:
             if val is not None:
                 self.set_param(key, val, ignore_warnings=ignore_warnings)
 
+    @staticmethod
+    def _portable_table(table):
+        """
+        Returns the features table with its strings as plain object dtype.
+
+        Since pandas 3, string columns and the column names themselves are backed by
+        pyarrow arrays. Pickling those makes loading the model require pyarrow, which
+        convpaint does not depend on, so a model saved with pandas 3 could not be opened
+        in an environment without it.
+        """
+        table = table.copy()
+        table.columns = pd.Index(list(table.columns), dtype=object)
+        for col in table.columns:
+            if str(table[col].dtype).startswith(('str', 'string')):
+                table[col] = table[col].astype(object)
+        return table
+
     def save(self, model_path, create_pkl=True, create_yml=True):
         """
         Saves the model to a pkl and/or yml file.
@@ -460,7 +477,7 @@ class ConvpaintModel:
                 data = {
                     'classifier': self.classifier,
                     'param': self._param,
-                    'table': self.table,
+                    'table': self._portable_table(self.table),
                     'annotations': self.annot_dict,
                     'num_features': self.num_features,
                     'num_trainings': self.num_trainings
