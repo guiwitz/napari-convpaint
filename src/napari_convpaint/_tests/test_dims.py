@@ -338,6 +338,26 @@ def test_memory_mode_accumulates_over_rounds():
     assert model.classifier is not None
 
 
+def test_memory_mode_img_ids_stay_aligned_when_images_have_no_new_annotations():
+    """Regression test: in memory mode, images without (new) annotations are dropped before
+    extraction; the img_ids must be filtered with the same mask, otherwise the surviving
+    images get the ids of the dropped ones (and the registered annotations of the next training
+    would be diffed against the wrong image)."""
+    from napari_convpaint.convpaint_model import ConvpaintModel
+
+    np.random.seed(0)
+    imgs = [np.random.randint(0, 255, (40, 40)).astype(np.float32) for _ in range(3)]
+    annots = [np.zeros((40, 40), dtype=np.uint8) for _ in range(3)]
+    annots[1][5:10, 5:10] = 1   # only the second image is annotated
+    annots[1][25:30, 25:30] = 2
+
+    model = ConvpaintModel(alias="gaussian")
+    model.set_params(channel_mode='single', tile_annotations=False)
+    model.train(imgs, annots, memory_mode=True, img_ids=['a', 'b', 'c'])
+
+    assert set(model.table['img_id']) == {'b'}, "Features must be registered under the annotated image's id"
+
+
 def test_3d_stack_training_with_dask_input(make_napari_viewer, capsys):
     """Test that training with a dask array input (as happens in the widget
     for large 3D stacks) works correctly with memory_mode and single img_id.
