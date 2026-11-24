@@ -53,6 +53,18 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install vcredist140 --no-progress
 
+      # Cache the downloaded model weights (DINOv2/v3, JAFAR, VGG16, etc.; hundreds of MB from
+      # HuggingFace / PyTorch) across runs. The key follows the feature extractor sources, so a
+      # new or changed extractor gets a fresh cache (seeded from the previous one).
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/torch/hub/checkpoints
+            ~/.cache/huggingface
+          key: convpaint-model-weights-${{ runner.os }}-${{ hashFiles('src/napari_convpaint/feature_extractors/*.py') }}
+          restore-keys: |
+            convpaint-model-weights-${{ runner.os }}-
 
       # note: if you need dependencies from conda, considering using
       # setup-miniconda: https://github.com/conda-incubator/setup-miniconda
