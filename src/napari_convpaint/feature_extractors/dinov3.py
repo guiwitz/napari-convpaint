@@ -50,6 +50,7 @@ class Dinov3Features(FeatureExtractor):
         self.num_input_channels = [3]
         self.norm_mode = "imagenet"
         self.rgb_input = True
+        self.has_global_context = True # ViT attention: every token depends on the whole image (as in dino.py)
         self.proposed_scalings = [[1]]
 
         # CLS + register tokens prefix the patch tokens in forward_features output

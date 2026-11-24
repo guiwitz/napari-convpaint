@@ -225,3 +225,18 @@ def test_instance_size_filter_keywords():
             assert calls == expected
     finally:
         utils._SKIMAGE_MAX_SIZE = installed
+
+@pytest.mark.parametrize("short_side", [16, 32, 48, 64, 80, 512])
+def test_jafar_tile_params_fit_blending_window(short_side):
+    """The JAFAR overlap must leave room for the ramp/flat/ramp blending window
+    (tile_px - 2*overlap*patch_size >= 0) and a positive stride, for every tile
+    size; e.g. 48 px (3 patches) used to get overlap 2 and crash on a negative window."""
+    from napari_convpaint.feature_extractors.dino_jafar import DinoJafarFeatures
+    fe = DinoJafarFeatures.__new__(DinoJafarFeatures)  # no weights needed for the tile params
+    fe.patch_size = 16
+    tile_px, overlap = fe._choose_tile_params(short_side, 512, desired_tile_px=512, overlap_tokens=2)
+    assert tile_px == min(short_side, 512)
+    assert tile_px - overlap * 16 > 0
+    assert tile_px - 2 * overlap * 16 >= 0
+    if short_side >= 64:
+        assert overlap == 2  # enough room -> the requested overlap is kept
