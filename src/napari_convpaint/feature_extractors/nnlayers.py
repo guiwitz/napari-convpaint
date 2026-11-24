@@ -206,7 +206,11 @@ class Hookmodel(FeatureExtractor):
         no finite padding makes tile features match whole-image features.
         """
         if len(self.selected_layers) == 0:
-            return 1, False
+            # Neutral defaults for an empty selection
+            self.padding = 0
+            self.patch_size = 1
+            self.has_global_context = False
+            return
         rf = 1
         stride = 1
         has_global = False
@@ -273,6 +277,10 @@ class Hookmodel(FeatureExtractor):
 
     def register_hooks(self, selected_layers):  # , selected_layer_pos):
         selected_layers = self.layers_to_keys(selected_layers)
+        # Hook the layers in execution order (module_dict is ordered like the model), since the forward
+        # pass stops at the last hooked layer: a deeper layer listed first would be dropped silently
+        module_order = {k: i for i, k in enumerate(self.module_dict.keys())}
+        selected_layers = sorted(selected_layers, key=lambda k: module_order[k])
         self.features_per_layer = []
         self.selected_layers = selected_layers.copy()
         for ind in range(len(selected_layers)):
