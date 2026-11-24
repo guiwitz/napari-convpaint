@@ -273,6 +273,13 @@ def _fill_holes_up_to(mask, max_hole_size):
 
 ### MODEL DOWNLOAD
 
+def _toggle_napari_activity_dock(viewer, show):
+    """Show/hide napari's activity dock (private napari API; best effort, a rename must not break a download)."""
+    try:
+        viewer.window._status_bar._toggle_activity_dock(show)
+    except AttributeError:
+        pass
+
 def guided_model_download(model_file: str, model_url: str, model_dir: str = None) -> str:
     """
     Downloads a model file with progress indication.
@@ -313,8 +320,11 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
         pass # Fall back to CLI progress if napari is not available
 
     if use_napari:
-        viewer.window._status_bar._toggle_activity_dock(True)
+        _toggle_napari_activity_dock(viewer, True)
 
+    # Stream to a temporary ".part" file and rename it into place once the download is complete,
+    # so that the cache only ever contains complete files
+    tmp_path = model_path + '.part'
     try:
         with requests.get(model_url, stream=True) as r:
             r.raise_for_status()
@@ -333,14 +343,16 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
                 print(f"Downloading {model_file} ({total / 1e6:.2f} MB) from {model_url}...")
                 pbr_ctx = None
 
+            written = 0
             try:
                 if pbr_ctx is not None:
                     pbr_ctx.set_description("Downloading weights")
 
-                with open(model_path, 'wb') as f:
+                with open(tmp_path, 'wb') as f:
                     for i, chunk in enumerate(r.iter_content(chunk_size=chunk_size)):
                         if chunk:
                             f.write(chunk)
+                            written += len(chunk)
                         if pbr_ctx is not None:
                             if i % update_every == 0 or i == num_chunks - 1:
                                 pbr_ctx.update(update_every)
@@ -350,7 +362,14 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
                 if pbr_ctx is not None:
                     pbr_ctx.close()
 
+        # Reject truncated downloads (e.g. an IncompleteRead from HuggingFace)
+        if total and written < total:
+            raise IOError(f"Incomplete download: got {written} of {total} bytes")
+        os.replace(tmp_path, model_path)  # atomic
+
     except Exception as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)  # no partial file left behind
         if use_napari:
             show_error(
                 f"❌ Download failed: {e}\n\n"
@@ -364,7 +383,7 @@ def guided_model_download(model_file: str, model_url: str, model_dir: str = None
         raise RuntimeError(f"Model download failed: {e}")
     finally:
         if use_napari:
-            viewer.window._status_bar._toggle_activity_dock(False)
+            _toggle_napari_activity_dock(viewer, False)
 
     return model_path
 

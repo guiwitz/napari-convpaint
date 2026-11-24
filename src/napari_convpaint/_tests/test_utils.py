@@ -225,3 +225,32 @@ def test_instance_size_filter_keywords():
             assert calls == expected
     finally:
         utils._SKIMAGE_MAX_SIZE = installed
+
+def test_guided_model_download_is_atomic(tmp_path, monkeypatch):
+    """A complete download lands under the final name; a truncated one raises and leaves no
+    (partial) file behind, so the next call downloads again instead of using a corrupt file."""
+    import os
+    from napari_convpaint.utils import guided_model_download
+
+    payload = b'x' * 1000
+
+    class FakeResponse:
+        def __init__(self, data, content_length):
+            self.data, self.headers = data, {'content-length': str(content_length)}
+        def raise_for_status(self): pass
+        def iter_content(self, chunk_size):
+            for i in range(0, len(self.data), chunk_size):
+                yield self.data[i:i + chunk_size]
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    def fake_get(url, stream=True):
+        return FakeResponse(payload if 'ok' in url else payload[:600], len(payload))
+    monkeypatch.setattr('napari_convpaint.utils.requests.get', fake_get)
+
+    path = guided_model_download('weights.pth', 'https://example.org/ok', model_dir=str(tmp_path))
+    assert os.path.getsize(path) == 1000 and os.listdir(tmp_path) == ['weights.pth']
+
+    with pytest.raises(RuntimeError, match='Incomplete download'):
+        guided_model_download('truncated.pth', 'https://example.org/bad', model_dir=str(tmp_path))
+    assert os.listdir(tmp_path) == ['weights.pth']   # no partial file left behind
