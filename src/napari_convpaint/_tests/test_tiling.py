@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from napari_convpaint.convpaint_model import ConvpaintModel
+from napari_convpaint.feature_extractors.ilastik import ilastik_available
 from napari_convpaint.testing_data import (
     generate_synthetic_square,
     generate_synthetic_circle_annotation,
@@ -84,7 +85,8 @@ def _assert_equal_segmentations(seg_a, seg_b, label_a, label_b):
     [
         ("vgg-m", [1]),  # 3 layers, total_stride=2 — misalignment by 1 (odd tile)
         ("vgg-l", [1]),  # 5 layers, total_stride=4 — misalignment up to 3 (bigger hit)
-        ("ilastik", [1]),  # ilastik filter set; FE-reported kernel_size=41 -> pad=20
+        pytest.param("ilastik", [1],  # ilastik filter set; FE-reported kernel_size=41 -> pad=20
+                     marks=pytest.mark.skipif(not ilastik_available(), reason="ilastik not installed")),
         ("gaussian", [1]),  # skimage.filters.gaussian, sigma=3; FE reports pad=2*sigma=6
     ],
 )
