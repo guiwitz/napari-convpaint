@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from napari_convpaint.convpaint_model import ConvpaintModel
+from napari_convpaint.feature_extractors.ilastik import ilastik_available
 from napari_convpaint.testing_data import (
     generate_synthetic_square,
     generate_synthetic_circle_annotation,
@@ -84,7 +85,8 @@ def _assert_equal_segmentations(seg_a, seg_b, label_a, label_b):
     [
         ("vgg-m", [1]),  # 3 layers, total_stride=2 — misalignment by 1 (odd tile)
         ("vgg-l", [1]),  # 5 layers, total_stride=4 — misalignment up to 3 (bigger hit)
-        ("ilastik", [1]),  # ilastik filter set; FE-reported kernel_size=41 -> pad=20
+        pytest.param("ilastik", [1],  # ilastik filter set; FE-reported kernel_size=41 -> pad=20
+                     marks=pytest.mark.skipif(not ilastik_available(), reason="ilastik not installed")),
         ("gaussian", [1]),  # skimage.filters.gaussian, sigma=3; FE reports pad=2*sigma=6
     ],
 )
@@ -122,13 +124,13 @@ def test_tile_annotations_matches_no_tile(alias, fe_scalings, use_rf):
 @pytest.mark.parametrize(
     "alias,fe_scalings,im_dims,square_dims,circle_offset",
     [
-        # vgg-m no binning: required padding = 12 * 1 = 12 < 50 -> should pass.
-        ("vgg-m", [1], (1100, 1100), (220, 220), 300),
-        # vgg-l with binning: required padding = 36 * 4 = 144 > 50 -> should fail.
-        ("vgg-l", [1, 2, 4], (1100, 1100), (220, 220), 300),
+        # vgg-m without scalings: tile margin = FE padding
+        ("vgg-m", [1], (420, 420), (84, 84), 115),
+        # vgg-l with scalings: tile margin = FE padding * 4, on a coarser grid
+        ("vgg-l", [1, 2, 4], (420, 420), (84, 84), 115),
     ],
 )
-def test_tile_image_matches_no_tile(alias, fe_scalings, im_dims, square_dims, circle_offset):
+def test_tile_image_matches_no_tile(alias, fe_scalings, im_dims, square_dims, circle_offset, monkeypatch):
     """Image tiling at predict time should not change the segmentation.
 
     Train one model with tile_annotations=False (so training is identical),
@@ -136,6 +138,8 @@ def test_tile_image_matches_no_tile(alias, fe_scalings, im_dims, square_dims, ci
     per-tile margin is large enough for the FE's receptive field AND aligned
     to the total stride, segmentations should be pixel-identical.
     """
+    # Small tiles, so a small image (and little memory) still gives several tiles
+    monkeypatch.setattr("napari_convpaint.convpaint_model.DEFAULT_TARGET_TILE_BLOCK", 192)
     im, im_annot = _make_data(im_dims=im_dims, square_dims=square_dims, circle_offset=circle_offset)
 
     cp = _build_model(alias, fe_scalings, tile_annotations=False, tile_image=False)
